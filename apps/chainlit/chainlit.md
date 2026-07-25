@@ -23,10 +23,6 @@ guessing.
 
 ---
 
-![KI-Servicezentrum Berlin-Brandenburg](/public/logo_kisz.png)
-
-![Bundesministerium für Forschung, Technologie und Raumfahrt](/public/logo_bmftr.png)
-
 Developed at the **KI-Servicezentrum Berlin-Brandenburg**, funded by the German
 Federal Ministry of Research, Technology and Space (grant 01IS22092).
 
