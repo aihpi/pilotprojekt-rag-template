@@ -23,6 +23,13 @@ guessing.
 
 ---
 
+![KI-Servicezentrum Berlin-Brandenburg](/public/logo_kisz.png)
+
+![Bundesministerium für Forschung, Technologie und Raumfahrt](/public/logo_bmftr.png)
+
+Developed at the **KI-Servicezentrum Berlin-Brandenburg**, funded by the German
+Federal Ministry of Research, Technology and Space (grant 01IS22092).
+
 *This screen is `apps/chainlit/chainlit.md` — replace it with your own welcome
-text. The instance itself is configured in a `rag.config.yaml`; see the project
-documentation.*
+text and swap the logos in `public/`. The instance itself is configured in a
+`rag.config.yaml`; see the project documentation.*
