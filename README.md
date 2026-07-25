@@ -1,7 +1,5 @@
 <p align="center">
   <img src="00_aisc/img/logo_aisc_bmftr.jpg" alt="AISC / BMFTR">
-  <br>
-  <img src="00_aisc/img/logo_fghgsd_60.png" alt="FGHGsD">
 </p>
 
 # Modular RAG Template
