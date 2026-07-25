@@ -27,15 +27,18 @@ from chat_history import (
     get_chat_session,
     get_session_messages,
     get_user_message_count,
+    get_user_selected_chat_model,
     get_user_selected_chat_profile,
     init_chat_db,
     list_chat_sessions,
     set_session_title_if_missing,
+    set_user_selected_chat_model,
     set_user_selected_chat_profile,
     update_chat_session_metadata,
     upsert_user_profile,
 )
-from llm import chat, message_to_dict
+from llm import cached_chat_models, chat, list_chat_models, message_to_dict
+from tools import ToolContext, build_openai_tools
 from native_chat import (
     check_user_exists,
     create_user,
@@ -45,13 +48,24 @@ from native_chat import (
     get_user_by_identifier,
     upsert_feedback,
 )
+from config import get_config
 from rag_tool import build_context, extract_page, extract_source_file, format_citations, retrieve
+from figure_markers import (
+    build_figure_candidates,
+    figure_display_name,
+    figure_url,
+    normalize_figure_markers,
+    render_figure_markers,
+    sanitize_for_model,
+    strip_figure_markers,
+)
 from settings import (
     CHAT_DB_PATH,
     CHAT_EXPORT_DIR,
     CHAINLIT_AUTH_PASSWORD,
     CHAINLIT_AUTH_USERNAME,
     CHAINLIT_INIT_DB,
+    CHAT_MODEL,
     DATA_RAW_DIR,
     DATABASE_URL,
     EMBED_MODEL,
@@ -82,8 +96,10 @@ def _load_system_prompt(path: Path) -> str | None:
 
 SYSTEM_PROMPT = _load_system_prompt(SYSTEM_PROMPT_PATH)
 CITATION_PANEL_CACHE: dict[str, str] = {}
-CITATION_SIDEBAR_TITLE = "Quellen & Belegstellen"
-CITATION_HISTORY_SIDEBAR_TITLE = "Quellen & Belegstellen (Verlauf)"
+CITATION_SIDEBAR_TITLE = get_config().citation.panel_title
+CITATION_HISTORY_SIDEBAR_TITLE = get_config().citation.labels.get(
+    "history_panel_title", f"{CITATION_SIDEBAR_TITLE} (Verlauf)"
+)
 
 
 def _allowed_source_pdf_names() -> set[str]:
@@ -121,6 +137,12 @@ def _resolve_source_pdf_path(file_name: str, allowed_names: set[str] | None = No
 
 def _source_pdf_url(file_name: str) -> str:
     return f"/sources/pdf/{quote(file_name, safe='')}"
+
+
+def _source_figure_url(file_name: str) -> str:
+    # Delegates so the route prefix has a single definition (figure_markers also
+    # emits and strips these URLs).
+    return figure_url(file_name)
 
 
 def _citation_panel_url(step_id: str) -> str:
@@ -198,16 +220,35 @@ def _ensure_route_precedes_catch_all(fastapi_app: Any, route_path: str) -> None:
     routes.insert(catch_all_idx, route)
 
 # Chat profiles configuration
-CHAT_PROFILES_PATH = Path(__file__).parent / "chat_profiles.json"
-
-
 def _load_chat_profiles() -> dict[str, Any]:
-    """Load chat profiles configuration from JSON file."""
-    if CHAT_PROFILES_PATH.is_file():
+    """Load chat profiles: config-defined profiles win; otherwise the JSON file.
+
+    Profiles are optional and domain-neutral — a profile scopes retrieval via
+    generic ``retrieval_filters`` (metadata field -> value(s))."""
+    cfg = get_config()
+    if cfg.profiles:
+        return {
+            "profiles": [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "icon": p.icon,
+                    "description": p.description,
+                    "markdown_description": p.markdown_description,
+                    "prompt_context": p.prompt_context,
+                    "retrieval_filters": p.retrieval_filters,
+                }
+                for p in cfg.profiles
+            ],
+            "default_profile": cfg.default_profile,
+        }
+    # A config may point at a JSON profiles file instead of inline profiles.
+    profiles_file = cfg.resolve_path(cfg.profiles_path) if cfg.profiles_path else None
+    if profiles_file and profiles_file.is_file():
         try:
-            return json.loads(CHAT_PROFILES_PATH.read_text(encoding="utf-8"))
+            return json.loads(profiles_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
-            print(f"[WARN] Failed to load chat_profiles.json: {e}")
+            print(f"[WARN] Failed to load profiles file {profiles_file}: {e}")
     return {"profiles": [], "default_profile": None}
 
 
@@ -222,23 +263,18 @@ def _get_profile_by_name(profile_name: str) -> dict[str, Any] | None:
     return None
 
 
-TOOLS: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "rag_retrieve",
-            "description": "Suche relevante Dokumente in der Wissensbasis.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Die Nutzerfrage oder Suchanfrage."},
-                    "top_k": {"type": "integer", "description": "Anzahl der Treffer.", "default": 5},
-                },
-                "required": ["query"],
-            },
-        },
-    }
-]
+def _active_retrieval_filters() -> dict[str, Any]:
+    """Generic metadata filters for the active chat profile (empty if none)."""
+    profile = cl.user_session.get("chat_profile_config") or {}
+    filters = profile.get("retrieval_filters") if isinstance(profile, dict) else None
+    return filters if isinstance(filters, dict) else {}
+
+
+# Build the OpenAI tool schemas + the {function_name -> Tool} router from the
+# enabled tools in the config (tools/ package registry). Search-only by default.
+TOOLS, TOOL_BY_FUNCTION_NAME = build_openai_tools(get_config())
+# The search tool's name, still used by the "call the tool first" retry nudge.
+TOOL_NAME: str = get_config().tool.name
 
 
 def _utc_stamp() -> str:
@@ -258,6 +294,8 @@ def _build_personalization_prompt(user_profile: UserProfile) -> str:
     Keywords are used only for the 'Bezug zu Ihren Interessen' section —
     they do NOT influence retrieval or chunk filtering.
     """
+    if not get_config().app.personalization_enabled:
+        return ""
     if not user_profile or not user_profile.personalization_enabled:
         return ""
 
@@ -853,26 +891,14 @@ def _markdown_link(label: str, url: str) -> str:
 
 
 def _resolve_section_title(metadata: dict[str, Any]) -> str | None:
-    explicit = metadata.get("section_title")
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
+    """Label for a chunk in citations: its section heading, else the doc title.
 
-    anforderung_id = metadata.get("anforderung_id")
-    if isinstance(anforderung_id, str) and anforderung_id.strip():
-        return anforderung_id.strip()
-
-    baustein_id = metadata.get("baustein_id")
-    if isinstance(baustein_id, str) and baustein_id.strip():
-        doc_type = metadata.get("doc_type")
-        if doc_type == "baustein_beschreibung":
-            return f"{baustein_id} Beschreibung"
-        if doc_type == "baustein_gefaehrdungslage":
-            return f"{baustein_id} Gefaehrdungslage"
-        return baustein_id
-
-    title = metadata.get("title")
-    if isinstance(title, str) and title.strip():
-        return title.strip()
+    Domain-specific ids can be surfaced instead via ``citation.segments`` /
+    ``citation.extra_fields`` in the config — no hardcoding needed here."""
+    for key in ("section_title", "title"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return None
 
 
@@ -996,7 +1022,7 @@ def _normalize_source_alias_mentions(
         return alias_by_index.get(idx) or (alias_by_number or {}).get(idx, match.group(0))
 
     # Normalize free-form mentions like
-    # "Quelle 1: APP.3.2.A20 ... (S) [Zentrale Verwaltung] (S.397)" or
+    # "Quelle 1: Abschnittstitel ... (S.397)" or
     # "Quelle 2: Einleitung ... (Seite 12)" to exact alias token.
     text = re.sub(
         r"Quelle\s*([0-9]+)\s*:\s*[^\n]*?\((?:S\.?|Seite)\s*[^)\n]+\)",
@@ -1126,7 +1152,7 @@ def _canonicalize_citations(
           prefix number matches the LLM-provided number. This prevents
           silent mis-routing when multiple retrieved sources share a
           page and the LLM-supplied title doesn't match either.
-        * numberless form (``Quelle APP.3.2 ...``) -> require best_score >= 5
+        * numberless form (``Quelle <Abschnitt> ...``) -> require best_score >= 5
           AND either a BSI-ID match OR >= 2 section-token hits, to avoid
           rewriting prose like "Die Quelle der Daten (S.10)".
 
@@ -1399,222 +1425,12 @@ def _desired_source_count(text: str, available: int) -> int:
     return available
 
 
-def _top_score(results: list[Any]) -> float:
-    return max((float(getattr(r, "score", 0.0) or 0.0) for r in results), default=0.0)
-
-
-def _is_weak_retrieval(results: list[Any], *, min_hits: int = 2, min_top_score: float = 0.22) -> bool:
-    return len(results) < min_hits or _top_score(results) < min_top_score
-
-
-def _is_strong_retrieval(results: list[Any], *, min_hits: int = 3, min_top_score: float = 0.45) -> bool:
-    return len(results) >= min_hits and _top_score(results) >= min_top_score
-
-
-def _is_context_abstention(text: str) -> bool:
-    normalized = re.sub(r"\s+", " ", (text or "")).strip().lower().rstrip(".!")
-    if not normalized:
-        return False
-    if normalized.startswith("im bereitgestellten kontext nicht enthalten"):
-        return True
-    # Catch common model variants like "Die Information ist ... nicht enthalten."
-    return "bereitgestellten kontext" in normalized and "nicht enthalten" in normalized
-
-
-def _extract_standard_id(query: str) -> str | None:
-    q = (query or "").lower()
-    m = re.search(r"\b(?:bsi[- ]?standard\s*)?200[- ]?([1-4])\b", q)
-    if not m:
-        return None
-    return f"standard_200_{m.group(1)}"
-
-
-def _normalize_query_text(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "")).strip()
-
-
-def _keyword_query_variant(query: str) -> str | None:
-    tokens = re.findall(r"[A-Za-zÄÖÜäöüß0-9.\-]+", query or "")
-    if not tokens:
-        return None
-    stopwords = {
-        "welche",
-        "welcher",
-        "welches",
-        "wie",
-        "was",
-        "sind",
-        "ist",
-        "der",
-        "die",
-        "das",
-        "bei",
-        "für",
-        "im",
-        "in",
-        "nach",
-        "und",
-        "oder",
-        "den",
-        "dem",
-        "des",
-        "ein",
-        "eine",
-        "einen",
-        "einer",
-        "sinnvoll",
-        "grundsätzlich",
-    }
-    kept = [t for t in tokens if len(t) > 2 and t.lower() not in stopwords]
-    if len(kept) < 2:
-        return None
-    return " ".join(kept)
-
-
-def _extract_baustein_id(query: str) -> str | None:
-    m = re.search(r"\b([A-Z]{2,4}\.\d+(?:\.\d+){1,2})\b", (query or "").upper())
-    if not m:
-        return None
-    return m.group(1)
-
-
-def _build_query_variants(query: str, standard_id: str | None) -> list[str]:
-    base = _normalize_query_text(query)
-    if not base:
-        return []
-
-    variants: list[str] = [base]
-    lower = base.lower()
-    keyword_variant = _keyword_query_variant(base)
-
-    if standard_id:
-        std_label = standard_id.replace("standard_", "BSI-Standard ").replace("_", "-")
-        if "basis-absicherung" in lower or "basis absicherung" in lower:
-            variants.append(f"{std_label} Basis-Absicherung Schritte Vorgehensweise")
-        if keyword_variant:
-            variants.append(f"{std_label} {keyword_variant}")
-    else:
-        elevated_need = ("erhöht" in lower or "erhoeh" in lower) and "schutzbedarf" in lower
-        if elevated_need:
-            variants.append(f"{base} (H) Anforderungen bei erhöhtem Schutzbedarf")
-            baustein_id = _extract_baustein_id(base)
-            if not baustein_id and "webserver" in lower:
-                baustein_id = "APP.3.2"
-            if baustein_id:
-                variants.append(f"{baustein_id} Anforderungen bei erhöhtem Schutzbedarf (H) Redundanz DDoS")
-            else:
-                variants.append("Anforderungen bei erhöhtem Schutzbedarf (H) Maßnahmen")
-        elif keyword_variant:
-            variants.append(f"IT-Grundschutz {keyword_variant}")
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for candidate in variants:
-        normalized = _normalize_query_text(candidate)
-        if not normalized:
-            continue
-        key = normalized.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(normalized)
-        if len(deduped) >= 3:
-            break
-    return deduped
-
-
 def _result_key(item: Any) -> tuple[str, int | None, str]:
     metadata = getattr(item, "metadata", {}) or {}
     file_name = extract_source_file(metadata) or ""
     page = extract_page(metadata)
     snippet = re.sub(r"\s+", " ", (getattr(item, "text", "") or "").strip())[:120]
     return (file_name, page, snippet)
-
-
-def _fuse_results(result_sets: list[list[Any]], max_items: int) -> list[Any]:
-    fused: dict[tuple[str, int | None, str], dict[str, Any]] = {}
-    for results in result_sets:
-        for rank, item in enumerate(results, start=1):
-            key = _result_key(item)
-            score = float(getattr(item, "score", 0.0) or 0.0)
-            state = fused.get(key)
-            if state is None:
-                state = {"item": item, "rrf": 0.0, "hits": 0, "best_score": score}
-                fused[key] = state
-            state["rrf"] += 1.0 / (60.0 + rank)
-            state["hits"] += 1
-            if score > state["best_score"]:
-                state["item"] = item
-                state["best_score"] = score
-
-    ranked = sorted(
-        fused.values(),
-        key=lambda s: (float(s["rrf"]), int(s["hits"]), float(s["best_score"])),
-        reverse=True,
-    )
-    return [entry["item"] for entry in ranked[:max_items]]
-
-
-async def _retrieve_fused(
-    *,
-    query: str,
-    top_k: int,
-    source_scope: str | None,
-    standard_id: str | None,
-) -> tuple[list[Any], list[dict[str, Any]]]:
-    variants = _build_query_variants(query, standard_id)
-    if not variants:
-        return [], []
-
-    result_sets: list[list[Any]] = []
-    variant_stats: list[dict[str, Any]] = []
-    for v in variants:
-        hits = await retrieve(
-            query=v,
-            top_k=top_k,
-            source_scope=source_scope,
-            standard_id=standard_id,
-        )
-        result_sets.append(hits)
-        variant_stats.append(
-            {
-                "query": v,
-                "hits": len(hits),
-                "top_score": round(_top_score(hits), 4),
-            }
-        )
-
-    fused = _fuse_results(result_sets, max_items=top_k)
-    print(
-        "[DEBUG] retrieve_fused",
-        {
-            "source_scope": source_scope,
-            "standard_id": standard_id,
-            "variants": len(variants),
-            "variant_stats": variant_stats,
-            "fused_hits": len(fused),
-            "fused_top_score": _top_score(fused),
-        },
-    )
-    return fused, variant_stats
-
-
-def _merge_results(primary: list[Any], secondary: list[Any], max_items: int) -> list[Any]:
-    merged: list[Any] = []
-    seen: set[tuple[str, int | None, str]] = set()
-
-    def key_for(item: Any) -> tuple[str, int | None, str]:
-        return _result_key(item)
-
-    for item in [*primary, *secondary]:
-        k = key_for(item)
-        if k in seen:
-            continue
-        seen.add(k)
-        merged.append(item)
-        if len(merged) >= max_items:
-            break
-    return merged
 
 
 def _extract_followups(text: str) -> tuple[str, list[str]]:
@@ -1965,6 +1781,48 @@ def _build_inline_pdf_elements(source_rows: list[dict[str, Any]] | None) -> list
     return elements
 
 
+def _build_inline_figure_elements(
+    last_results: list[Any] | None,
+    *,
+    exclude_image_paths: set[str] | None = None,
+    exclude_names: set[str] | None = None,
+) -> list[Any]:
+    """Build one cl.Image per retrieved figure that was NOT already inlined as a
+    markdown image in the answer body.
+
+    Chainlit renders every ``display="inline"`` element in the grid below the
+    message regardless of the text, so a figure that is both inlined and
+    elementized would appear TWICE. Excluded names are pre-seeded into ``seen``
+    because Chainlit substring-matches element names against the body."""
+    from kb.figure_store import figure_dir, resolve_figure_path
+
+    elements: list[Any] = []
+    if not last_results:
+        return elements
+    base = figure_dir(get_config())
+    skip_paths = exclude_image_paths or set()
+    seen: set[str] = set(exclude_names or set())
+    for result in last_results:
+        metadata = getattr(result, "metadata", None) or {}
+        if not metadata.get("is_figure"):
+            continue
+        image_path = metadata.get("image_path")
+        if not isinstance(image_path, str) or image_path in skip_paths:
+            continue
+        if resolve_figure_path(image_path, base) is None:
+            continue
+        name = figure_display_name(metadata)
+        if name in seen:
+            continue
+        seen.add(name)
+        # inline so the figure renders in the chat body (side elements only show
+        # when their name is referenced in the answer text, which it isn't here).
+        elements.append(
+            cl.Image(name=name, url=_source_figure_url(image_path), display="inline", size="medium")
+        )
+    return elements
+
+
 def _sanitize_followup_questions(raw_followups: Any, *, max_items: int = 8) -> list[str]:
     if not isinstance(raw_followups, list):
         return []
@@ -2106,6 +1964,34 @@ async def auth_callback(username: str, password: str) -> cl.User | None:
 
 @cl.on_app_startup
 async def on_app_startup() -> None:
+    global SYSTEM_PROMPT
+    # No system prompt configured? Generate one from the template + indexed docs
+    # via the chat model (cached for future restarts).
+    if not SYSTEM_PROMPT:
+        from system_prompt_gen import ensure_system_prompt
+
+        generated, cache_path = await ensure_system_prompt(get_config(), SYSTEM_PROMPT)
+        if generated:
+            SYSTEM_PROMPT = generated
+            print(f"[STARTUP] auto-generated system prompt ({len(generated)} chars) -> {cache_path}")
+        else:
+            default_prompt = _load_system_prompt(
+                Path(__file__).resolve().parent / "config" / "prompts" / "default_system.md"
+            )
+            if default_prompt:
+                SYSTEM_PROMPT = default_prompt
+                print("[STARTUP] system prompt: using bundled default_system.md fallback")
+
+    # Warm the gateway model list once, off the event loop, so the settings
+    # panel's model selector never triggers a blocking network call per session.
+    import asyncio
+
+    try:
+        models = await asyncio.to_thread(list_chat_models)
+        print(f"[STARTUP] gateway chat models: {models or '(none enumerable — using configured list)'}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[STARTUP] model list warm-up skipped: {exc}")
+
     print(
         "[STARTUP] system_prompt_path=",
         str(SYSTEM_PROMPT_PATH),
@@ -2148,6 +2034,23 @@ async def on_app_startup() -> None:
         return FileResponse(
             path=str(file_path),
             media_type="application/pdf",
+            headers={"Content-Disposition": "inline"},
+        )
+
+    @chainlit_fastapi_app.get("/sources/figure/{file_name:path}")
+    async def source_figure(file_name: str, current_user=Depends(get_current_user)):
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        from kb.figure_store import figure_dir, resolve_figure_path
+
+        figure_path = resolve_figure_path(file_name, figure_dir(get_config()))
+        if figure_path is None:
+            raise HTTPException(status_code=404, detail="Figure not found")
+
+        return FileResponse(
+            path=str(figure_path),
+            media_type="image/png",
             headers={"Content-Disposition": "inline"},
         )
 
@@ -2223,6 +2126,7 @@ async def on_app_startup() -> None:
         )
 
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/pdf/{file_name:path}")
+    _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/figure/{file_name:path}")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/citations/{step_id}")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/all-chats")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/feedback")
@@ -2284,7 +2188,10 @@ async def on_chat_resume(thread: dict[str, Any]):
         elif "assistant_message" in step_type:
             text = _coerce_step_text(step.get("output") or step.get("input"))
             if text:
-                messages.append({"role": "assistant", "content": text})
+                # The persisted text is the rendered one (it may contain inlined
+                # figure images); strip them so the model does not learn to emit
+                # image markdown itself. The displayed history is untouched.
+                messages.append({"role": "assistant", "content": sanitize_for_model(text)})
             step_id = step.get("id")
             normalized_step_id: str | None = None
             step_has_actions = False
@@ -2452,22 +2359,92 @@ def _rebuild_system_prompt_in_session() -> None:
     cl.user_session.set("messages", messages)
 
 
+def _chat_model_options() -> list[str]:
+    """Chat-model ids for the selector: configured list ∪ gateway ∪ active model.
+
+    Uses the warmed cache (see ``cached_chat_models``) so no blocking network
+    call happens inside the async settings handlers. Embedding models the gateway
+    also advertises are filtered out (they are not valid chat models)."""
+    cfg = get_config()
+    embed_model = (cfg.models.embed_model or "").lower()
+    options: list[str] = []
+    candidates = (
+        list(cfg.models.selectable_chat_models)
+        + cached_chat_models()
+        + [_session_chat_model(), CHAT_MODEL]
+    )
+    for model in candidates:
+        if not model or model in options:
+            continue
+        lowered = model.lower()
+        if lowered == embed_model or "embed" in lowered:
+            continue
+        options.append(model)
+    return options
+
+
+def _session_chat_model() -> str | None:
+    """Per-session chat model override picked in the settings panel (or None)."""
+    return cl.user_session.get("chat_model") or None
+
+
+def _model_is_vision_capable(model: str | None, cfg) -> bool:
+    """Whether ``model`` may receive figure pixels in attach mode. The gateway
+    exposes no capability flag, so ``images.vision_capable_models`` is authoritative."""
+    lowered = (model or "").lower()
+    return any(v.lower() in lowered or lowered in v.lower() for v in cfg.images.vision_capable_models)
+
+
+def _collect_attach_figures(last_results: list[Any], cfg, *, limit: int) -> list[tuple[str, Any]]:
+    """Up to ``limit`` (data_uri, RagResult) pairs for figure chunks present in
+    ``last_results`` that have a resolvable stored image."""
+    from kb.figure_store import figure_dir, file_to_data_uri, resolve_figure_path
+
+    base = figure_dir(cfg)
+    out: list[tuple[str, Any]] = []
+    for result in last_results:
+        metadata = getattr(result, "metadata", None) or {}
+        if not metadata.get("is_figure"):
+            continue
+        image_path = metadata.get("image_path")
+        resolved = resolve_figure_path(image_path, base) if isinstance(image_path, str) else None
+        if resolved is None:
+            continue
+        out.append((file_to_data_uri(resolved, max_px=cfg.images.attach_image_max_px), result))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _figure_marker_system_message(results: Any) -> dict[str, str] | None:
+    """Ephemeral per-request instruction teaching the ``{{ABB:...}}`` protocol.
+
+    Returns None when the feature is off or no figure was retrieved — that saves
+    tokens and stops the model inventing markers. Never edit the (regenerable,
+    user-overridable) system prompt file for this."""
+    cfg = get_config()
+    if cfg.images.mode == "none" or not cfg.images.inline_figures:
+        return None
+    if not any((getattr(r, "metadata", None) or {}).get("is_figure") for r in (results or [])):
+        return None
+    return {"role": "system", "content": cfg.images.figure_marker_prompt}
+
+
 def _build_chat_settings(
     current_profile: str | None = None,
     user_profile: UserProfile | None = None,
     chat_profile_config: dict[str, Any] | None = None,
 ):
-    """Build ChatSettings with profile selector, personalization toggle, and keyword tags."""
+    """Build ChatSettings with model + system-prompt controls, plus profile,
+    personalization, and keyword widgets. Always returns a panel (the model and
+    system-prompt controls are shown even when no chat profiles are configured)."""
+    app_cfg = get_config().app
+    if not app_cfg.show_settings:
+        return None
+    personalization_feature = app_cfg.personalization_enabled
+
     profiles = CHAT_PROFILES_CONFIG.get("profiles", [])
     profile_names = [p.get("name", "") for p in profiles if p.get("name")]
-
-    if not profile_names:
-        return None
-
-    # Find current profile index
-    initial_index = 0
-    if current_profile and current_profile in profile_names:
-        initial_index = profile_names.index(current_profile)
 
     # Resolve profile config if not passed
     if chat_profile_config is None and current_profile:
@@ -2487,33 +2464,62 @@ def _build_chat_settings(
     elif SYSTEM_PROMPT:
         current_prompt = SYSTEM_PROMPT
 
+    # Model selector (options: configured list ∪ gateway list ∪ active model)
+    model_options = _chat_model_options()
+    current_model = _session_chat_model() or CHAT_MODEL
+    model_index = model_options.index(current_model) if current_model in model_options else 0
+
     widgets: list = [
         Select(
-            id="chat_profile",
-            label="Ihre Rolle",
-            description="Wählen Sie Ihre Rolle für angepasste Antworten",
-            values=profile_names,
-            initial_index=initial_index,
+            id="chat_model",
+            label="Chat-Modell",
+            description="Modell für Antworten (nutzt den API-Key aus der .env).",
+            values=model_options,
+            initial_index=model_index,
         ),
-        Switch(
-            id="personalization_enabled",
-            label="Personalisierung aktivieren",
-            description="Schlüsselwörter aus dem Chatverlauf in Antworten berücksichtigen",
-            initial=personalization_on,
-        ),
-        Tags(
-            id="active_keywords",
-            label="Schlüsselwörter",
-            description="Themen aus Ihrem Chatverlauf. Entfernen oder hinzufügen.",
-            initial=active_kw_values,
-        ),
-        Select(
-            id="regenerate_keywords",
-            label="Schlüsselwörter-Aktion",
-            description="Schlüsselwörter aus dem Chatverlauf neu extrahieren",
-            values=["- Keine Aktion -", "Jetzt neu generieren"],
-            initial_index=0,
-        ),
+    ]
+
+    # Role selector only when chat profiles are configured for this instance.
+    if profile_names:
+        initial_index = 0
+        if current_profile and current_profile in profile_names:
+            initial_index = profile_names.index(current_profile)
+        widgets.append(
+            Select(
+                id="chat_profile",
+                label="Ihre Rolle",
+                description="Wählen Sie Ihre Rolle für angepasste Antworten",
+                values=profile_names,
+                initial_index=initial_index,
+            )
+        )
+
+    # Personalization / keyword controls — only when the feature is enabled for
+    # this instance (app.personalization_enabled in the YAML).
+    if personalization_feature:
+        widgets.extend([
+            Switch(
+                id="personalization_enabled",
+                label="Personalisierung aktivieren",
+                description="Schlüsselwörter aus dem Chatverlauf in Antworten berücksichtigen",
+                initial=personalization_on,
+            ),
+            Tags(
+                id="active_keywords",
+                label="Schlüsselwörter",
+                description="Themen aus Ihrem Chatverlauf. Entfernen oder hinzufügen.",
+                initial=active_kw_values,
+            ),
+            Select(
+                id="regenerate_keywords",
+                label="Schlüsselwörter-Aktion",
+                description="Schlüsselwörter aus dem Chatverlauf neu extrahieren",
+                values=["- Keine Aktion -", "Jetzt neu generieren"],
+                initial_index=0,
+            ),
+        ])
+
+    widgets.append(
         TextInput(
             id="system_prompt",
             label="System-Prompt (bearbeitbar)",
@@ -2522,7 +2528,7 @@ def _build_chat_settings(
             placeholder="System-Prompt hier eingeben …",
             multiline=True,
         ),
-    ]
+    )
 
     # Add read-only ROLLENKONTEXT so the user sees what gets appended
     role_context = ""
@@ -2530,7 +2536,7 @@ def _build_chat_settings(
         ctx = chat_profile_config.get("prompt_context", "")
         if ctx:
             role_context = f"## ROLLENKONTEXT\n{ctx}"
-    if user_profile and user_profile.personalization_enabled:
+    if personalization_feature and user_profile and user_profile.personalization_enabled:
         active_kws = user_profile.active_keyword_values()
         if active_kws:
             kw_section = f"## PERSONALISIERTER KONTEXT\nThemen: {', '.join(active_kws)}"
@@ -2556,6 +2562,13 @@ async def on_settings_update(settings: dict[str, Any]):
     user_id = cl.user_session.get("current_user_id")
     user_profile: UserProfile | None = cl.user_session.get("user_profile")
     changed_parts: list[str] = []
+
+    # --- Handle chat model change (applied silently, no confirmation message) ---
+    new_model = (settings.get("chat_model") or "").strip()
+    if new_model and new_model != (_session_chat_model() or CHAT_MODEL):
+        cl.user_session.set("chat_model", new_model)
+        if user_id:
+            set_user_selected_chat_model(CHAT_DB_PATH, user_id, new_model)
 
     # --- Handle chat profile change ---
     new_profile_name = settings.get("chat_profile")
@@ -2655,11 +2668,13 @@ async def on_settings_update(settings: dict[str, Any]):
             user_profile = UserProfile(user_id=user_id or "anonymous")
 
         if not new_prompt_text or new_prompt_text == (SYSTEM_PROMPT or "").strip():
-            # Empty or identical to default → reset to default
+            # Empty or identical to default → reset to default. Capture the prior
+            # state BEFORE clearing so the confirmation reflects an actual reset.
+            had_custom = user_profile.custom_prompt is not None
             user_profile.custom_prompt = None
             if user_id:
                 upsert_user_profile(CHAT_DB_PATH, user_id, custom_prompt=None)
-            if user_profile.custom_prompt is not None or new_prompt_text == "":
+            if had_custom or new_prompt_text == "":
                 changed_parts.append("System-Prompt → **Standard**")
         else:
             old_custom = user_profile.custom_prompt
@@ -2729,6 +2744,12 @@ async def on_chat_start():
     cl.user_session.set("chat_profile", chat_profile_name)
     cl.user_session.set("chat_profile_config", chat_profile_config)
 
+    # Restore the user's persisted chat-model selection so it survives new chats.
+    if user_id:
+        saved_model = get_user_selected_chat_model(CHAT_DB_PATH, user_id)
+        if saved_model:
+            cl.user_session.set("chat_model", saved_model)
+
     print(
         f"[DEBUG] on_chat_start: user={user}, user_id={user_id}, chat_profile={chat_profile_name}, "
         f"resumed_session={resumed_session}, session_id={session_id}"
@@ -2748,9 +2769,10 @@ async def on_chat_start():
     cl.user_session.set("current_user_id", user_id)
     cl.user_session.set("source_catalog", _load_session_source_catalog(session_id))
 
-    # Load or initialize user profile for personalization
+    # Load or initialize user profile for personalization (only if the feature
+    # is enabled for this instance).
     user_profile: UserProfile | None = None
-    if user_id:
+    if user_id and get_config().app.personalization_enabled:
         user_profile = await load_user_profile(user_id)
         if user_profile and user_profile.has_sufficient_history():
             print(f"[DEBUG] on_chat_start: loaded profile for {user_id}, topics={user_profile.topics}")
@@ -2930,7 +2952,7 @@ async def main(message: cl.Message):
     add_chat_message(CHAT_DB_PATH, session_id, "user", message.content)
     set_session_title_if_missing(CHAT_DB_PATH, session_id, _first_sentence(message.content, max_len=96))
 
-    response = await chat(messages, tools=TOOLS, tool_choice="required")
+    response = await chat(messages, tools=TOOLS, tool_choice="required", model=_session_chat_model())
     assistant_msg = response.choices[0].message
     print(
         "[DEBUG] first_call",
@@ -2946,10 +2968,10 @@ async def main(message: cl.Message):
             *messages,
             {
                 "role": "system",
-                "content": "Rufe zuerst das Tool rag_retrieve auf, bevor du antwortest.",
+                "content": get_config().ui_text.retry_tool.format(tool=TOOL_NAME),
             },
         ]
-        retry_response = await chat(retry_messages, tools=TOOLS, tool_choice="required")
+        retry_response = await chat(retry_messages, tools=TOOLS, tool_choice="required", model=_session_chat_model())
         retry_msg = retry_response.choices[0].message
         print(
             "[DEBUG] first_call_retry",
@@ -2988,7 +3010,8 @@ async def main(message: cl.Message):
             )
             for tool_call in current_msg.tool_calls:
                 function_name = getattr(getattr(tool_call, "function", None), "name", "")
-                if function_name != "rag_retrieve":
+                tool = TOOL_BY_FUNCTION_NAME.get(function_name)
+                if tool is None:
                     tool_payload = {"error": f"Unsupported tool: {function_name}"}
                     messages.append(
                         {
@@ -3000,45 +3023,37 @@ async def main(message: cl.Message):
                     continue
 
                 args = json.loads(tool_call.function.arguments or "{}")
-                query = str(args.get("query") or message.content or "")
-                raw_top_k = args.get("top_k")
-                try:
-                    requested_top_k = int(raw_top_k) if raw_top_k is not None else TOP_K
-                except (TypeError, ValueError):
-                    requested_top_k = TOP_K
-                top_k = max(1, min(requested_top_k, MAX_TOP_K))
-
-                signature = f"{function_name}:{json.dumps({'query': query, 'top_k': top_k}, ensure_ascii=False, sort_keys=True)}"
+                signature = f"{function_name}:{json.dumps(args, ensure_ascii=False, sort_keys=True)}"
                 if signature in cached_tool_payloads:
                     results, tool_payload = cached_tool_payloads[signature]
-                    with cl.Step(name="rag_retrieve", type="tool") as step:
-                        step.input = {"query": query, "top_k": top_k, "cached": True}
+                    with cl.Step(name=function_name, type="tool") as step:
+                        step.input = {**args, "cached": True}
                         step.output = {"hits": len(results), "cached": True}
                 else:
-                    with cl.Step(name="rag_retrieve", type="tool") as step:
-                        step.input = {"query": query, "top_k": top_k}
-
-                        # Standard retrieval (no personalization filtering on chunks)
-                        results = await retrieve(
-                            query=query,
-                            top_k=top_k,
-                        )
-                        print(
-                            "[DEBUG] rag_retrieve",
-                            "hits=",
-                            len(results),
-                            "first_text_len=",
-                            len(results[0].text) if results else 0,
-                        )
-                        step.output = {"hits": len(results)}
-
-                    context = build_context(results)
-                    citations_text = format_citations(results)
-                    tool_payload = {
-                        "query": query,
-                        "context": context,
-                        "citations": citations_text,
-                    }
+                    cfg = get_config()
+                    ctx = ToolContext(
+                        query_fallback=message.content or "",
+                        filters=_active_retrieval_filters(),
+                        default_top_k=TOP_K,
+                        max_top_k=MAX_TOP_K,
+                        collection=None,
+                        language=cfg.language,
+                        fetch_max_chunks=cfg.tools.fetch_max_chunks,
+                        expand_window=cfg.tools.expand_window,
+                    )
+                    with cl.Step(name=function_name, type="tool") as step:
+                        step.input = args
+                        tool_result = await tool.handler(args, ctx)
+                        results = tool_result.results
+                        tool_payload = tool_result.payload
+                        step.output = tool_result.step_output or {"hits": len(results)}
+                    print(
+                        "[DEBUG] tool_call",
+                        "name=",
+                        function_name,
+                        "hits=",
+                        len(results),
+                    )
                     cached_tool_payloads[signature] = (results, tool_payload)
 
                 for item in results:
@@ -3062,10 +3077,17 @@ async def main(message: cl.Message):
                     session_id,
                     "tool",
                     json.dumps(tool_payload, ensure_ascii=False),
-                    metadata={"tool_name": "rag_retrieve"},
+                    metadata={"tool_name": function_name},
                 )
 
-            followup = await chat(messages, tools=TOOLS, tool_choice="auto")
+            # This in-loop call also produces the FINAL answer (the loop exits when
+            # it returns no tool_calls), so the marker instruction must ride along.
+            # Throwaway list — never mutate the session `messages`.
+            _fig_hint = _figure_marker_system_message(aggregated_by_key.values())
+            _loop_messages = [*messages, _fig_hint] if _fig_hint else messages
+            followup = await chat(
+                _loop_messages, tools=TOOLS, tool_choice="auto", model=_session_chat_model()
+            )
             current_msg = followup.choices[0].message
             print(
                 "[DEBUG] tool_round_followup",
@@ -3083,7 +3105,56 @@ async def main(message: cl.Message):
             reverse=True,
         )
 
-        if getattr(current_msg, "tool_calls", None):
+        # attach mode: if figures are retrieved and the active chat model can see
+        # images, produce the final answer with a multimodal vision pass (mirrors
+        # the safety-stop block below, plus image_url parts).
+        vision_answer: str | None = None
+        _img_cfg = get_config()
+        if _img_cfg.images.mode == "attach":
+            active_model = _session_chat_model() or CHAT_MODEL
+            attach_figures = _collect_attach_figures(
+                last_results, _img_cfg, limit=_img_cfg.images.max_attach_images
+            )
+            if attach_figures and _model_is_vision_capable(active_model, _img_cfg):
+                vision_context = build_context(last_results[: max(TOP_K, 8)])
+                user_parts: list[dict[str, Any]] = [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Frage: {message.content}\n\n"
+                            f"Kontext:\n{vision_context}\n\n"
+                            "Nutze auch die beigefügten Abbildungen zur Beantwortung. "
+                            "Antworte auf Deutsch mit Quellenhinweisen [1], [2], ..."
+                        ),
+                    }
+                ]
+                for data_uri, _ in attach_figures:
+                    user_parts.append({"type": "image_url", "image_url": {"url": data_uri}})
+                _fig_hint = _figure_marker_system_message(last_results)
+                vision_messages = [
+                    *messages,
+                    {
+                        "role": "system",
+                        "content": (
+                            "Erstelle jetzt die finale Antwort aus Kontext und Abbildungen. "
+                            "Keine weiteren Tool-Aufrufe."
+                        ),
+                    },
+                    *([_fig_hint] if _fig_hint else []),
+                    {"role": "user", "content": user_parts},
+                ]
+                vision_final = await chat(vision_messages, model=active_model)
+                vision_answer = vision_final.choices[0].message.content or ""
+                print("[DEBUG] attach_vision_pass", "figures=", len(attach_figures), "model=", active_model)
+            elif attach_figures:
+                print(
+                    f"[WARN] images.mode=attach but active model '{active_model}' is not "
+                    "vision-capable; falling back to the text answer."
+                )
+
+        if vision_answer is not None and vision_answer.strip():
+            content = vision_answer
+        elif getattr(current_msg, "tool_calls", None):
             # Safety stop: avoid endless tool loops, force final answer from collected context.
             print(
                 "[WARN] tool_round_limit_reached",
@@ -3093,6 +3164,7 @@ async def main(message: cl.Message):
                 len(last_results),
             )
             final_context = build_context(last_results[: max(TOP_K, 8)])
+            _fig_hint = _figure_marker_system_message(last_results)
             forced_messages = [
                 *messages,
                 {
@@ -3102,6 +3174,7 @@ async def main(message: cl.Message):
                         "Keine weiteren Tool-Aufrufe."
                     ),
                 },
+                *([_fig_hint] if _fig_hint else []),
                 {
                     "role": "user",
                     "content": (
@@ -3111,7 +3184,7 @@ async def main(message: cl.Message):
                     ),
                 },
             ]
-            forced_final = await chat(forced_messages)
+            forced_final = await chat(forced_messages, model=_session_chat_model())
             forced_final_msg = forced_final.choices[0].message
             content = forced_final_msg.content or ""
         else:
@@ -3124,6 +3197,9 @@ async def main(message: cl.Message):
                 content = "Im bereitgestellten Kontext nicht enthalten"
 
         content = _strip_model_source_blocks(content)
+        # Canonicalize figure markers BEFORE _inject_named_source_refs below, which
+        # would otherwise swallow a bracket-form marker as a named source reference.
+        content = normalize_figure_markers(content)
 
         # Attach source PDFs as endpoint URLs to avoid session-scoped file copies.
         session_source_catalog = _sanitize_source_catalog(cl.user_session.get("source_catalog"))
@@ -3292,7 +3368,7 @@ async def main(message: cl.Message):
         # rewritten to an exact element-name alias, and any adjacent stray **/__
         # decorators are stripped. Handles LLM deviations the upstream chain
         # cannot repair: orphan bold wrappers (e.g. "**Quelle 1: ... (S.X)" with
-        # no closing "**") and the numberless form ("Quelle APP.3.2 ... (S.X)").
+        # no closing "**") and the numberless form ("Quelle <Abschnitt> ... (S.X)").
         # Chainlit's frontend uses strict substring equality against element
         # names, so any residual divergence silently kills the click handler.
         # This pass is idempotent when the pipeline already agrees.
@@ -3358,7 +3434,32 @@ async def main(message: cl.Message):
         content, followups = _extract_followups(content)
         followup_questions = _sanitize_followup_questions(followups)
         cl.user_session.set("followup_questions", followup_questions)
+
+        # --- inline figures: marked figures become images above their paragraph ---
+        # render_content -> screen + Chainlit's data layer (so images survive a
+        # reload, which cl.Image elements do not). `content` -> LLM history + export
+        # DB, kept marker- and image-free so the model never imitates ![](...).
+        _img_inline_cfg = get_config().images
+        inlined_figures: list[Any] = []
         render_content = content
+        if _img_inline_cfg.inline_figures and _img_inline_cfg.mode != "none":
+            try:
+                render_content, inlined_figures = render_figure_markers(
+                    render_content,
+                    build_figure_candidates(last_results),
+                    with_caption=_img_inline_cfg.inline_figure_caption,
+                )
+            except Exception as exc:  # noqa: BLE001 — never lose an answer over a figure
+                print(f"[WARN] inline_figures_failed: {exc.__class__.__name__}: {exc}")
+                render_content, inlined_figures = content, []
+        # Unresolved markers must never reach the user, the DB, or the model.
+        render_content = strip_figure_markers(render_content)
+        content = strip_figure_markers(content)
+        inlined_image_paths = {c.image_path for c in inlined_figures}
+        inlined_figure_names = {c.display_name for c in inlined_figures}
+        if inlined_figures:
+            print("[DEBUG] inline_figures=", len(inlined_figures))
+
         message_metadata: dict[str, Any] = {
             "has_citations_panel": bool(citation_panel_content),
             "followup_count": len(followup_questions),
@@ -3397,6 +3498,17 @@ async def main(message: cl.Message):
         if inline_pdf_elements:
             assistant_reply.elements = (assistant_reply.elements or []) + inline_pdf_elements
 
+        # Thumbnails below the message for retrieved figures that were NOT inlined
+        # into the answer text (opt out via images.show_unmarked_figures: false).
+        if _img_inline_cfg.show_unmarked_figures:
+            figure_elements = _build_inline_figure_elements(
+                last_results,
+                exclude_image_paths=inlined_image_paths,
+                exclude_names=inlined_figure_names,
+            )
+            if figure_elements:
+                assistant_reply.elements = (assistant_reply.elements or []) + figure_elements
+
         await assistant_reply.send()
         if citation_panel_content:
             history_panel_content, history_rows = _build_citation_history_view(
@@ -3427,7 +3539,9 @@ async def main(message: cl.Message):
             metadata=message_metadata,
         )
     else:
-        content = assistant_msg.content or ""
+        # No retrieval happened, so any marker here would be imitation (e.g. copied
+        # from a resumed transcript) — strip defensively.
+        content = strip_figure_markers(assistant_msg.content or "")
         content, followups = _extract_followups(content)
         followup_questions = _sanitize_followup_questions(followups)
         cl.user_session.set("followup_questions", followup_questions)

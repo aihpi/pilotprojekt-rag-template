@@ -7,12 +7,18 @@ import litellm
 from settings import CHAT_MODEL, EMBED_MODEL, LITELLM_API_KEY, LITELLM_BASE_URL
 
 
-def _client_args() -> dict[str, Any]:
+def _client_args(model: str | None = None) -> dict[str, Any]:
     args: dict[str, Any] = {}
     if LITELLM_BASE_URL:
         args["api_base"] = LITELLM_BASE_URL
     if LITELLM_API_KEY:
         args["api_key"] = LITELLM_API_KEY
+    # Bare gateway model names (no "provider/" prefix) need an explicit provider
+    # for the litellm SDK, which otherwise raises "LLM Provider NOT provided".
+    # This gateway is OpenAI-compatible. Models that already carry a prefix
+    # (e.g. "anthropic/…") keep their own provider.
+    if model and "/" not in model:
+        args["custom_llm_provider"] = "openai"
     return args
 
 
@@ -22,10 +28,11 @@ async def chat(
     tool_choice: str | None = "auto",
     model: str | None = None,
 ):
+    resolved = model or CHAT_MODEL
     payload: dict[str, Any] = {
-        "model": model or CHAT_MODEL,
+        "model": resolved,
         "messages": messages,
-        **_client_args(),
+        **_client_args(resolved),
     }
     if tools:
         payload["tools"] = tools
@@ -39,7 +46,7 @@ async def stream_chat(messages: list[dict[str, Any]], tools: list[dict[str, Any]
         "model": CHAT_MODEL,
         "messages": messages,
         "stream": True,
-        **_client_args(),
+        **_client_args(CHAT_MODEL),
     }
     if tools:
         payload["tools"] = tools
@@ -53,7 +60,91 @@ async def embed(texts: list[str]) -> list[list[float]]:
         model=EMBED_MODEL,
         input=texts,
         encoding_format="float",
-        **_client_args(),
+        **_client_args(EMBED_MODEL),
+    )
+    data = sorted(response.data, key=lambda item: item["index"])
+    return [item["embedding"] for item in data]
+
+
+_MODEL_LIST_CACHE: list[str] | None = None
+# Meta/alias ids the gateway advertises that are not directly callable as models.
+_META_MODEL_IDS = {"all-team-models"}
+
+
+def list_chat_models() -> list[str]:
+    """Best-effort list of model ids the gateway advertises via ``/v1/models``.
+
+    Blocking network call — warm it once at startup, then read the result via
+    :func:`cached_chat_models`. Only a SUCCESSFUL response is cached (an empty
+    result from a gateway that only exposes a meta alias counts as success); a
+    transient failure (timeout, network error) is NOT cached, so it can be
+    retried rather than poisoning the cache for the process lifetime."""
+    global _MODEL_LIST_CACHE
+    if _MODEL_LIST_CACHE is not None:
+        return _MODEL_LIST_CACHE
+    try:
+        import json
+        import urllib.request
+
+        base = (LITELLM_BASE_URL or "").rstrip("/")
+        req = urllib.request.Request(f"{base}/v1/models")
+        if LITELLM_API_KEY:
+            req.add_header("Authorization", f"Bearer {LITELLM_API_KEY}")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        ids = [
+            m["id"]
+            for m in data.get("data", [])
+            if isinstance(m, dict) and m.get("id") and m["id"] not in _META_MODEL_IDS
+        ]
+    except Exception:  # noqa: BLE001 — transient: return empty WITHOUT caching
+        return []
+    _MODEL_LIST_CACHE = ids
+    return ids
+
+
+def cached_chat_models() -> list[str]:
+    """Return the warmed model list without triggering a network call (safe to
+    call from async handlers). Empty until :func:`list_chat_models` has run."""
+    return _MODEL_LIST_CACHE or []
+
+
+def describe_image_sync(image_data_uri: str, prompt: str, model: str) -> str:
+    """Blocking single-image vision completion via the gateway.
+
+    Used by the PDF parser's figure step, which runs inside ``plan_ingest`` (a
+    synchronous stage executing inside ``ingest_all``'s event loop), so the async
+    ``chat`` would raise "cannot be called from a running event loop". Blocking is
+    fine for the batch ingest CLI. Mirrors :func:`embed_sync`."""
+    response = litellm.completion(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_data_uri}},
+                ],
+            }
+        ],
+        **_client_args(model),
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+def embed_sync(texts: list[str]) -> list[list[float]]:
+    """Blocking embedding call.
+
+    Used by the semantic chunker, which runs inside ``plan_ingest`` — a
+    synchronous stage that itself executes inside ``ingest_all``'s event loop,
+    so the async ``embed`` (via ``asyncio.run``) would raise "cannot be called
+    from a running event loop". A blocking call is fine for the batch CLI.
+    """
+    response = litellm.embedding(
+        model=EMBED_MODEL,
+        input=texts,
+        encoding_format="float",
+        **_client_args(EMBED_MODEL),
     )
     data = sorted(response.data, key=lambda item: item["index"])
     return [item["embedding"] for item in data]

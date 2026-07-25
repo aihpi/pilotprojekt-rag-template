@@ -4,14 +4,14 @@ import re
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
-import json
 from qdrant_client import QdrantClient
-from qdrant_client.models import FieldCondition, Filter, MatchValue
+from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
 
+import citations
+import figure_markers as figure_markers_mod
+from config import get_config
 from llm import embed
 from settings import (
-    CITATION_MAP_PATH,
-    GRUNDSCHUTZ_SOURCE_PDF,
     QDRANT_API_KEY,
     QDRANT_COLLECTION,
     QDRANT_URL,
@@ -31,31 +31,6 @@ class RagResult:
 
 
 _client: QdrantClient | None = None
-_citation_map: dict[str, dict[str, str]] | None = None
-
-
-def _canonical_pdf_from_text(value: str) -> str | None:
-    raw = (value or "").strip()
-    if not raw:
-        return None
-    lower = raw.lower()
-
-    if lower.endswith(".pdf"):
-        return raw.split("/")[-1]
-
-    if "standard_200_1" in lower or "standard 200 1" in lower:
-        return "standard_200_1.pdf"
-    if "standard_200_2" in lower or "standard 200 2" in lower:
-        return "standard_200_2.pdf"
-    if "standard_200_3" in lower or "standard 200 3" in lower:
-        return "standard_200_3.pdf"
-    if "standard_200_4" in lower or "standard 200 4" in lower:
-        return "standard_200_4.pdf"
-
-    if "kompendium" in lower or "grundschutz" in lower:
-        return GRUNDSCHUTZ_SOURCE_PDF
-
-    return None
 
 
 def _get_client() -> QdrantClient:
@@ -63,20 +38,6 @@ def _get_client() -> QdrantClient:
     if _client is None:
         _client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     return _client
-
-
-def _load_citation_map() -> dict[str, dict[str, str]]:
-    global _citation_map
-    if _citation_map is not None:
-        return _citation_map
-    try:
-        if CITATION_MAP_PATH.is_file():
-            _citation_map = json.loads(CITATION_MAP_PATH.read_text(encoding="utf-8"))
-        else:
-            _citation_map = {}
-    except Exception:  # noqa: BLE001
-        _citation_map = {}
-    return _citation_map
 
 
 def _extract_text(payload: dict[str, Any]) -> str:
@@ -87,63 +48,9 @@ def _extract_text(payload: dict[str, Any]) -> str:
     return ""
 
 
-def _extract_citation(payload: dict[str, Any]) -> str:
-    source = payload.get("source") or payload.get("document") or payload.get("title") or payload.get("file")
-    page = payload.get("page") or payload.get("page_number") or payload.get("pages")
-    module = payload.get("module") or payload.get("baustein")
-    parts: list[str] = []
-    if source:
-        parts.append(str(source))
-    if module:
-        parts.append(f"Modul {module}")
-    if page:
-        parts.append(f"Seite {page}")
-    if not parts:
-        return "Quelle unbekannt"
-    return " | ".join(parts)
-
-
 def extract_source_file(payload: dict[str, Any]) -> str | None:
-    value = payload.get("file")
-    if isinstance(value, str):
-        resolved = _canonical_pdf_from_text(value)
-        if resolved:
-            return resolved
-
-    source = payload.get("source")
-    if isinstance(source, dict):
-        value = source.get("file")
-        if isinstance(value, str):
-            resolved = _canonical_pdf_from_text(value)
-            if resolved:
-                return resolved
-
-        for key in ("document", "title", "source"):
-            nested = source.get(key)
-            if isinstance(nested, str):
-                resolved = _canonical_pdf_from_text(nested)
-                if resolved:
-                    return resolved
-
-    for key in ("source", "document", "title"):
-        value = payload.get(key)
-        if isinstance(value, str):
-            resolved = _canonical_pdf_from_text(value)
-            if resolved:
-                return resolved
-
-    # Fallback for Grundschutz chunks ingested from structured JSON without explicit PDF file.
-    source = payload.get("source")
-    if isinstance(source, str) and source.lower().endswith("grundschutz.json"):
-        return GRUNDSCHUTZ_SOURCE_PDF
-    doc_type = payload.get("doc_type")
-    if isinstance(doc_type, str) and doc_type in {
-        "anforderung",
-        "baustein_beschreibung",
-        "baustein_gefaehrdungslage",
-    }:
-        return GRUNDSCHUTZ_SOURCE_PDF
-    return None
+    """Served filename for a chunk (config-driven; see :mod:`citations`)."""
+    return citations.resolve_source_file(payload)
 
 
 def extract_page(payload: dict[str, Any]) -> int | None:
@@ -172,6 +79,8 @@ async def retrieve(
     query: str,
     top_k: int | None = None,
     *,
+    collection: str | None = None,
+    filters: dict[str, Any] | None = None,
     source_scope: str | None = None,
     standard_id: str | None = None,
     include_vectors: bool = False,
@@ -181,25 +90,40 @@ async def retrieve(
     Args:
         query: Search query text
         top_k: Number of results to return
-        source_scope: Optional filter by source scope
-        standard_id: Optional filter by standard ID
+        collection: Override the configured Qdrant collection
+        filters: Generic metadata filters (field -> value or list of values);
+            only fields listed in ``retrieval.filterable_fields`` are applied
+        source_scope: Deprecated shim, folded into ``filters``
+        standard_id: Deprecated shim, folded into ``filters``
         include_vectors: If True, include embedding vectors in results (for personalization)
 
     Returns:
         List of RagResult objects
     """
+    cfg = get_config()
     client = _get_client()
     vector = (await embed([query]))[0]
     k = top_k or TOP_K
-    must: list[FieldCondition] = []
+    target = collection or QDRANT_COLLECTION
+
+    requested = dict(filters or {})
     if source_scope:
-        must.append(FieldCondition(key="source_scope", match=MatchValue(value=source_scope)))
+        requested.setdefault("source_scope", source_scope)
     if standard_id:
-        must.append(FieldCondition(key="standard_id", match=MatchValue(value=standard_id)))
+        requested.setdefault("standard_id", standard_id)
+    allowed = set(cfg.retrieval.filterable_fields)
+    must: list[FieldCondition] = []
+    for key, value in requested.items():
+        if key not in allowed:
+            continue
+        if isinstance(value, (list, tuple, set)):
+            must.append(FieldCondition(key=key, match=MatchAny(any=list(value))))
+        else:
+            must.append(FieldCondition(key=key, match=MatchValue(value=value)))
     query_filter = Filter(must=must) if must else None
-    print("[DEBUG] retrieve", {"top_k": k, "source_scope": source_scope, "standard_id": standard_id})
+
     response = client.query_points(
-        collection_name=QDRANT_COLLECTION,
+        collection_name=target,
         query=vector,
         limit=k,
         score_threshold=SCORE_THRESHOLD,
@@ -208,11 +132,10 @@ async def retrieve(
         query_filter=query_filter,
     )
     points = list(response.points or [])
-    if not points and (source_scope or standard_id):
-        # Compatibility fallback for older collections without new metadata fields.
-        print("[WARN] filtered_retrieval_empty_fallback_unfiltered", {"top_k": k})
+    if not points and must:
+        # Compatibility fallback for collections without the filtered fields.
         response = client.query_points(
-            collection_name=QDRANT_COLLECTION,
+            collection_name=target,
             query=vector,
             limit=k,
             score_threshold=SCORE_THRESHOLD,
@@ -272,78 +195,220 @@ async def personalized_retrieve(
     )
 
 
-def build_context(results: list[RagResult]) -> str:
+def build_context(results: list[RagResult], *, figure_markers: bool | None = None) -> str:
+    """Numbered retrieval context for the model.
+
+    For figure chunks an extra ``Abbildungs-Marker: {{ABB:...}}`` line is appended
+    (unless disabled) so the model can request that image be shown above the
+    paragraph describing it — see :mod:`figure_markers`. ``figure_markers=None``
+    follows ``images.inline_figures`` from the config.
+    """
+    cfg = get_config()
+    label = cfg.citation.labels.get("source", "Source")
+    want_markers = cfg.images.inline_figures if figure_markers is None else figure_markers
+    exists = None
+    if want_markers and cfg.images.mode != "none":
+        try:
+            from kb.figure_store import figure_dir, resolve_figure_path
+
+            base = figure_dir(cfg)
+            exists = lambda name: resolve_figure_path(name, base) is not None  # noqa: E731
+        except Exception:  # noqa: BLE001 — never break retrieval over the figure dir
+            exists = None
+
     lines: list[str] = []
     for idx, result in enumerate(results, start=1):
-        citation = _extract_citation(result.metadata)
-        lines.append(f"[{idx}] {result.text}\nQuelle: {citation}")
+        line = citations.render_citation_line(result.metadata)
+        entry = f"[{idx}] {result.text}\n{label}: {line}"
+        if exists is not None:
+            token = figure_markers_mod.figure_marker_for_metadata(result.metadata, exists=exists)
+            if token:
+                entry = f"{entry}\n{figure_markers_mod.MARKER_CONTEXT_LABEL}: {token}"
+        lines.append(entry)
     return "\n\n".join(lines)
 
 
 def format_citations(results: list[RagResult]) -> str:
-    citation_map = _load_citation_map()
     lines: list[str] = []
     for idx, result in enumerate(results, start=1):
-        meta = result.metadata
-        source = meta.get("source") or {}
-        document = meta.get("document") or (source.get("document") if isinstance(source, dict) else None)
-        file_name = extract_source_file(meta) or (source.get("file") if isinstance(source, dict) else None)
-        page = meta.get("page") or meta.get("page_start")
-        if isinstance(page, dict):
-            start = page.get("start")
-            end = page.get("end")
-        else:
-            start = page if isinstance(page, int) else None
-            end = None
-
-        # Grundschutz-specific fields
-        baustein_id = meta.get("baustein")
-        baustein_title = meta.get("baustein_titel")
-        anforderung_id = meta.get("anforderung_id")
-
-        doc_key = None
-        if isinstance(document, str):
-            doc_key = document
-        elif isinstance(file_name, str):
-            doc_key = file_name.replace(".pdf", "")
-        meta_entry = citation_map.get(doc_key or "", {})
-
-        author = meta_entry.get("author")
-        year = meta_entry.get("year")
-        title = meta_entry.get("title") or doc_key
-        publisher = meta_entry.get("publisher")
-
-        page_label = None
-        if start is not None and end is not None and start != end:
-            page_label = f"S. {start}–{end}"
-        elif start is not None:
-            page_label = f"S. {start}"
-        elif end is not None:
-            page_label = f"S. {end}"
-
-        if baustein_id:
-            parts = [f"Modul {baustein_id}"]
-            if baustein_title:
-                parts.append(str(baustein_title))
-            if anforderung_id:
-                parts.append(f"Anforderung {anforderung_id}")
-            if page_label:
-                parts.append(page_label)
-            line = " | ".join(parts)
-        elif author or year or title:
-            parts = []
-            if author:
-                parts.append(author)
-            if year:
-                parts.append(f"({year}).")
-            if title:
-                parts.append(title + ".")
-            if publisher:
-                parts.append(publisher + ".")
-            if page_label:
-                parts.append(page_label + ".")
-            line = " ".join(parts)
-        else:
-            line = _extract_citation(meta)
-        lines.append(f"[{idx}] {line}")
+        lines.append(f"[{idx}] {citations.render_citation_line(result.metadata)}")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# Document-level backends for the agentic tools (tools/ package).
+# These scroll Qdrant directly (bypassing the semantic top-k / filterable_fields
+# path) so the agent can enumerate the corpus and load whole documents.
+# --------------------------------------------------------------------------- #
+def _scroll_all(client, collection: str, *, scroll_filter=None, cap: int = 20000):
+    points: list[Any] = []
+    offset = None
+    while True:
+        batch, offset = client.scroll(
+            collection_name=collection,
+            scroll_filter=scroll_filter,
+            with_payload=True,
+            limit=1000,
+            offset=offset,
+        )
+        points.extend(batch)
+        if offset is None or len(points) >= cap:
+            break
+    return points
+
+
+def _norm_name(value: str) -> str:
+    return re.sub(r"\s+", "", value or "").lower()
+
+
+def _section_order_key(point: Any) -> tuple[int, int, int]:
+    payload = point.payload or {}
+    # chunk_index disambiguates sub-chunks that share a section (semantic chunker).
+    chunk_index = payload.get("chunk_index")
+    chunk_index = chunk_index if isinstance(chunk_index, int) else 0
+    section_index = payload.get("section_index")
+    if isinstance(section_index, int):
+        return (0, section_index, chunk_index)
+    page_start = payload.get("page_start")
+    return (1, page_start if isinstance(page_start, int) else 0, chunk_index)
+
+
+# Section headings that are structural boilerplate, not a document title.
+_NON_TITLE_HEADINGS = {
+    "untitled section", "open", "abstract", "introduction", "references",
+    "acknowledgements", "acknowledgments", "author contributions",
+    "data availability", "funding", "competing interests",
+    "additional information", "materials and methods", "methods",
+    "results", "discussion", "conclusion", "conclusions",
+    "results and discussion", "results and discussions",
+    "methods dataset", "supplementary information",
+}
+
+
+def _looks_like_title(heading: Any) -> bool:
+    if not isinstance(heading, str):
+        return False
+    text = re.sub(r"\s+", " ", heading).strip()
+    return len(text) >= 12 and text.lower() not in _NON_TITLE_HEADINGS
+
+
+async def list_documents(*, collection: str | None = None) -> list[dict[str, Any]]:
+    """Enumerate the collection: one entry per distinct ``source_file`` with its
+    chunk count and a rough token estimate. The best-effort ``title`` is the
+    first real heading in reading order (structural headings like References /
+    Acknowledgements are skipped); it is ``None`` when no descriptive heading is
+    found — ``source_file`` is the reliable identifier. Navigational — no
+    citations."""
+    client = _get_client()
+    target = collection or QDRANT_COLLECTION
+    docs: dict[str, dict[str, Any]] = {}
+    for point in _scroll_all(client, target):
+        payload = point.payload or {}
+        if payload.get("_meta"):
+            continue
+        source_file = payload.get("source_file") or payload.get("source")
+        if not source_file:
+            continue
+        entry = docs.setdefault(
+            source_file,
+            {"source_file": source_file, "title": None, "_title_key": None, "chunks": 0, "_chars": 0},
+        )
+        entry["chunks"] += 1
+        entry["_chars"] += len(payload.get("text") or "")
+        heading = payload.get("title") or payload.get("section_title")
+        if _looks_like_title(heading):
+            key = _section_order_key(point)  # earliest real heading in reading order
+            if entry["_title_key"] is None or key < entry["_title_key"]:
+                entry["_title_key"] = key
+                entry["title"] = re.sub(r"\s+", " ", heading).strip()
+    out: list[dict[str, Any]] = []
+    for source_file in sorted(docs):
+        entry = docs[source_file]
+        out.append(
+            {
+                "source_file": source_file,
+                "title": entry["title"],
+                "chunks": entry["chunks"],
+                "approx_tokens": entry["_chars"] // 4,
+            }
+        )
+    return out
+
+
+async def fetch_document(
+    source_file: str, *, collection: str | None = None, max_chunks: int | None = None
+) -> list[RagResult]:
+    """All chunks of one document in reading order (by ``section_index``), as
+    RagResult items (score 1.0). Exact ``source_file`` match, with a
+    whitespace/case-insensitive fallback. Capped at ``max_chunks``."""
+    client = _get_client()
+    target = collection or QDRANT_COLLECTION
+    flt = Filter(must=[FieldCondition(key="source_file", match=MatchValue(value=source_file))])
+    points = _scroll_all(client, target, scroll_filter=flt)
+    if not points:
+        wanted = _norm_name(source_file)
+        points = [
+            p
+            for p in _scroll_all(client, target)
+            if _norm_name(str((p.payload or {}).get("source_file") or "")) == wanted
+        ]
+    points.sort(key=_section_order_key)
+    if max_chunks:
+        points = points[:max_chunks]
+    results: list[RagResult] = []
+    for point in points:
+        payload = dict(point.payload or {})
+        if payload.get("_meta"):
+            continue
+        text = _extract_text(payload)
+        if not text:
+            continue
+        results.append(RagResult(text=_clean_text(text, max_len=4000), score=1.0, metadata=payload))
+    return results
+
+
+async def expand_context(
+    source_file: str, section_index: int, *, window: int = 1, collection: str | None = None
+) -> list[RagResult]:
+    """Neighboring chunks around ``section_index`` (± ``window``) within one
+    document, in order. Degrades to the exact-section chunk if section indices
+    are absent."""
+    client = _get_client()
+    target = collection or QDRANT_COLLECTION
+    flt = Filter(must=[FieldCondition(key="source_file", match=MatchValue(value=source_file))])
+    points = _scroll_all(client, target, scroll_filter=flt)
+    low, high = section_index - window, section_index + window
+    selected = [
+        p
+        for p in points
+        if isinstance((p.payload or {}).get("section_index"), int)
+        and low <= (p.payload or {})["section_index"] <= high
+    ]
+    if not selected:
+        selected = [p for p in points if (p.payload or {}).get("section_index") == section_index]
+    selected.sort(key=_section_order_key)
+    results: list[RagResult] = []
+    for point in selected:
+        payload = dict(point.payload or {})
+        if payload.get("_meta"):
+            continue
+        text = _extract_text(payload)
+        if not text:
+            continue
+        results.append(RagResult(text=_clean_text(text), score=1.0, metadata=payload))
+    return results
+
+
+async def verify_claim(
+    claim: str,
+    *,
+    filters: dict[str, Any] | None = None,
+    collection: str | None = None,
+    top_k: int | None = None,
+) -> tuple[list[RagResult], bool]:
+    """Re-retrieve for a drafted claim; return (evidence, supported). ``supported``
+    is a soft signal — the model still reads the evidence."""
+    results = await retrieve(claim, top_k or TOP_K, filters=filters, collection=collection)
+    floor = max(SCORE_THRESHOLD, 0.3)
+    supported = any(r.score >= floor for r in results)
+    return results, supported

@@ -35,7 +35,7 @@ def _kw_key(value: str) -> str:
 
     Folds Unicode hyphen variants (NON-BREAKING HYPHEN U+2011, EN DASH U+2013)
     to the regular hyphen-minus U+002D before lowercasing, so that
-    'IT‑Grundschutz' and 'IT-Grundschutz' compare equal.
+    'Multi‑Word' and 'Multi-Word' compare equal.
     """
     return value.lower().replace("‑", "-").replace("–", "-")
 
@@ -83,18 +83,20 @@ class UserProfile:
         return out
 
 
-TOPIC_EXTRACTION_PROMPT = """Analysiere die folgenden Benutzeranfragen an einen IT-Grundschutz-Chatbot und extrahiere die Hauptthemen, für die sich der Benutzer interessiert.
+# Domain-neutral by design: the topics are derived from the user's own questions,
+# so this works for any corpus without naming one.
+TOPIC_EXTRACTION_PROMPT = """Analysiere die folgenden Nutzerfragen an einen Wissens-Assistenten und extrahiere die Hauptthemen, für die sich der Nutzer interessiert.
 
-Benutzeranfragen:
+Nutzerfragen:
 {messages}
 
 Aufgabe:
-1. Identifiziere die wichtigsten Themen/Bereiche aus den Anfragen (z.B. "Webserver-Sicherheit", "Netzwerksegmentierung", "Cloud-Computing", "Authentifizierung")
+1. Identifiziere die wichtigsten Themen/Bereiche aus den Fragen
 2. Gib maximal {topic_limit} Themen zurück
-3. Verwende prägnante, spezifische Begriffe aus dem IT-Grundschutz-Kontext
+3. Verwende prägnante, spezifische Begriffe aus dem Kontext der Fragen selbst
 
 Antworte NUR mit einem JSON-Array der Themen, ohne weitere Erklärungen.
-Beispiel: ["Webserver-Sicherheit", "Authentifizierung", "Netzwerksegmentierung"]
+Beispiel: ["Messaufbau", "Kalibrierung", "Auswertungsverfahren"]
 
 Themen:"""
 

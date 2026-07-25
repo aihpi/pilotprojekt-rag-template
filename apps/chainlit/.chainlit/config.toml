@@ -31,7 +31,10 @@ allow_origins = ["*"]
 unsafe_allow_html = false
 
 # Process and display mathematical expressions. This can clash with "$" characters in messages.
-latex = false
+# Enabled: Docling extracts formulas from the papers as LaTeX ($\mu\text{m/s}$, $\tau$,
+# $\text{ED}_{50}$, ...). Checked against the corpus: no chunk has an unpaired "$",
+# so there is no stray-dollar-opens-math-mode risk here.
+latex = true
 
 # Autoscroll new user messages at the top of the window
 user_message_autoscroll = true

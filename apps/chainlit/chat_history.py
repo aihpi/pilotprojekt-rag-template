@@ -86,6 +86,10 @@ def init_chat_db(db_path: Path) -> None:
             conn.execute(
                 "ALTER TABLE user_profiles ADD COLUMN personalization_enabled INTEGER NOT NULL DEFAULT 1"
             )
+        if "selected_chat_model" not in columns:
+            conn.execute(
+                "ALTER TABLE user_profiles ADD COLUMN selected_chat_model TEXT DEFAULT NULL"
+            )
         conn.commit()
 
 
@@ -389,6 +393,7 @@ def upsert_user_profile(
     topic_embeddings: list[list[float]] | None = None,
     excluded_bausteine: list[str] | None = None,
     selected_chat_profile: str | None = None,
+    selected_chat_model: str | None = _SENTINEL,
     message_count: int | None = None,
     keywords: list[dict[str, Any]] | None = None,
     custom_prompt: str | None = _SENTINEL,
@@ -416,6 +421,9 @@ def upsert_user_profile(
             if selected_chat_profile is not None:
                 updates.append("selected_chat_profile = ?")
                 params.append(selected_chat_profile)
+            if selected_chat_model is not _SENTINEL:
+                updates.append("selected_chat_model = ?")
+                params.append(selected_chat_model)
             if message_count is not None:
                 updates.append("message_count = ?")
                 params.append(message_count)
@@ -437,10 +445,10 @@ def upsert_user_profile(
             conn.execute(
                 """
                 INSERT INTO user_profiles (user_id, topics_json, topic_embeddings_json,
-                    excluded_bausteine_json, selected_chat_profile, message_count,
-                    keywords_json, custom_prompt, personalization_enabled,
+                    excluded_bausteine_json, selected_chat_profile, selected_chat_model,
+                    message_count, keywords_json, custom_prompt, personalization_enabled,
                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -448,6 +456,7 @@ def upsert_user_profile(
                     json.dumps(topic_embeddings or [], ensure_ascii=False),
                     json.dumps(excluded_bausteine or [], ensure_ascii=False),
                     selected_chat_profile,
+                    selected_chat_model if selected_chat_model is not _SENTINEL else None,
                     message_count or 0,
                     json.dumps(keywords or [], ensure_ascii=False),
                     custom_prompt if custom_prompt is not _SENTINEL else None,
@@ -535,6 +544,29 @@ def set_user_selected_chat_profile(
 ) -> None:
     """Set the user's chat profile selection persistently."""
     upsert_user_profile(db_path, user_id, selected_chat_profile=profile_name)
+
+
+def get_user_selected_chat_model(db_path: Path, user_id: str) -> str | None:
+    """Get the user's persisted chat model selection (None if unset)."""
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT selected_chat_model FROM user_profiles WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        return row["selected_chat_model"] if row else None
+    except sqlite3.Error as e:
+        logger.error(
+            "Failed to query selected_chat_model for user_id=%s: %s", user_id, e
+        )
+        return None
+
+
+def set_user_selected_chat_model(
+    db_path: Path, user_id: str, model: str | None
+) -> None:
+    """Set the user's chat model selection persistently."""
+    upsert_user_profile(db_path, user_id, selected_chat_model=model)
 
 
 def delete_user_profile(db_path: Path, user_id: str) -> bool:

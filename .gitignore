@@ -1,6 +1,6 @@
 # Temporary files
 tmp/
-.chainlit/
+.chainlit/*
 .files/
 .DS_Store
 # Chainlit's own configuration is intentionally versioned (its folder is ignored)
