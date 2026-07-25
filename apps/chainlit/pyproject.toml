@@ -1,7 +1,7 @@
 [project]
-name = "gski-chainlit"
+name = "rag-chainlit"
 version = "0.1.0"
-description = "Chainlit UI for GSKI with LiteLLM + Qdrant RAG"
+description = "Config-driven Chainlit RAG app (LiteLLM + Qdrant + Docling)"
 requires-python = ">=3.12"
 dependencies = [
     "chainlit==2.11.0",
@@ -12,4 +12,19 @@ dependencies = [
     "openai-harmony>=0.0.1",
     "docling>=1.5.0",
     "bcrypt>=4.1.0",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+    "mkdocs-static-i18n>=1.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

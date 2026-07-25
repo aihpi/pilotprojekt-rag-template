@@ -1,0 +1,106 @@
+# =============================================================================
+# Reference instance — the shipped example. This is what a fresh clone runs:
+# three open-access papers (see data/documents/SOURCES.md) with every feature
+# of the template switched on, so you can see what it does before configuring
+# your own corpus.
+#
+# Make it yours:  cp examples/papers/rag.config.yaml my-rag.yaml
+#                 (my-rag.yaml is gitignored)
+# Paths are relative to THIS file's directory unless noted.
+# =============================================================================
+name: papers-rag
+
+# The app's citation ("Quelle N") and follow-up ("Anschlussfragen:") parsing is
+# currently German-locked, so the assistant answers in German even though the
+# papers are English. Set `en` once that parsing is language-aware.
+language: de
+
+models:
+  # Model names are GATEWAY-SPECIFIC. These defaults work against OpenAI and
+  # most OpenAI-compatible proxies. If your gateway rejects them, use its own
+  # names — e.g. a LiteLLM proxy may expose bare names like:
+  #   chat_model: gpt-oss-120b
+  #   embed_model: octen-embedding-8b
+  #   vision_model (below): gemma-4-31b
+  chat_model: gpt-4o-mini
+  embed_model: text-embedding-3-large
+  # Empty = the settings-panel model selector fills itself from the gateway's
+  # /v1/models (embedding models are filtered out).
+  selectable_chat_models: []
+
+vector_store:
+  collection: papers
+
+data_sources:
+  - name: papers
+    path: ../../data/documents      # relative to this file -> apps/chainlit/data/documents
+    format: pdf
+    glob: "*.pdf"
+    # Chunking strategies: fixed_size | heading | passthrough | semantic | docling_hybrid
+    # `semantic` splits at embedding-similarity breakpoints — good for prose, but
+    # it embeds sentences at ingest time (costs extra calls). `heading` is the
+    # cheap default for structured PDFs.
+    chunking:
+      strategy: semantic
+      semantic_breakpoint_percentile: 95.0
+    pdf_options:
+      include_tables: true          # serialize tables into their section
+
+retrieval:
+  top_k: 5
+  # Lets the `search` tool scope to a single document via its `document` argument.
+  filterable_fields: [source_file]
+
+sources:
+  data_dir: ../../data/documents    # served files (citations open the PDF)
+  served_extensions: [.pdf]
+
+# Agentic tools exposed to the model (see docs/tools.md). Remove entries to
+# shrink the toolset; `search` alone reproduces classic single-tool RAG.
+tools:
+  enabled: [search, list_documents, fetch_document, expand_context, verify_claim]
+  descriptions:
+    list_documents: "Nenne alle Dokumente in der Wissensbasis (exakter source_file, Titel, Umfang). Nutze dies, um Dokumentnamen aufzulösen oder zu fragen, welche Paper vorhanden sind."
+    fetch_document: "Lade ein komplettes Paper (alle Abschnitte in Reihenfolge) über seinen exakten source_file. Für Zusammenfassungen besser als die Suche. Hole den source_file zuerst über list_documents."
+    expand_context: "Erweitere einen Suchtreffer um seine Nachbarabschnitte (±window um section_index), wenn ein Treffer abgeschnitten wirkt."
+    verify_claim: "Prüfe, ob eine geplante Aussage durch die Wissensbasis gestützt wird; liefert Belegstellen und ein supported-Signal."
+
+# Figure handling (see docs/images.md). `describe` renders every figure at ingest
+# and has the vision model write a searchable description; a figure the answer
+# marks is then shown inline above its paragraph.
+#   none     -> figures ignored (cheapest)
+#   describe -> descriptions + inline/thumbnail display
+#   attach   -> additionally feeds figure pixels to a vision chat model
+# Switching none -> describe/attach requires a re-ingest.
+images:
+  mode: describe
+  vision_model: gpt-4o-mini         # must be vision-capable
+  images_scale: 2.0
+  inline_figures: true              # marked figure appears ABOVE its paragraph
+  show_unmarked_figures: true       # other retrieved figures as thumbnails below
+  max_attach_images: 3
+  vision_capable_models: [gpt-4o-mini, gpt-4o, gemma-4-31b]
+
+prompt:
+  # No system_prompt_path -> the app generates one at startup from the template
+  # and a sample of the indexed chunks, then caches it (see docs/prompts.md).
+  auto_generate: true
+  starter_questions:
+    - "Welche Paper sind in der Wissensbasis enthalten?"
+    - "Fasse die zentralen Ergebnisse des Kage-2018-Papers zusammen."
+    - "Welche Methoden verwenden diese Paper?"
+    - "Was sagen die Paper über die Grenzen ihres Ansatzes?"
+
+# Optional roles: each scopes the prompt and (via retrieval_filters) retrieval.
+# profiles:
+#   - id: beginner
+#     name: "Einsteiger:in"
+#     prompt_context: "Erkläre Fachbegriffe kurz, wenn sie zum ersten Mal vorkommen."
+#   - id: researcher
+#     name: "Forscher:in"
+#     prompt_context: "Antworte knapp und technisch, nenne Messgrößen und Einheiten."
+
+app:
+  # Keyword-based personalization (settings panel). Off keeps the UI minimal.
+  personalization_enabled: false
+  show_settings: true               # gear panel: model selector + system prompt

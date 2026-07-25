@@ -1,0 +1,17 @@
+# Smallest working RAG config: a data source, a collection, and the models.
+# Everything else falls back to the schema defaults. Point the app at it with
+#   RAG_CONFIG=examples/minimal/rag.config.yaml
+name: minimal-rag
+
+models:
+  chat_model: gpt-4o-mini
+  embed_model: text-embedding-3-large
+
+vector_store:
+  collection: my_docs
+
+data_sources:
+  - name: docs
+    path: ./data
+    format: pdf
+    glob: "*.pdf"
