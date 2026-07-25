@@ -17,6 +17,8 @@ apps/chainlit/my-rag.yaml
 *.sqlite3-wal
 # Figure images are regenerated on every ingest
 **/figures/
+# Personal idea/backlog scratchpad — reified ideas belong in GitHub issues
+/TODO.md
 
 # --- Documents -------------------------------------------------------------
 # The example corpus below is committed; your own PDFs stay local, so they
