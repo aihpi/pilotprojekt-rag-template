@@ -48,3 +48,7 @@ a[href*="/sources/pdf/"]:hover {
   overflow: hidden !important;
   resize: none !important;
 }
+
+
+/* Fallback: matches the header logo by its URL, independent of classes. */
+img[src*="/logo"] { height: 96px !important; max-height: 96px !important; width: auto !important; }
