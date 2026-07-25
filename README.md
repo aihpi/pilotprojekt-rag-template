@@ -4,98 +4,172 @@
   <img src="00_aisc/img/logo_fghgsd_60.png" alt="FGHGsD">
 </p>
 
-# IT-Grundschutz-KI
+# Modular RAG Template
 
-Entwicklung des Chat Bots GSKI, der die Erarbeitung von Sicherheitskonzepten gemäß den BSI-Standards als zuverlässiger Wissensträger unterstützt. Fragen dazu beantwortet er ebenso richtig wie vollständig und durch Quellenangaben sorgt er für Transparenz und Wissenstransfer.
+**🇩🇪 [Deutsche Version](README.de.md)** · 📖 **[Documentation](https://aihpi.github.io/pilotprojekt-rag-template/)**
+
+A config-driven RAG application you point at your own documents. Everything that
+usually gets hardcoded — models, chunking, retrieval, citations, prompt, tools —
+lives in one YAML file, so a new knowledge assistant is a config change, not a
+fork.
+
+Built with [Chainlit](https://chainlit.io) (chat UI), [LiteLLM](https://litellm.ai)
+(any OpenAI-compatible model gateway), [Qdrant](https://qdrant.tech) (vector
+store) and [Docling](https://github.com/DS4SD/docling) (PDF parsing).
+
+> **It runs out of the box.** Three open-access papers ship with the repo
+> ([sources & licence](apps/chainlit/data/documents/SOURCES.md)), so you can chat
+> with a working instance before configuring anything.
+
+---
+
+## Quickstart
+
+```bash
+git clone https://github.com/aihpi/pilotprojekt-rag-template.git
+cd pilotprojekt-rag-template/apps/chainlit
+
+cp .env.example .env      # put your gateway URL + API key in .env
+docker compose up -d      # Qdrant + Postgres + ingest + app
+```
+
+Open <http://localhost:8000> (default login `admin` / `admin` — change it). The
+default instance
+[`examples/papers/rag.config.yaml`](apps/chainlit/examples/papers/rag.config.yaml)
+ingests the three shipped papers with every feature enabled.
+
+<details>
+<summary><b>Without Docker</b></summary>
+
+```bash
+cd apps/chainlit
+uv sync                                   # or: pip install -e .
+docker run -p 6333:6333 qdrant/qdrant     # vector store
+
+export RAG_CONFIG=examples/papers/rag.config.yaml
+uv run python -m kb.ingest --dry-run      # inspect chunks, embeds nothing
+uv run python -m kb.ingest                # embed + upsert
+uv run chainlit run app.py                # http://localhost:8000
+```
+</details>
+
+> **Model names are gateway-specific.** The example uses `gpt-4o-mini` and
+> `text-embedding-3-large`. If your gateway rejects them, use its own names — the
+> config has a commented block showing where.
+
+## Use your own documents
+
+```bash
+cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
+```
+
+1. Drop your PDFs into `apps/chainlit/data/documents/`. Your files stay local —
+   only the three examples are versioned, and you may delete them.
+2. In `my-rag.yaml`, set a fresh `vector_store.collection`.
+3. Re-ingest: `RAG_CONFIG=my-rag.yaml uv run python -m kb.ingest --recreate`
+
+Other formats (Markdown, JSON, CSV, custom parsers) and chunking options:
+[Adding your data](docs/adding-data.md).
+
+## What you configure
+
+| Block | What it controls |
+|---|---|
+| `models` | chat + embedding model, gateway, models offered in the UI picker |
+| `vector_store` | Qdrant URL and collection |
+| `data_sources[]` | where documents live, their format, per-source chunking |
+| `chunking` | `fixed_size` · `heading` · `passthrough` · `semantic` · `docling_hybrid` |
+| `retrieval` | `top_k`, score threshold, indexed and filterable metadata fields |
+| `tools` | which [agentic tools](docs/tools.md) the model may call |
+| `images` | [figure handling](docs/images.md): descriptions, inline placement, vision |
+| `citation` | how a source reference is rendered and which fields it shows |
+| `prompt` | system prompt (or [auto-generate](docs/prompts.md) one), starter questions |
+| `app` | streaming, personalization, settings panel |
+
+Full reference: [Configuration](docs/configuration.md) — generated from the schema,
+so it cannot drift from the code.
 
 ## Features
 
-- **Concise Answers with Source Citations**: Instead of lengthy text responses, the chatbot provides precise jump links into the original IT-Grundschutz documents. Source passages are displayed side-by-side in the browser, ensuring transparency and allowing users to verify answers directly against the original material.
-- **Guided Topic Exploration via Follow-up Questions**: The chatbot leverages the structure of the IT-Grundschutz to suggest relevant follow-up questions. Logical and hierarchical relationships between modules (Bausteine) and methods are reflected in the suggestions, helping users navigate complex topics systematically.
-- **User-Controlled Role and Topic Focus**: Answers are tailored to the user's role (e.g. IT security officer, department head, IT operations) and to topics from previous conversations. This personalization is fully transparent and configurable via the settings panel.
-- **User Feedback**: Thumbs up/down feedback on answers, persisted to PostgreSQL with CSV export for evaluation.
-- **Chat History & Export**: Full conversation persistence with OpenAI-format JSON/JSONL export.
-- **Docker Compose Deployment**: One-command setup with Chainlit, PostgreSQL, Qdrant, and auto-ingestion.
+- **Agentic retrieval** — the model chooses among five tools: semantic `search`,
+  `list_documents`, `fetch_document` (a whole document, which is what summaries
+  need), `expand_context`, `verify_claim`. Enable them per instance; `search`
+  alone is classic RAG. → [docs](docs/tools.md)
+- **Figures, not just text** — figures are extracted, described by a vision model
+  and made searchable; a figure the answer discusses appears inline **above that
+  paragraph**. → [docs](docs/images.md)
+- **Tables survive ingestion** — Docling tables are serialized into their section
+  instead of being dropped.
+- **Clickable citations** — each claim carries a source that opens the original PDF
+  at the right page; the format comes from config.
+- **Self-writing system prompt** — with none configured, the app generates one from
+  your indexed documents at startup and caches it. → [docs](docs/prompts.md)
+- **Model picker and prompt editor** in the settings panel, persisted per user.
+- **Chat history, feedback and CSV/ZIP export**, GitHub OAuth or local login.
 
-## Setup and Installation
+## How it fits together
 
-### Prerequisites
+```
+                        rag.config.yaml
+                               │
+  documents ──► kb/parsers ──► kb/chunkers ──► embeddings ──► Qdrant
+  (pdf/md/json/csv/custom)                                      │
+                                                                ▼
+  Chainlit UI ◄── citations ◄── answer ◄── LLM + tools ◄── retrieval
+```
 
-- Docker and Docker Compose
-- A running LLM endpoint compatible with the OpenAI API (e.g. [LiteLLM](https://github.com/BerriAI/litellm), [Ollama](https://ollama.com/))
-- An embedding model accessible via the same endpoint
+A format lives in `kb/parsers/`, a chunking strategy in `kb/chunkers/`, a tool in
+`tools/` — each is a small registry you extend by adding one file.
+→ [Extending](docs/extending.md)
 
-The LLM endpoint is configured via `LITELLM_BASE_URL` in the `.env` file. This works with any OpenAI-compatible API, including Ollama (e.g. `LITELLM_BASE_URL=http://localhost:11434/v1`).
+## Documentation
 
-### Authentication
+| Page | |
+|---|---|
+| [Getting started](docs/getting-started.md) | install, ingest, run |
+| [Example corpus](docs/example-corpus.md) | what ships and how to swap it |
+| [Adding your data](docs/adding-data.md) | formats, chunking, citations |
+| [Agentic tools](docs/tools.md) | the five tools, writing your own |
+| [Figures & images](docs/images.md) | `images.mode`, inline placement |
+| [System prompts](docs/prompts.md) | generation, editing, model picker |
+| [Configuration](docs/configuration.md) | full schema reference |
+| [Field-mapping DSL](docs/field-mapping.md) | JSON/CSV → chunks |
+| [Extending](docs/extending.md) | custom parsers, chunkers, tools |
 
-Two authentication methods are supported:
-
-- **GitHub OAuth** (recommended): Configure `OAUTH_GITHUB_CLIENT_ID` and `OAUTH_GITHUB_CLIENT_SECRET` in `.env` for single sign-on via GitHub.
-- **Password login**: Set `CHAINLIT_AUTH_USERNAME` and `CHAINLIT_AUTH_PASSWORD` in `.env` for local admin access. Additional users can self-register via the built-in registration form.
-
-### Quick Start
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/aihpi/pilotprojekt-GrundschutzKI.git
-   cd pilotprojekt-GrundschutzKI
-   ```
-
-2. Configure and start the Chainlit app:
-   ```bash
-   cd apps/chainlit
-   cp .env.example .env
-   # Edit .env: set LITELLM_BASE_URL, LITELLM_API_KEY, CHAT_MODEL, EMBED_MODEL
-   docker compose up -d --build
-   ```
-
-3. Access the application:
-   - Chat UI: `http://localhost:8000`
-
-For detailed configuration options, ingestion workflows, environment variables, and troubleshooting, see the [Chainlit app README](apps/chainlit/README.md).
-
-## User Guide
-
-### Getting Started
-
-1. Open the chat UI at `http://localhost:8000` and log in with the credentials configured in `.env` (`CHAINLIT_AUTH_USERNAME` / `CHAINLIT_AUTH_PASSWORD`).
-2. Select a role profile in the settings sidebar to receive answers tailored to your perspective (e.g. IT security officer, IT operations, management).
-3. Ask questions about IT-Grundschutz — the system retrieves relevant passages and generates answers with source citations.
-
-### Key Interactions
-
-- **Source citations**: Click on source references (e.g. "Quelle 1: ...") to open the corresponding PDF at the cited page.
-- **Follow-up questions**: Suggested follow-up questions appear as clickable buttons below each answer.
-- **Feedback**: Use the thumbs up/down buttons to rate answer quality. Optionally add a comment.
-- **Chat commands**: Type `/help` in the chat for available slash commands (history, export, keywords, prompt customization).
-
-### Administration
-
-- **Feedback export**: Administrators can download all user feedback as CSV at `/export/feedback` (requires admin login).
-- **Chat export**: Use `/export all` in the chat or the sidebar export button for OpenAI-format JSONL export.
-
-For the full user and administration guide, see the [Chainlit app README](apps/chainlit/README.md).
-
+Published in English and German at
+**<https://aihpi.github.io/pilotprojekt-rag-template/>**, or locally via
+`uv run --only-group docs mkdocs serve`.
 
 ## Limitations
 
-- **Prototype / Vibe-Coded**: This application was developed using AI-assisted "vibe coding" and **must be hardened and security-reviewed before any production deployment**.
-- **Local models**: Local LLMs can be used via [Ollama](https://ollama.com/) by pointing `LITELLM_BASE_URL` in the `.env` file to the Ollama endpoint (e.g. `http://localhost:11434/v1`). Adjust `CHAT_MODEL` and `EMBED_MODEL` accordingly.
+- **Prototype.** Not security-audited — review it before production use.
+- **Citations and follow-up questions are parsed from German markers**
+  (`Quelle N: … (S.x)`, `Anschlussfragen:`), so set `language: de` for those to
+  work. Your documents may be in any language.
+- `images.mode: describe` costs one vision call per figure at ingest time.
+- Changing the embedding model requires a re-ingest (`--recreate`).
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Earlier project stages — the IT-Grundschutz
+assistant, research notebooks and evaluation scripts — remain on the
+`backup/pre-template-cleanup` branch.
 
 ## References
 
 - [AI Service Centre Berlin Brandenburg (KI-Servicezentrum)](https://hpi.de/ki-servicezentrum/)
 - [fghgsd.de](https://fghgsd.de)
 
-## License
+## Licence
 
-This project is licensed under the [MIT License](LICENSE).
+Code under the [MIT licence](LICENSE). The example papers are CC BY 4.0 — see
+[SOURCES.md](apps/chainlit/data/documents/SOURCES.md).
 
 ---
 
-## Acknowledgements
-<img src="00_aisc/img/logo_bmftr_de.png" alt="drawing" style="width:170px;"/>
+## Acknowledgement
+<img src="00_aisc/img/logo_bmftr_de.png" alt="BMFTR" style="width:170px;"/>
 
-The [AI Service Centre Berlin Brandenburg](http://hpi.de/kisz) is funded by the [Federal Ministry of Research, Technology and Space](https://www.bmbf.de/) under the funding code 01IS22092.
+The [AI Service Centre Berlin Brandenburg](http://hpi.de/kisz) is funded by the
+[German Federal Ministry of Research, Technology and Space](https://www.bmbf.de/)
+under grant number 01IS22092.

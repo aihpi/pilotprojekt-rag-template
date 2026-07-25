@@ -1,10 +1,10 @@
 # Temporary files
 tmp/
-.chainlit/*
+**/.chainlit/*
 .files/
 .DS_Store
 # Chainlit's own configuration is intentionally versioned (its folder is ignored)
-!apps/chainlit/.chainlit/config.toml
+!**/.chainlit/config.toml
 
 # --- RAG template: local instance state, never committed --------------------
 # Instance config — the docs have you create this yourself

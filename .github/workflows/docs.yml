@@ -1,0 +1,30 @@
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "apps/chainlit/config/schema.py"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install docs dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # mkdocstrings reads the pydantic schema; pydantic is enough to render it.
+          pip install mkdocs-material "mkdocstrings[python]" mkdocs-static-i18n pydantic
+      - name: Build and deploy to GitHub Pages
+        run: mkdocs gh-deploy --force --clean

@@ -1,5 +1,5 @@
 **Issue** : [Provide the issue URL here]
-`https://github.com/aihpi/recreategoods/issues/___`   
+`https://github.com/aihpi/pilotprojekt-rag-template/issues/___`   
    
 **Description** :    
 (For instance : why, how, take care of, debt, compromise, package added, scenario, unhappy path, type feature or bug ...     

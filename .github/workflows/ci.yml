@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/chainlit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install app
+        run: uv sync
+      - name: Run tests
+        # The neutral default config keeps the suite independent of any gateway,
+        # and no network access is needed.
+        env:
+          RAG_CONFIG: config/default.yaml
+        run: uv run pytest tests/ -q
+
+  docs:
+    name: Docs build (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install docs toolchain
+        # mkdocstrings renders the pydantic schema statically; pydantic is enough.
+        run: pip install mkdocs-material "mkdocstrings[python]" mkdocs-static-i18n pydantic
+      - name: Build
+        # --strict turns broken links and missing nav entries into failures.
+        run: mkdocs build --strict

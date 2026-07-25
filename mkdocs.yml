@@ -1,0 +1,84 @@
+site_name: RAG Template
+site_description: A config-driven, modular RAG template (Chainlit + LiteLLM + Qdrant)
+repo_url: https://github.com/aihpi/pilotprojekt-rag-template
+repo_name: aihpi/pilotprojekt-rag-template
+site_url: https://aihpi.github.io/pilotprojekt-rag-template/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - toc.integrate
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: de
+          name: Deutsch
+          build: true
+          nav_translations:
+            Home: Start
+            Getting Started: Erste Schritte
+            Adding Your Data: Daten hinzufügen
+            Configuration Reference: Konfigurationsreferenz
+            Field-Mapping DSL: Field-Mapping-DSL
+            Example Corpus: Beispielkorpus
+            Agentic Tools: Agentische Tools
+            Figures & Images: Abbildungen
+            System Prompts: System-Prompts
+            Extending (parsers & chunkers): Erweitern (Parser & Chunker)
+            Feedback Export: Feedback-Export
+  - mkdocstrings:
+      handlers:
+        python:
+          # config.schema lives under the Chainlit app package.
+          paths: [apps/chainlit]
+          options:
+            show_root_heading: true
+            show_source: false
+            members_order: source
+            separate_signature: true
+            docstring_style: google
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Example Corpus: example-corpus.md
+  - Adding Your Data: adding-data.md
+  - Agentic Tools: tools.md
+  - Figures & Images: images.md
+  - System Prompts: prompts.md
+  - Configuration Reference: configuration.md
+  - Field-Mapping DSL: field-mapping.md
+  - Extending (parsers & chunkers): extending.md
+  - Feedback Export: feedback-export.md
