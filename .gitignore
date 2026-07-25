@@ -3,6 +3,30 @@ tmp/
 .chainlit/
 .files/
 .DS_Store
+# Chainlit's own configuration is intentionally versioned (its folder is ignored)
+!apps/chainlit/.chainlit/config.toml
+
+# --- RAG template: local instance state, never committed --------------------
+# Instance config — the docs have you create this yourself
+apps/chainlit/my-rag.yaml
+# Auto-generated system prompt cache (one per collection)
+.generated_system_prompt.*.md
+# Chat history DB (also outside .chainlit/)
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+# Figure images are regenerated on every ingest
+**/figures/
+
+# --- Documents -------------------------------------------------------------
+# The example corpus below is committed; your own PDFs stay local, so they
+# never show up in `git status` by accident.
+apps/chainlit/data/documents/*
+!apps/chainlit/data/documents/.gitkeep
+!apps/chainlit/data/documents/SOURCES.md
+!apps/chainlit/data/documents/Kage_2018_SciReports.pdf
+!apps/chainlit/data/documents/Schmidt_2022_SciReports.pdf
+!apps/chainlit/data/documents/Lin_2024_SciReports.pdf
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
