@@ -1,0 +1,103 @@
+# =============================================================================
+# Default RAG configuration — a neutral, domain-free starting point.
+#
+# Clone the template, edit this file (or copy examples/minimal/rag.config.yaml),
+# point `data_sources` at your documents, run `python -m kb.ingest --dry-run`
+# to check parsing, then ingest and start the app.
+#
+# For a fully featured, ready-to-run instance select the shipped example:
+#     RAG_CONFIG=examples/papers/rag.config.yaml
+#
+# Paths are resolved relative to THIS file (apps/chainlit/config/). Secrets and
+# infra (API keys, URLs) are left null and come from environment variables —
+# see apps/chainlit/.env.example.
+# =============================================================================
+name: knowledge-assistant
+language: en
+
+models:
+  chat_model: gpt-4o-mini
+  fallback_chat_model: null
+  embed_model: text-embedding-3-large
+  litellm_base_url: null      # env LITELLM_BASE_URL
+  litellm_api_key: null       # env LITELLM_API_KEY
+
+vector_store:
+  provider: qdrant
+  url: http://localhost:6333  # env QDRANT_URL
+  api_key: null               # env QDRANT_API_KEY
+  collection: documents
+  distance: cosine
+
+chunking:
+  strategy: fixed_size
+  max_chars: 1500
+  overlap: 200
+
+# Point these at your own corpus. Formats: pdf | txt | md | json | csv | custom.
+data_sources:
+  - name: docs
+    path: ./data/documents
+    format: pdf
+    glob: "*.pdf"
+  # - name: notes
+  #   path: ./data/notes
+  #   format: md
+  # - name: faq
+  #   path: ./data/faq.csv
+  #   format: csv
+  #   chunking: {strategy: passthrough}
+  #   field_mapping:
+  #     text_template: "Q: {question}\n\nA: {answer}"
+  #     metadata: {title: question}
+
+retrieval:
+  top_k: 5
+  score_threshold: 0.0
+  payload_indexes: []
+  filterable_fields: []
+
+citation:
+  segments:
+    - "{title}"
+    - "{source_file}"
+    - "p. {page}"
+  separator: " — "
+  token_word: Source
+  page_abbr: "p."
+  panel_title: "Sources & Evidence"
+
+sources:
+  data_dir: ./data/documents
+  served_extensions:
+    - .pdf
+    - .txt
+    - .md
+
+prompt:
+  system_prompt_path: ./prompts/default_system.md
+  starter_questions: []
+
+# profiles: []   # optional roles; each scopes retrieval via retrieval_filters
+
+app:
+  streaming_enabled: false
+  personalization_enabled: false
+
+# PDF figure handling (A/B/C test knob; env IMAGES_MODE overrides).
+#   none     — figures dropped (default)
+#   describe — VLM writes a description per figure at ingest -> searchable chunk
+#   attach   — describe + feed figure pixels to a vision chat model at query time
+# describe/attach persist figure images and render them as UI thumbnails when
+# cited. Switching none->describe/attach needs a re-ingest.
+images:
+  mode: none
+  vision_model: gemma-4-31b
+  images_scale: 2.0
+  # true: a figure the model marks is shown directly ABOVE its paragraph.
+  inline_figures: true
+  # true: figures the answer does NOT reference still appear as thumbnails below
+  # the message. false: only figures the model actually marked are shown.
+  show_unmarked_figures: true
+  max_attach_images: 3
+  vision_capable_models: [gemma-4-31b]

@@ -1,0 +1,482 @@
+"""Typed configuration schema for the RAG template.
+
+A single declarative config file (YAML) describes an entire RAG instance:
+data sources, chunking, models, vector store, retrieval, citations, prompt,
+profiles and UI strings. The models here are the single source of truth for
+that schema — the docs "Config Reference" page is generated from them via
+mkdocstrings, so keep the docstrings accurate.
+
+Secrets/infra fields (API keys, URLs) default to ``None`` in YAML and are
+filled from environment variables by :mod:`config.loader`, so they never need
+to live in the file.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+
+
+class ModelsConfig(BaseModel):
+    """Chat and embedding model selection (all routed through LiteLLM)."""
+
+    chat_model: str = "gpt-4o-mini"
+    """LiteLLM ``provider/model`` string for the chat model."""
+    fallback_chat_model: str | None = None
+    """Optional model used via LiteLLM ``fallbacks=`` and the pre-flight health probe."""
+    embed_model: str = "text-embedding-3-large"
+    """LiteLLM ``provider/model`` string for embeddings."""
+    selectable_chat_models: list[str] = Field(default_factory=list)
+    """Chat models offered in the settings-panel model selector. Merged with
+    whatever the gateway advertises via ``/v1/models`` and the active
+    ``chat_model``. Use this when the gateway does not enumerate its models."""
+    litellm_base_url: str | None = None
+    """LiteLLM gateway base URL (env ``LITELLM_BASE_URL`` overrides)."""
+    litellm_api_key: str | None = None
+    """LiteLLM gateway API key (env ``LITELLM_API_KEY`` overrides)."""
+
+
+class VectorStoreConfig(BaseModel):
+    """Vector database connection and collection."""
+
+    provider: Literal["qdrant"] = "qdrant"
+    url: str = "http://localhost:6333"
+    """Qdrant URL (env ``QDRANT_URL`` overrides)."""
+    api_key: str | None = None
+    """Qdrant API key (env ``QDRANT_API_KEY`` overrides)."""
+    collection: str = "documents"
+    """Collection name (env ``QDRANT_COLLECTION`` overrides)."""
+    distance: Literal["cosine", "dot", "euclid"] = "cosine"
+
+
+class ChunkingConfig(BaseModel):
+    """How parsed sections are split into chunks before embedding."""
+
+    strategy: Literal[
+        "fixed_size", "heading", "passthrough", "semantic", "docling_hybrid"
+    ] = "fixed_size"
+    """``fixed_size`` = sliding window; ``heading`` = one chunk per parsed
+    section (with an oversize guard); ``passthrough`` = one chunk per section,
+    never split (for structured JSON/CSV records); ``semantic`` = split each
+    section at embedding-similarity breakpoints (embeds sentences at ingest —
+    not free); ``docling_hybrid`` = Docling's native token-aware chunker
+    (PDF only; serializes tables/figures itself, sizes by the embed tokenizer)."""
+    max_chars: int = Field(default=3000, gt=0)
+    overlap: int = Field(default=300, ge=0)
+    min_section_chars: int = Field(default=40, ge=0)
+    semantic_breakpoint_percentile: float = Field(default=95.0, ge=0.0, le=100.0)
+    """``semantic`` only: consecutive-sentence distances above this percentile
+    start a new chunk. Lower = more, smaller chunks."""
+    hybrid_max_tokens: int | None = Field(default=None, gt=0)
+    """``docling_hybrid`` only: token cap per chunk. ``None`` uses the
+    tokenizer's model default."""
+
+    @model_validator(mode="after")
+    def _check_overlap(self) -> "ChunkingConfig":
+        if self.overlap >= self.max_chars:
+            raise ValueError(
+                f"chunking.overlap ({self.overlap}) must be smaller than "
+                f"max_chars ({self.max_chars})"
+            )
+        return self
+
+
+class IterStep(BaseModel):
+    """One level of descent for the nested-JSON ``record_specs`` DSL."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    path: str | list[str]
+    """A key to descend into, or several sibling list-keys to iterate together
+    (e.g. ``[basis, standard, erhoeht]``)."""
+    as_: str | None = Field(default=None, alias="as")
+    """Bind the current element under this name for later ``{name.field}`` refs."""
+    object: bool = False
+    """Descend into an object without iterating (single dict, not a list)."""
+    bind_key_as: str | None = None
+    """When ``path`` is a list of sibling keys, capture which key we came
+    through under this name (referenced as ``@name``)."""
+
+
+class RecordSpec(BaseModel):
+    """A nested-iteration record producer for the JSON field-mapping DSL."""
+
+    iterate: list[IterStep]
+    text_template: str
+    """f-string over the bound namespace, e.g. ``"{req.titel}\\n\\n{req.inhalt}"``."""
+    id_template: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    """payload_key -> value spec (dotted path, ``@bound_key``, ``{const: X}`` or ``{template: "..."}``)."""
+
+
+class FieldMapping(BaseModel):
+    """Declarative mapping from JSON/CSV records to chunk text + metadata."""
+
+    delimiter: str = ","
+    """CSV column delimiter."""
+    record_path: str | None = None
+    """Dotted path to the list of records (flat JSON). Omit for top-level lists."""
+    text_template: str | None = None
+    """f-string over a record's fields to build the chunk text."""
+    text_fields: list[str] | None = None
+    """Alternative to ``text_template``: join these fields with newlines."""
+    id_template: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    """payload_key -> value spec (see :class:`RecordSpec`)."""
+    record_specs: list[RecordSpec] | None = None
+    """For nested/multi-record JSON — overrides the flat fields above."""
+
+
+class PdfOptions(BaseModel):
+    """PDF/Docling extraction options for a data source."""
+
+    docling_json_dir: str | None = None
+    """If set, parse pre-exported Docling JSON from this dir (fast path) instead
+    of converting PDFs live."""
+    docling_service_url: str | None = None
+    """Optional remote Docling service (else local CPU conversion)."""
+    ocr: bool = False
+    ocr_engine: Literal["tesseract", "mac"] = "tesseract"
+    ocr_lang: list[str] = Field(default_factory=lambda: ["eng", "deu"])
+    device: Literal["cpu", "mps", "cuda", "auto"] = "cpu"
+    include_tables: bool = True
+    """Serialize each table (as a Markdown grid) into the section it appears in,
+    so table content is retrievable. Ignored by ``docling_hybrid`` (that chunker
+    serializes tables itself). Applies to the ``heading``/``fixed_size``/
+    ``semantic`` reconstruction path."""
+
+
+class DataSourceConfig(BaseModel):
+    """One corpus to ingest: where it is, its format, how to parse and chunk it."""
+
+    name: str
+    path: str
+    """File or directory path (resolved relative to the config file)."""
+    format: Literal["pdf", "txt", "md", "json", "csv", "custom"]
+    glob: str | None = None
+    """Glob for directory paths (e.g. ``*.pdf``)."""
+    parser_name: str | None = None
+    """Registered parser name — required when ``format == 'custom'``."""
+    chunking: ChunkingConfig | None = None
+    """Per-source override of the global chunking config."""
+    field_mapping: FieldMapping | None = None
+    """Required for ``json``/``csv`` formats."""
+    pdf_options: PdfOptions | None = None
+    extra_metadata: dict[str, Any] = Field(default_factory=dict)
+    """Static metadata merged into every chunk from this source."""
+
+    @model_validator(mode="after")
+    def _check(self) -> "DataSourceConfig":
+        if self.format in {"json", "csv"} and self.field_mapping is None:
+            raise ValueError(
+                f"data source '{self.name}': field_mapping is required for "
+                f"format '{self.format}'"
+            )
+        if self.format == "custom" and not self.parser_name:
+            raise ValueError(
+                f"data source '{self.name}': parser_name is required for "
+                f"format 'custom'"
+            )
+        return self
+
+
+class RetrievalConfig(BaseModel):
+    """Retrieval knobs and which payload fields are indexed/filterable."""
+
+    top_k: int = Field(default=5, ge=1)
+    max_top_k: int | None = None
+    """Upper bound the model may request. Defaults to ``top_k`` when unset."""
+    max_source_links: int = Field(default=8, ge=0)
+    score_threshold: float = Field(default=0.0, ge=0.0)
+    payload_indexes: list[str] = Field(default_factory=list)
+    """Metadata fields to build Qdrant keyword indexes on."""
+    filterable_fields: list[str] = Field(default_factory=list)
+    """Metadata fields ``retrieve()`` and profiles are allowed to filter on."""
+
+    @model_validator(mode="after")
+    def _default_max_top_k(self) -> "RetrievalConfig":
+        if self.max_top_k is None:
+            self.max_top_k = self.top_k
+        elif self.max_top_k < self.top_k:
+            raise ValueError(
+                f"retrieval.max_top_k ({self.max_top_k}) must be >= top_k ({self.top_k})"
+            )
+        return self
+
+
+class FilenameRule(BaseModel):
+    """One declarative rule mapping stored source metadata to a served file."""
+
+    when_field: str
+    """Payload key to test (e.g. ``source``, ``doc_type``, ``source_file``)."""
+    equals: str | None = None
+    matches: str | None = None
+    """Regex matched against the field value."""
+    in_: list[str] | None = Field(default=None, alias="in")
+    serve: str
+    """Filename to serve when the rule matches."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CitationConfig(BaseModel):
+    """How sources are rendered as citations and served to the UI."""
+
+    segments: list[str] = Field(
+        default_factory=lambda: ["{title}", "{source_file}", "p. {page}"]
+    )
+    """Ordered format-string segments; a segment is emitted only if every
+    ``{field}`` it references resolves to a non-empty value."""
+    separator: str = " — "
+    token_word: str = "Source"
+    """In-text citation token label; drives the clickable-citation regexes."""
+    page_abbr: str = "p."
+    panel_title: str = "Sources & Evidence"
+    extra_fields: list[str] = Field(default_factory=list)
+    """Optional metadata keys exposed to citation segments (e.g. domain fields)."""
+    map_path: str | None = None
+    """Optional bibliographic citation map JSON (env ``CITATION_MAP_PATH`` overrides)."""
+    id_pattern: str | None = None
+    """Optional regex for domain IDs used as an extra citation-matching signal."""
+    source_pdf_fallback: str | None = None
+    """Fallback served filename for chunks without a resolvable source file."""
+    labels: dict[str, str] = Field(default_factory=dict)
+    """UI label overrides (file/page/section/open/source/…)."""
+
+
+class SourcesConfig(BaseModel):
+    """Where served source files live and which types are served."""
+
+    data_dir: str = "data"
+    """Directory of served source files (env ``DATA_RAW_DIR`` overrides)."""
+    served_extensions: list[str] = Field(
+        default_factory=lambda: [".pdf", ".txt", ".md"]
+    )
+    filename_map: list[FilenameRule] = Field(default_factory=list)
+    """Declarative rules for mapping stored names to served files."""
+
+
+class PromptConfig(BaseModel):
+    """System prompt and starter questions."""
+
+    system_prompt_path: str | None = None
+    """Path to a markdown system prompt (env ``SYSTEM_PROMPT_PATH`` overrides)."""
+    starter_questions: list[str] = Field(default_factory=list)
+    starter_icons: list[str] = Field(default_factory=list)
+    auto_generate: bool = True
+    """When no system prompt is configured/loaded, generate one at startup with
+    the chat model, grounded in ``template_path`` and a sample of the indexed
+    chunks. Cached as ``.generated_system_prompt.<collection>.md`` next to the
+    config (set env ``REGENERATE_SYSTEM_PROMPT=true`` to force a rebuild)."""
+    template_path: str | None = None
+    """Structural template for auto-generation (default: repo-root ``system.md``,
+    else the bundled ``config/prompts/default_system.md``)."""
+    sample_size: int = Field(default=40, ge=1)
+    """How many indexed chunks to sample when auto-generating the prompt."""
+
+
+class ToolConfig(BaseModel):
+    """The retrieval (``search``) tool exposed to the model."""
+
+    name: str = "rag_retrieve"
+    description: str = "Search the knowledge base for documents relevant to the query."
+    query_param_description: str = "The search query."
+    top_k_param_description: str = "Number of documents to retrieve."
+
+
+class ToolsConfig(BaseModel):
+    """Which pluggable agentic-RAG tools are exposed to the model.
+
+    ``enabled`` lists registry ids from the ``tools/`` package (order = schema
+    order). Defaults to ``["search"]`` so instances that only declare the legacy
+    ``tool:`` block behave exactly as before. The ``search`` tool takes its name
+    and descriptions from ``tool:``; other tools' descriptions come from their
+    language-aware defaults unless overridden in ``descriptions``.
+    """
+
+    enabled: list[str] = Field(default_factory=lambda: ["search"])
+    descriptions: dict[str, str] = Field(default_factory=dict)
+    """tool_id -> OpenAI function description override (``search`` uses ``tool:``)."""
+    fetch_max_chunks: int = Field(default=200, ge=1)
+    """Whole-document size cap for ``fetch_document`` (guards context blow-up)."""
+    expand_window: int = Field(default=1, ge=0)
+    """Default neighbor window for ``expand_context``."""
+
+
+class ImagesConfig(BaseModel):
+    """How PDF figures are handled at ingest and query time.
+
+    ``none``   — figures dropped (default; today's behavior).
+    ``describe``— at ingest, render each figure and have ``vision_model`` write a
+                 description, stored as a searchable/citable figure chunk (works
+                 with any chat model).
+    ``attach`` — same ingest as describe, plus at query time the figure pixels are
+                 fed to a vision-capable chat model.
+    Figure images are persisted (and rendered as UI thumbnails when cited) in both
+    ``describe`` and ``attach``. Switching ``none``→``describe``/``attach`` needs a
+    re-ingest; ``describe``↔``attach`` does not.
+    """
+
+    mode: Literal["none", "describe", "attach"] = "none"
+    vision_model: str = "gemma-4-31b"
+    """Vision-language model (via the gateway) used to describe figures, and the
+    expected chat model for ``attach``."""
+    images_scale: float = Field(default=2.0, gt=0)
+    """Docling figure render scale (2.0 = higher-res crops)."""
+    describe_prompt: str = (
+        "Beschreibe diese Abbildung aus einem wissenschaftlichen Dokument sachlich "
+        "und detailliert auf Deutsch. Nenne die dargestellten Objekte, "
+        "Beschriftungen, Achsen und Verläufe sowie die Kernaussage. Gib "
+        "ausschließlich die Beschreibung aus, ohne Einleitung."
+    )
+    inline_figures: bool = True
+    """Render a marked figure as a markdown image directly ABOVE the paragraph that
+    describes it. ``build_context`` advertises a per-figure marker token, the model
+    copies it on its own line, and the answer post-processing swaps it for
+    ``![](/sources/figure/...)``. Every retrieved figure the model did NOT mark keeps
+    the legacy behavior (a ``cl.Image`` thumbnail below the answer) — never both.
+    Inert when ``mode == "none"``."""
+    figure_marker_prompt: str = (
+        "Zu jeder Abbildung im Kontext steht eine Zeile "
+        '"Abbildungs-Marker: {{ABB:...}}". Wenn du eine Abbildung beschreibst, '
+        "setze deren Marker unverändert in eine eigene Zeile direkt VOR den Absatz, "
+        "der die Abbildung beschreibt. Kopiere ihn exakt inklusive der geschweiften "
+        "Klammern (hier ausdrücklich erlaubt, abweichend von der Klammer-Regel für "
+        "Zitate). Verwende jeden Marker höchstens einmal, erfinde keine Marker und "
+        "schreibe niemals selbst Bild-Links oder Markdown-Bilder."
+    )
+    """Ephemeral per-request system message teaching the marker protocol. Used
+    VERBATIM — never ``.format()`` it, that would collapse ``{{`` to ``{``."""
+    inline_figure_caption: bool = False
+    """Also emit the figure caption as an italic line under the inlined image."""
+    show_unmarked_figures: bool = True
+    """Whether retrieved figures the answer does NOT reference are still shown as
+    thumbnails below the message. ``false`` = only figures the model actually
+    marked appear (cleaner, but nothing is shown if it forgets the marker).
+    With ``inline_figures: false`` every figure counts as unmarked, so ``false``
+    here hides figure thumbnails entirely (descriptions stay searchable)."""
+    max_attach_images: int = Field(default=3, ge=1)
+    """``attach`` only: cap on figure images fed to the vision call per answer."""
+    attach_image_max_px: int = Field(default=768, ge=64)
+    """``attach`` only: downscale each figure so its longest side ≤ this (JPEG)
+    before sending to the vision model (keeps the request under the gateway size
+    limit)."""
+    figure_store_dir: str | None = None
+    """Where figure PNGs are saved. ``None`` → ``<sources.data_dir>/figures``."""
+    vision_capable_models: list[str] = Field(default_factory=lambda: ["gemma-4-31b"])
+    """Chat models allowed to receive figure pixels in ``attach`` mode (the gateway
+    exposes no per-model capability flag, so this list is authoritative)."""
+
+    @model_validator(mode="after")
+    def _check(self) -> "ImagesConfig":
+        if self.mode == "attach" and not self.vision_capable_models:
+            raise ValueError(
+                "images.mode='attach' requires images.vision_capable_models to be "
+                "non-empty."
+            )
+        return self
+
+
+class ProfileConfig(BaseModel):
+    """An optional persona/role that scopes prompt and retrieval."""
+
+    id: str
+    name: str
+    icon: str | None = None
+    description: str | None = None
+    markdown_description: str | None = None
+    prompt_context: str = ""
+    retrieval_filters: dict[str, Any] = Field(default_factory=dict)
+    """Metadata field -> value(s) to scope retrieval for this profile."""
+
+
+class AppConfig(BaseModel):
+    """Runtime/behavioral knobs (streaming, personalization)."""
+
+    streaming_enabled: bool = False
+    streaming_double_pass: bool = False
+    personalization_enabled: bool = True
+    profile_min_messages: int = Field(default=5, ge=1)
+    profile_topic_limit: int = Field(default=8, ge=0)
+    profile_relevance_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    personalized_followups_count: int = Field(default=2, ge=0)
+    show_settings: bool = True
+    """Whether the Chainlit settings panel is shown (even without profiles)."""
+
+
+class UiTextConfig(BaseModel):
+    """Neutral UI/prompt strings (overridable per language)."""
+
+    role_context_header: str = "## ROLE CONTEXT"
+    retry_tool: str = "Call the {tool} tool first before answering."
+    forced_final: str = (
+        "Answer the question using only the retrieved context above. "
+        "If the answer is not in the context, say so."
+    )
+    no_context: str = "Not found in the provided context."
+
+
+class RagConfig(BaseModel):
+    """Top-level configuration for a RAG instance."""
+
+    name: str = "rag"
+    language: str = "en"
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+    vector_store: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
+    chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
+    data_sources: list[DataSourceConfig] = Field(default_factory=list)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    citation: CitationConfig = Field(default_factory=CitationConfig)
+    sources: SourcesConfig = Field(default_factory=SourcesConfig)
+    prompt: PromptConfig = Field(default_factory=PromptConfig)
+    tool: ToolConfig = Field(default_factory=ToolConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    images: ImagesConfig = Field(default_factory=ImagesConfig)
+    profiles: list[ProfileConfig] = Field(default_factory=list)
+    profiles_path: str | None = None
+    """Optional path to a JSON profiles file (used when ``profiles`` is empty)."""
+    default_profile: str | None = None
+    app: AppConfig = Field(default_factory=AppConfig)
+    ui_text: UiTextConfig = Field(default_factory=UiTextConfig)
+
+    _config_dir: Path | None = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def _check_custom_parsers(self) -> "RagConfig":
+        # Deferred import to avoid a cycle at module import time.
+        try:
+            from kb.parsers import PARSER_REGISTRY
+        except Exception:
+            return self
+        for src in self.data_sources:
+            if src.format == "custom" and src.parser_name not in PARSER_REGISTRY:
+                raise ValueError(
+                    f"data source '{src.name}': unknown custom parser "
+                    f"'{src.parser_name}'. Registered: {sorted(PARSER_REGISTRY)}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_enabled_tools(self) -> "RagConfig":
+        # Deferred import to avoid a cycle at module import time.
+        try:
+            from tools import TOOL_REGISTRY
+        except Exception:
+            return self
+        for tool_id in self.tools.enabled:
+            if tool_id not in TOOL_REGISTRY:
+                raise ValueError(
+                    f"tools.enabled: unknown tool '{tool_id}'. "
+                    f"Registered: {sorted(TOOL_REGISTRY)}"
+                )
+        return self
+
+    def resolve_path(self, value: str | Path) -> Path:
+        """Resolve a config-relative path against the config file's directory."""
+        p = Path(value)
+        if p.is_absolute():
+            return p
+        base = self._config_dir or Path.cwd()
+        return (base / p).resolve()
