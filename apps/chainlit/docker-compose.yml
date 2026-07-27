@@ -14,7 +14,10 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Host port is configurable so the stack can run next to an existing
+      # Postgres/Qdrant (set POSTGRES_PORT/QDRANT_PORT in .env). The in-container
+      # ports never change, so service DNS below stays valid either way.
+      - "${POSTGRES_PORT:-5432}:5432"
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -22,7 +25,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     ports:
-      - "6333:6333"
+      - "${QDRANT_PORT:-6333}:6333"
 
   chainlit:
     build:
@@ -39,7 +42,11 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://chainlit:chainlit@postgres:5432/chainlit}
+      # Deliberately NOT ${DATABASE_URL}: .env holds the value for running the
+      # app on the host (localhost:5432), which inside a container points at the
+      # container itself. Compose interpolates from that same .env, so reusing the
+      # name would break the Docker path. Use DOCKER_DATABASE_URL for an external DB.
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://chainlit:chainlit@postgres:5432/chainlit}
       CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET:-change-me}
       CHAINLIT_AUTH_USERNAME: ${CHAINLIT_AUTH_USERNAME:-admin}
       CHAINLIT_AUTH_PASSWORD: ${CHAINLIT_AUTH_PASSWORD:-admin}
@@ -56,7 +63,7 @@ services:
       - ./.chainlit:/app/.chainlit
       - ./.files:/app/.files
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
 
   langflow:
     profiles: ["langflow"]
