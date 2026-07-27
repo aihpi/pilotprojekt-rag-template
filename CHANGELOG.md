@@ -42,6 +42,14 @@ can be pointed at a new corpus without touching Python.
 - **Documentation site.** MkDocs Material site (English and German) with a
   configuration reference generated from the schema.
 
+### Changed
+
+- **Open-weight models everywhere by default.** All shipped configs, the schema
+  defaults, `docker-compose.yml` and the docs now use `gpt-oss-120b` (Apache-2.0),
+  `octen-embedding-8b` and `gemma-4-31b` instead of proprietary hosted models, so
+  no instance depends on a single vendor. Model names remain gateway-specific;
+  the configs point at `GET /v1/models` and list other open alternatives.
+
 ### Removed
 
 The following were dropped as domain- or workflow-specific. They remain available

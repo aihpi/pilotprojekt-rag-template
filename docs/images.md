@@ -8,14 +8,14 @@ with the `images:` block.
 ```yaml
 images:
   mode: none            # none | describe | attach
-  vision_model: gpt-4o-mini
+  vision_model: gemma-4-31b
   images_scale: 2.0     # Docling render scale (2.0 = higher-res crops)
   inline_figures: true
   show_unmarked_figures: true
   inline_figure_caption: false
   max_attach_images: 3
   attach_image_max_px: 768
-  vision_capable_models: [gpt-4o-mini, gpt-4o]
+  vision_capable_models: [gemma-4-31b]
 ```
 
 The mode can be switched without touching the YAML via the `IMAGES_MODE`

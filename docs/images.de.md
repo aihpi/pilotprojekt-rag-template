@@ -8,14 +8,14 @@ Argumentation in einem Diagramm steckt, ist das ein echter Verlust. Mit dem
 ```yaml
 images:
   mode: none            # none | describe | attach
-  vision_model: gpt-4o-mini
+  vision_model: gemma-4-31b
   images_scale: 2.0     # Docling-Renderskalierung (2.0 = höher aufgelöste Ausschnitte)
   inline_figures: true
   show_unmarked_figures: true
   inline_figure_caption: false
   max_attach_images: 3
   attach_image_max_px: 768
-  vision_capable_models: [gpt-4o-mini, gpt-4o]
+  vision_capable_models: [gemma-4-31b]
 ```
 
 Der Modus lässt sich ohne Änderung der YAML über die Umgebungsvariable

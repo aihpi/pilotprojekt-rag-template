@@ -51,9 +51,12 @@ uv run chainlit run app.py                # http://localhost:8000
 ```
 </details>
 
-> **Modellnamen sind gateway-abhängig.** Das Beispiel nutzt `gpt-4o-mini` und
-> `text-embedding-3-large`. Lehnt dein Gateway diese ab, trage dessen eigene
-> Namen ein — die Config enthält dafür einen kommentierten Block.
+> **Standardmäßig offene Modelle, und Namen sind gateway-abhängig.** Das Beispiel
+> nutzt `gpt-oss-120b` (Apache-2.0 — das Open-Weight-Release, nicht die gehostete
+> GPT-API), `octen-embedding-8b` und `gemma-4-31b` für Vision. Nirgends wird ein
+> proprietärer Anbieter benötigt. Dein Gateway hat eigene Namen — frag es ab
+> (`GET /v1/models`) und trage diese ein; die Config listet in einem Kommentar
+> weitere offene Optionen (Qwen3, Llama 3.x, Mistral, BGE-M3, multilingual-E5).
 
 ## Eigene Dokumente verwenden
 

@@ -98,7 +98,7 @@ def test_settings_shim_exports_expected_constants():
     sys.modules.pop("settings", None)
     settings = importlib.import_module("settings")
     # Neutral default: constants resolve and have the right types.
-    assert settings.CHAT_MODEL == "gpt-4o-mini"
+    assert settings.CHAT_MODEL == "gpt-oss-120b"
     assert settings.QDRANT_COLLECTION == "documents"
     assert settings.TOP_K == 5
     assert settings.MAX_TOP_K == settings.TOP_K

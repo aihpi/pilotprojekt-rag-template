@@ -4,8 +4,8 @@
 name: minimal-rag
 
 models:
-  chat_model: gpt-4o-mini
-  embed_model: text-embedding-3-large
+  chat_model: gpt-oss-120b
+  embed_model: octen-embedding-8b
 
 vector_store:
   collection: my_docs

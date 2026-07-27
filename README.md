@@ -51,9 +51,12 @@ uv run chainlit run app.py                # http://localhost:8000
 ```
 </details>
 
-> **Model names are gateway-specific.** The example uses `gpt-4o-mini` and
-> `text-embedding-3-large`. If your gateway rejects them, use its own names — the
-> config has a commented block showing where.
+> **Open-weight models by default, and names are gateway-specific.** The example
+> uses `gpt-oss-120b` (Apache-2.0 — the open-weight release, not the hosted GPT
+> API), `octen-embedding-8b` and `gemma-4-31b` for vision. No proprietary vendor
+> is required anywhere. Your gateway will expose its own names, so ask it
+> (`GET /v1/models`) and put those in the config — there is a commented block
+> listing other open options (Qwen3, Llama 3.x, Mistral, BGE-M3, multilingual-E5).
 
 ## Use your own documents
 

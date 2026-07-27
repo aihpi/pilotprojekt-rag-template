@@ -16,9 +16,9 @@ name: knowledge-assistant
 language: en
 
 models:
-  chat_model: gpt-4o-mini
+  chat_model: gpt-oss-120b
   fallback_chat_model: null
-  embed_model: text-embedding-3-large
+  embed_model: octen-embedding-8b
   litellm_base_url: null      # env LITELLM_BASE_URL
   litellm_api_key: null       # env LITELLM_API_KEY
 

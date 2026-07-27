@@ -92,7 +92,7 @@ nützlich, wenn das Gateway seine Modelle nicht aufzählt:
 
 ```yaml
 models:
-  chat_model: gpt-4o-mini
+  chat_model: gpt-oss-120b
   selectable_chat_models: []   # wird mit dem gemergt, was /v1/models meldet
 ```
 

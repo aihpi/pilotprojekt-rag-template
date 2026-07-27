@@ -20,13 +20,19 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 
 class ModelsConfig(BaseModel):
-    """Chat and embedding model selection (all routed through LiteLLM)."""
+    """Chat and embedding model selection (all routed through LiteLLM).
 
-    chat_model: str = "gpt-4o-mini"
-    """LiteLLM ``provider/model`` string for the chat model."""
+    The defaults are deliberately **open-weight** models, so a fresh instance
+    never depends on a proprietary vendor. The exact strings are gateway-specific
+    — query ``GET /v1/models`` and use whatever your gateway advertises.
+    """
+
+    chat_model: str = "gpt-oss-120b"
+    """LiteLLM ``provider/model`` string for the chat model. Default is OpenAI's
+    Apache-2.0 open-weight release, not the hosted GPT API."""
     fallback_chat_model: str | None = None
     """Optional model used via LiteLLM ``fallbacks=`` and the pre-flight health probe."""
-    embed_model: str = "text-embedding-3-large"
+    embed_model: str = "octen-embedding-8b"
     """LiteLLM ``provider/model`` string for embeddings."""
     selectable_chat_models: list[str] = Field(default_factory=list)
     """Chat models offered in the settings-panel model selector. Merged with

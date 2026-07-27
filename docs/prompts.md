@@ -89,7 +89,7 @@ its models:
 
 ```yaml
 models:
-  chat_model: gpt-4o-mini
+  chat_model: gpt-oss-120b
   selectable_chat_models: []   # merged with whatever /v1/models advertises
 ```
 
