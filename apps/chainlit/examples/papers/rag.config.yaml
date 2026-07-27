@@ -101,7 +101,7 @@ images:
   #   show_unmarked_figures true  = remaining retrieved figures as thumbnails below
   #                         false = show only figures the answer actually marks
   inline_figures: true
-  show_unmarked_figures: true
+  show_unmarked_figures: false
   max_attach_images: 3              # only used by mode: attach
   vision_capable_models: [gemma-4-31b]
 
