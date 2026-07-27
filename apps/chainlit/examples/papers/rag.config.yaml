@@ -16,14 +16,18 @@ name: papers-rag
 language: de
 
 models:
-  # Model names are GATEWAY-SPECIFIC. These defaults work against OpenAI and
-  # most OpenAI-compatible proxies. If your gateway rejects them, use its own
-  # names — e.g. a LiteLLM proxy may expose bare names like:
-  #   chat_model: gpt-oss-120b
-  #   embed_model: octen-embedding-8b
-  #   vision_model (below): gemma-4-31b
-  chat_model: gpt-4o-mini
-  embed_model: text-embedding-3-large
+  # Open-weight models by default — nothing here requires a proprietary vendor.
+  # Model names are GATEWAY-SPECIFIC, though: these are the names a LiteLLM proxy
+  # exposes. Ask your own gateway for its list (GET /v1/models) and use those
+  # strings. Other open options, if your gateway serves them:
+  #   chat   : Qwen3 / Llama 3.x instruct / Mistral / Gemma 3 variants
+  #   embed  : BGE-M3 or multilingual-E5 (both strong for German), Nomic Embed
+  #   vision : Qwen2.5-VL or Gemma 3 vision variants
+  # Note: gpt-oss-120b is OpenAI's *open-weight* release (Apache-2.0), not the
+  # hosted GPT API — the name is confusing, the licence is not.
+  chat_model: gpt-oss-120b
+  # 4096-dim. Changing the embedding model requires a re-ingest (--recreate).
+  embed_model: octen-embedding-8b
   # Empty = the settings-panel model selector fills itself from the gateway's
   # /v1/models (embedding models are filtered out).
   selectable_chat_models: []
@@ -36,13 +40,22 @@ data_sources:
     path: ../../data/documents      # relative to this file -> apps/chainlit/data/documents
     format: pdf
     glob: "*.pdf"
-    # Chunking strategies: fixed_size | heading | passthrough | semantic | docling_hybrid
-    # `semantic` splits at embedding-similarity breakpoints — good for prose, but
-    # it embeds sentences at ingest time (costs extra calls). `heading` is the
-    # cheap default for structured PDFs.
+    # ---- Pick ONE chunking strategy (swap the `strategy:` value) -------------
+    # Available: fixed_size | heading | passthrough | semantic | docling_hybrid
+    #   heading        : one chunk per Docling section, oversized ones are split.
+    #                    Cheap default for structured PDFs; tables are serialized
+    #                    into their section (see include_tables below).
+    #   semantic       : split sections at embedding-similarity breakpoints. Good
+    #                    for prose, but embeds sentences at ingest time (extra
+    #                    calls). Tune with semantic_breakpoint_percentile —
+    #                    lower => more, smaller chunks.
+    #   docling_hybrid : Docling's native token-aware chunker. Serializes tables
+    #                    AND figures itself and sizes chunks by the embedding
+    #                    tokenizer, so chunks never overflow the model.
     chunking:
       strategy: semantic
-      semantic_breakpoint_percentile: 95.0
+      semantic_breakpoint_percentile: 95.0   # for strategy: semantic
+      # hybrid_max_tokens: 512               # for strategy: docling_hybrid
     pdf_options:
       include_tables: true          # serialize tables into their section
 
@@ -61,9 +74,12 @@ tools:
   enabled: [search, list_documents, fetch_document, expand_context, verify_claim]
   descriptions:
     list_documents: "Nenne alle Dokumente in der Wissensbasis (exakter source_file, Titel, Umfang). Nutze dies, um Dokumentnamen aufzulösen oder zu fragen, welche Paper vorhanden sind."
-    fetch_document: "Lade ein komplettes Paper (alle Abschnitte in Reihenfolge) über seinen exakten source_file. Für Zusammenfassungen besser als die Suche. Hole den source_file zuerst über list_documents."
-    expand_context: "Erweitere einen Suchtreffer um seine Nachbarabschnitte (±window um section_index), wenn ein Treffer abgeschnitten wirkt."
+    fetch_document: "Lade ein komplettes Paper (alle Abschnitte in Reihenfolge) über seinen exakten source_file. Für Zusammenfassungen/Überblicke besser als die Suche. Hole den source_file zuerst über list_documents."
+    expand_context: "Erweitere einen Suchtreffer um seine Nachbarabschnitte (±window um section_index im angegebenen Dokument), wenn ein Treffer abgeschnitten wirkt."
     verify_claim: "Prüfe, ob eine geplante Aussage durch die Wissensbasis gestützt wird; liefert Belegstellen und ein supported-Signal."
+  # Both are the schema defaults, spelled out so the limits are visible:
+  fetch_max_chunks: 200           # cap for one fetch_document call
+  expand_window: 1                # neighbours per side for expand_context
 
 # Figure handling (see docs/images.md). `describe` renders every figure at ingest
 # and has the vision model write a searchable description; a figure the answer
@@ -71,15 +87,23 @@ tools:
 #   none     -> figures ignored (cheapest)
 #   describe -> descriptions + inline/thumbnail display
 #   attach   -> additionally feeds figure pixels to a vision chat model
-# Switching none -> describe/attach requires a re-ingest.
+# Re-ingest rule: none -> describe/attach requires one (the figures have to be
+# rendered and described); describe <-> attach does NOT, it only changes what is
+# sent at query time. `attach` additionally needs a vision-capable CHAT model
+# selected in the settings panel.
 images:
   mode: describe
-  vision_model: gpt-4o-mini         # must be vision-capable
+  vision_model: gemma-4-31b         # must be vision-capable
   images_scale: 2.0
-  inline_figures: true              # marked figure appears ABOVE its paragraph
-  show_unmarked_figures: true       # other retrieved figures as thumbnails below
-  max_attach_images: 3
-  vision_capable_models: [gpt-4o-mini, gpt-4o, gemma-4-31b]
+  # How figures are displayed:
+  #   inline_figures        true  = a marked figure appears directly ABOVE its
+  #                                 paragraph (the {{ABB:...}} marker protocol)
+  #   show_unmarked_figures true  = remaining retrieved figures as thumbnails below
+  #                         false = show only figures the answer actually marks
+  inline_figures: true
+  show_unmarked_figures: true
+  max_attach_images: 3              # only used by mode: attach
+  vision_capable_models: [gemma-4-31b]
 
 prompt:
   # No system_prompt_path -> the app generates one at startup from the template
@@ -101,6 +125,8 @@ prompt:
 #     prompt_context: "Antworte knapp und technisch, nenne Messgrößen und Einheiten."
 
 app:
-  # Keyword-based personalization (settings panel). Off keeps the UI minimal.
+  # Keyword-based "personality management": the personalization toggle, keyword
+  # tags and keyword regeneration in the settings panel. false hides all of it
+  # and disables the feature, which keeps the UI minimal.
   personalization_enabled: false
   show_settings: true               # gear panel: model selector + system prompt
