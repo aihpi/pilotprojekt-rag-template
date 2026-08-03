@@ -92,10 +92,13 @@ services:
       RAG_CONFIG: ${RAG_CONFIG:-examples/papers/rag.config.yaml}
       # IMPORTANT: inside Docker network, use service DNS name (not localhost)
       QDRANT_URL: http://qdrant:6333
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-papers}
+      # Pass through ONLY if explicitly set. A default here would win over the
+      # YAML (env beats config by design), silently redirecting every other
+      # RAG_CONFIG into this collection / embedding model.
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-}
       LITELLM_BASE_URL: ${LITELLM_BASE_URL}
       LITELLM_API_KEY: ${LITELLM_API_KEY}
-      EMBED_MODEL: ${EMBED_MODEL:-octen-embedding-8b}
+      EMBED_MODEL: ${EMBED_MODEL:-}
       INGEST_RECREATE: ${INGEST_RECREATE:-false}
       INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-256}
       INGEST_MAX_BATCH_CHARS: ${INGEST_MAX_BATCH_CHARS:-20000}
@@ -129,7 +132,7 @@ services:
         sys.exit(1)
         PY
         if [ "$$INGEST_RECREATE" != "true" ]; then
-          echo "Checking if collection '$$QDRANT_COLLECTION' already exists ...";
+          echo "Checking whether the target collection already exists ...";
           python - <<'PY'
         import json
         import os
@@ -137,7 +140,8 @@ services:
         import urllib.request
 
         base = (os.environ.get("QDRANT_URL") or "http://qdrant:6333").rstrip("/")
-        collection = os.environ.get("QDRANT_COLLECTION") or "documents"
+        from config import load_config
+        collection = os.environ.get("QDRANT_COLLECTION") or load_config().vector_store.collection
         url = f"{base}/collections"
         with urllib.request.urlopen(url, timeout=5) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
