@@ -27,8 +27,8 @@ store) and [Docling](https://github.com/DS4SD/docling) (PDF parsing).
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
 cd pilotprojekt-rag-template/apps/chainlit
 
-cp .env.example .env      # put your gateway URL + API key in .env
-docker compose up -d      # Qdrant + Postgres + ingest + app
+cp .env.example .env            # put your gateway URL + API key in .env
+docker compose up -d --build    # Qdrant + Postgres + ingest + app
 ```
 
 Open <http://localhost:8000> (default login `admin` / `admin` — change it). The
@@ -41,7 +41,7 @@ ingests the three shipped papers with every feature enabled.
 
 ```bash
 cd apps/chainlit
-uv sync                                   # or: pip install -e .
+uv sync                                   # use uv, not pip — see Updating below
 docker run -p 6333:6333 qdrant/qdrant     # vector store
 
 export RAG_CONFIG=examples/papers/rag.config.yaml
@@ -57,6 +57,46 @@ uv run chainlit run app.py                # http://localhost:8000
 > is required anywhere. Your gateway will expose its own names, so ask it
 > (`GET /v1/models`) and put those in the config — there is a commented block
 > listing other open options (Qwen3, Llama 3.x, Mistral, BGE-M3, multilingual-E5).
+
+## Updating to a newer version
+
+Already have it running and want the latest changes? Three lines.
+
+**With Docker (the usual way):**
+
+```bash
+git pull
+cd apps/chainlit
+docker compose up -d --build
+```
+
+The `--build` at the end matters. Without it, Docker starts your **old** app again and
+you will not see any of the changes — with no error to warn you. Rebuilding takes about
+half a minute. (`make up` does the same thing.)
+
+**Without Docker:**
+
+```bash
+git pull
+cd apps/chainlit
+uv sync
+```
+
+Use `uv sync`, not `pip install -e .`. Pip picks different versions of some packages,
+and the app can fail to start.
+
+Then open <http://localhost:8000> and ask a question. Click one of the sources under the
+answer — the PDF should open on the right. That is the quickest way to see it worked.
+
+### Good to know
+
+- **Nothing you added gets deleted.** Your documents, indexed data and chat history all
+  survive an update, so you normally do not need to ingest again.
+- **The first start after an update is slow.** The app re-downloads the models it uses to
+  read PDFs (roughly 500 MB). This is normal and happens once per update.
+- **Old versions take up disk space.** Free it up with `docker image prune`.
+- **Something acting up?** Stop everything and start fresh:
+  `docker compose down && docker compose up -d --build`
 
 ## Use your own documents
 

@@ -8,7 +8,7 @@ help:
 	@echo "  make down          # stop stack"
 	@echo "  make ps            # list compose services"
 	@echo "  make reingest      # force recreate qdrant collection + restart chainlit"
-	@echo "  make local-install # create .venv and install app"
+	@echo "  make local-install # install app into .venv with uv (not pip)"
 	@echo "  make local-run     # run chainlit locally"
 
 init-env:
@@ -30,9 +30,11 @@ reingest:
 	INGEST_RECREATE=true docker compose run --rm ingest
 	docker compose up -d chainlit
 
+# uv, not pip: the CPU-only torch and headless-OpenCV choices live in [tool.uv] in
+# pyproject.toml, which pip ignores. `pip install -e .` pulls the CUDA build and both
+# OpenCV wheels, which breaks `import cv2` on slim/headless machines.
 local-install:
-	python -m venv .venv
-	. .venv/bin/activate && pip install -e .
+	uv sync
 
 local-run:
 	. .venv/bin/activate && chainlit run app.py -w

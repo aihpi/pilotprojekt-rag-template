@@ -27,8 +27,8 @@ Stack: [Chainlit](https://chainlit.io) (Chat-UI), [LiteLLM](https://litellm.ai)
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
 cd pilotprojekt-rag-template/apps/chainlit
 
-cp .env.example .env      # Gateway-URL + API-Key in .env eintragen
-docker compose up -d      # Qdrant + Postgres + Ingest + App
+cp .env.example .env            # Gateway-URL + API-Key in .env eintragen
+docker compose up -d --build    # Qdrant + Postgres + Ingest + App
 ```
 
 <http://localhost:8000> öffnen (Standard-Login `admin` / `admin` — ändern!). Die
@@ -41,7 +41,7 @@ ingestiert die drei mitgelieferten Paper mit allen Features.
 
 ```bash
 cd apps/chainlit
-uv sync                                   # oder: pip install -e .
+uv sync                                   # uv nutzen, nicht pip — siehe „Aktualisieren“
 docker run -p 6333:6333 qdrant/qdrant     # Vektordatenbank
 
 export RAG_CONFIG=examples/papers/rag.config.yaml
@@ -57,6 +57,48 @@ uv run chainlit run app.py                # http://localhost:8000
 > proprietärer Anbieter benötigt. Dein Gateway hat eigene Namen — frag es ab
 > (`GET /v1/models`) und trage diese ein; die Config listet in einem Kommentar
 > weitere offene Optionen (Qwen3, Llama 3.x, Mistral, BGE-M3, multilingual-E5).
+
+## Auf eine neuere Version aktualisieren
+
+Die App läuft schon und du möchtest die neuesten Änderungen? Drei Zeilen.
+
+**Mit Docker (der übliche Weg):**
+
+```bash
+git pull
+cd apps/chainlit
+docker compose up -d --build
+```
+
+Das `--build` am Ende ist wichtig. Ohne `--build` startet Docker wieder deine **alte**
+App und du siehst keine der Änderungen — ohne Fehlermeldung, die dich warnt. Der Neubau
+dauert etwa eine halbe Minute. (`make up` macht dasselbe.)
+
+**Ohne Docker:**
+
+```bash
+git pull
+cd apps/chainlit
+uv sync
+```
+
+Bitte `uv sync` benutzen und nicht `pip install -e .`. Pip installiert bei einigen
+Paketen andere Versionen, und die App startet dann möglicherweise nicht.
+
+Danach <http://localhost:8000> öffnen und eine Frage stellen. Klick auf eine der Quellen
+unter der Antwort — das PDF sollte sich rechts öffnen. So siehst du am schnellsten, dass
+alles funktioniert hat.
+
+### Gut zu wissen
+
+- **Nichts von dir wird gelöscht.** Deine Dokumente, die indexierten Daten und der
+  Chat-Verlauf bleiben beim Aktualisieren erhalten. Du musst normalerweise nicht neu
+  ingesten.
+- **Der erste Start nach dem Update dauert länger.** Die App lädt die Modelle zum Lesen
+  von PDFs erneut herunter (etwa 500 MB). Das ist normal und passiert einmal pro Update.
+- **Alte Versionen belegen Speicherplatz.** Mit `docker image prune` freigeben.
+- **Etwas zickt?** Alles stoppen und neu starten:
+  `docker compose down && docker compose up -d --build`
 
 ## Eigene Dokumente verwenden
 

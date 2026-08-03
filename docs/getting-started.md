@@ -5,7 +5,7 @@
 ```bash
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
 cd pilotprojekt-rag-template/apps/chainlit
-uv sync            # or: pip install -e .
+uv sync            # use uv, not pip: pip installs the wrong package versions
 cp .env.example .env   # fill in LITELLM_* and QDRANT_* secrets
 ```
 

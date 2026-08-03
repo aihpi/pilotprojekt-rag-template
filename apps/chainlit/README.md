@@ -47,7 +47,7 @@ make ps           # service status
 Needs Python 3.12+, a reachable Qdrant, and an OpenAI-compatible LiteLLM endpoint.
 
 ```bash
-uv sync                                  # or: make local-install
+uv sync                                  # or: make local-install (uv, not pip)
 docker run -d --name qdrant -p 6333:6333 -v qdrant_data:/qdrant/storage qdrant/qdrant
 uv run python -m kb.ingest --dry-run     # inspect chunks, no embedding
 uv run python -m kb.ingest               # embed + upsert
