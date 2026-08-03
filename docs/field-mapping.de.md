@@ -21,7 +21,7 @@ erklärt die DSL vollständig, einschließlich des verschachtelten Falls.
 
 ## Flaches JSON / CSV
 
-Der einfachste Fall — ein Chunk pro Datensatz. `record_path` wählt die Liste aus
+Der einfachste Fall: ein Chunk pro Datensatz. `record_path` wählt die Liste aus
 (weglassen, wenn die oberste Ebene bereits eine Liste ist); bei CSV ist jede
 Zeile ein Datensatz.
 
@@ -52,7 +52,7 @@ data_sources:
         author: author.name            # verschachtelter Zugriff
 ```
 
-## Verschachteltes JSON — `record_specs` (vollständiges Beispiel)
+## Verschachteltes JSON mit `record_specs` (vollständiges Beispiel)
 
 Wenn Datensätze mehrere Ebenen tief verschachtelt sind und du auf jedem Blatt den
 **Kontext der Vorfahren** behalten willst, nutze `record_specs`. Jede Spec hat
@@ -106,13 +106,13 @@ field_mapping:
 
 Schritt für Schritt:
 
-1. **`{path: layers, as: layer}`** — die oberste Liste `layers` iterieren; jedes
+1. **`{path: layers, as: layer}`** iteriert die oberste Liste `layers`; jedes
    Element als `layer` binden.
-2. **`{path: modules, as: module}`** — je Layer `layer.modules` iterieren; jedes
+2. **`{path: modules, as: module}`**: je Layer `layer.modules` iterieren; jedes
    Element als `module` binden.
-3. **`{path: requirements, object: true}`** — `requirements` ist ein **dict**,
+3. **`{path: requirements, object: true}`**: `requirements` ist ein **dict**,
    keine Liste, daher steigt `object: true` hinein, ohne zu iterieren.
-4. **`{path: [basic, standard], as: req, bind_key_as: level}`** — *jeden* der
+4. **`{path: [basic, standard], as: req, bind_key_as: level}`** iteriert *jeden* der
    Geschwister-Listenschlüssel iterieren; jedes Element als `req` binden und den
    Schlüssel (`basic`/`standard`) unter `level` festhalten. Ein **fehlender**
    Geschwister-Schlüssel wird übersprungen, nicht als Fehler behandelt (z. B. ein
@@ -130,18 +130,18 @@ Iterate-Step-`path` fehlt oder auf den falschen Typ zeigt, erhältst du den
 vollständigen Pfad, den erwarteten vs. gefundenen Typ und ein Syntaxbeispiel:
 
 ```text
-data source 'reqs': iterate step path 'modules' — expected a list to iterate,
+data source 'reqs': iterate step path 'modules': expected a list to iterate,
 but found dict. 
   Correct syntax, e.g.:  - {path: items, as: item}   (path must point at a list)
 ```
 
 Feldreferenzen in `text_template`/`metadata` sind nachsichtig (fehlt → leer),
-damit optionale Felder die Ingestion nicht abbrechen — validiere sie mit `--dry-run`.
+damit optionale Felder die Ingestion nicht abbrechen. Validiere sie mit `--dry-run`.
 
 ## Der Autoren-Loop
 
 ```bash
 # field_mapping bearbeiten, dann:
 python -m kb.ingest --dry-run --only faq --limit 5
-# ausgegebenen Text + Metadaten prüfen, anpassen, wiederholen — ohne Embedding-Kosten.
+# ausgegebenen Text + Metadaten prüfen, anpassen, wiederholen, ohne Embedding-Kosten.
 ```

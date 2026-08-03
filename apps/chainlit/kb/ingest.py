@@ -19,7 +19,7 @@ from config import CONFIG_PATH_ENV, load_config
 
 
 def _print_dry_run(per_source, chunks, limit: int) -> None:
-    print("DRY RUN — parsed and chunked, nothing embedded or written.\n")
+    print("DRY RUN: parsed and chunked, nothing embedded or written.\n")
     total = 0
     for s in per_source:
         total += s["chunks"]
@@ -47,7 +47,7 @@ def main() -> None:
         "--skip-if-exists",
         action="store_true",
         help="Exit successfully if the collection already exists (ignored with --recreate). "
-        "NOTE: this only checks existence — after changing the config's content or embed "
+        "NOTE: this only checks existence. After changing the config's content or embed "
         "model you must use --recreate (or a new collection).",
     )
     ap.add_argument("--dry-run", action="store_true", help="Parse and chunk only; print samples.")

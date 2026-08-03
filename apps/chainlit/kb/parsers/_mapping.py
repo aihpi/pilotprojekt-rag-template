@@ -38,7 +38,7 @@ def _fail(
     else:
         actual = type(found).__name__
     msg = (
-        f"data source '{source_name}': {where} '{dotted}' — expected {expected}, "
+        f"data source '{source_name}': {where} '{dotted}': expected {expected}, "
         f"but found {actual}."
     )
     if detail:

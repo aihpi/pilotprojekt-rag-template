@@ -8,8 +8,8 @@ however, those clicks are **not** written to the database.
 
 The template therefore adds two pieces:
 
-1. **Persistence** — feedback is written to the PostgreSQL `Feedback` table on click.
-2. **CSV export** — an authenticated HTTP endpoint serves all users' feedback as a CSV download.
+1. **Persistence.** Feedback is written to the PostgreSQL `Feedback` table on click.
+2. **CSV export.** An authenticated HTTP endpoint serves all users' feedback as a CSV download.
 
 ## Files involved
 
@@ -30,13 +30,13 @@ The template therefore adds two pieces:
 
 ## DB schema change
 
-- **Unique index** `Feedback_stepId_unique` on `"Feedback"."stepId"` — prevents duplicate feedback rows per step.
+- **Unique index** `Feedback_stepId_unique` on `"Feedback"."stepId"`, prevents duplicate feedback rows per step.
 - The index is created idempotently via `CREATE UNIQUE INDEX IF NOT EXISTS` on the first call to `upsert_feedback()`.
 
 ## Data-model background
 
 Chainlit attaches feedback to **`run` steps** (the `on_message` wrapper), not to
-`assistant_message` steps. But `run` steps carry no output of their own — the
+`assistant_message` steps. But `run` steps carry no output of their own, so the
 actual answer sits in a **child step** of type `assistant_message` with
 `parentId = run.id`.
 

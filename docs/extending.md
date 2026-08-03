@@ -32,7 +32,7 @@ def parse_my_format(source, config) -> list[Section]:
     return sections
 ```
 
-Import it once so the decorator runs — add it to the import list in
+Import it once so the decorator runs, by adding it to the import list in
 `kb/parsers/__init__.py`. Then use it:
 
 ```yaml
@@ -50,7 +50,7 @@ data_sources:
     be surfaced in citations via `citation.extra_fields`.
 
 The bundled [`kb/parsers/example_custom.py`](https://github.com/aihpi/pilotprojekt-rag-template/blob/main/apps/chainlit/kb/parsers/example_custom.py)
-is a runnable example (a JSON Lines parser, registered as `example_jsonl`) — copy
+is a runnable example (a JSON Lines parser, registered as `example_jsonl`). Copy
 that file to start your own.
 
 ## A custom chunker
@@ -84,5 +84,5 @@ chunking:
   strategy: sentence
 ```
 
-`doc_id` must be **stable and unique** — the pipeline derives each Qdrant point
+`doc_id` must be **stable and unique**: the pipeline derives each Qdrant point
 id from it (UUID5), so a deterministic id keeps re-ingests idempotent.

@@ -6,7 +6,7 @@ Every field below is generated directly from the pydantic models in
 !!! note "Precedence"
     For each value: **explicit environment variable → YAML value → default**.
     Secrets and infrastructure (`LITELLM_API_KEY`, `QDRANT_URL`, …) are left
-    `null` in YAML and supplied via environment variables — see `.env.example`.
+    `null` in YAML and supplied via environment variables. See `.env.example`.
     Relative paths resolve against the **config file's own directory**.
 
 ::: config.schema.RagConfig

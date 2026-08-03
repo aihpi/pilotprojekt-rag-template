@@ -21,7 +21,7 @@ Anywhere a metadata value is expected, you may write:
 
 ## Flat JSON / CSV
 
-The simplest case — one chunk per record. `record_path` selects the list
+The simplest case: one chunk per record. `record_path` selects the list
 (omit it if the top level is already a list); for CSV each row is a record.
 
 ```yaml
@@ -51,7 +51,7 @@ data_sources:
         author: author.name            # nested lookup
 ```
 
-## Nested JSON — `record_specs` (complete walkthrough)
+## Nested JSON with `record_specs` (complete walkthrough)
 
 When records are nested several levels deep and you need to keep **ancestor
 context** on each leaf, use `record_specs`. Each spec has an `iterate` list of
@@ -104,13 +104,13 @@ field_mapping:
 
 Step by step:
 
-1. **`{path: layers, as: layer}`** — iterate the top-level list `layers`; bind
+1. **`{path: layers, as: layer}`** iterates the top-level list `layers`; bind
    each element as `layer`.
-2. **`{path: modules, as: module}`** — for each layer, iterate `layer.modules`;
+2. **`{path: modules, as: module}`**: for each layer, iterate `layer.modules`;
    bind each as `module`.
-3. **`{path: requirements, object: true}`** — `requirements` is a **dict**, not a
+3. **`{path: requirements, object: true}`**: `requirements` is a **dict**, not a
    list, so `object: true` descends into it without iterating.
-4. **`{path: [basic, standard], as: req, bind_key_as: level}`** — iterate *each*
+4. **`{path: [basic, standard], as: req, bind_key_as: level}`** iterates *each*
    of the sibling list keys; bind each element as `req` and record which key
    (`basic`/`standard`) under `level`. A sibling key that is **absent is
    skipped**, not an error (e.g. a module with no `standard` requirements).
@@ -127,18 +127,18 @@ missing or points at the wrong type, you get the full path, the expected vs.
 actual type, and a syntax example:
 
 ```text
-data source 'reqs': iterate step path 'modules' — expected a list to iterate,
+data source 'reqs': iterate step path 'modules': expected a list to iterate,
 but found dict. 
   Correct syntax, e.g.:  - {path: items, as: item}   (path must point at a list)
 ```
 
 Field references inside `text_template`/`metadata` are lenient (missing → empty)
-so optional fields don't break ingestion — validate them with `--dry-run`.
+so optional fields don't break ingestion. Validate them with `--dry-run`.
 
 ## The authoring loop
 
 ```bash
 # edit field_mapping, then:
 python -m kb.ingest --dry-run --only faq --limit 5
-# inspect the printed text + metadata, adjust, repeat — no embeddings spent.
+# inspect the printed text + metadata, adjust, repeat. No embeddings spent.
 ```

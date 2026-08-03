@@ -8,7 +8,7 @@ Englisch.)
 !!! note "Vorrang"
     Für jeden Wert gilt: **explizite Umgebungsvariable → YAML-Wert → Default**.
     Secrets und Infrastruktur (`LITELLM_API_KEY`, `QDRANT_URL`, …) bleiben in der
-    YAML `null` und werden über Umgebungsvariablen gesetzt — siehe `.env.example`.
+    YAML `null` und werden über Umgebungsvariablen gesetzt, siehe `.env.example`.
     Relative Pfade werden relativ zum **Verzeichnis der Konfigurationsdatei** aufgelöst.
 
 ::: config.schema.RagConfig

@@ -9,8 +9,8 @@ gespeichert.
 
 Das Template ergänzt deshalb zwei Bausteine:
 
-1. **Persistierung** — Feedback wird beim Klick in die PostgreSQL-`Feedback`-Tabelle geschrieben.
-2. **CSV-Export** — ein authentifizierter HTTP-Endpoint liefert alle Feedback-Daten aller Nutzer als CSV-Download.
+1. **Persistierung.** Feedback wird beim Klick in die PostgreSQL-`Feedback`-Tabelle geschrieben.
+2. **CSV-Export.** Ein authentifizierter HTTP-Endpoint liefert alle Feedback-Daten aller Nutzer als CSV-Download.
 
 ## Beteiligte Dateien
 
@@ -31,13 +31,13 @@ Das Template ergänzt deshalb zwei Bausteine:
 
 ## DB-Schema-Änderung
 
-- **Unique Index** `Feedback_stepId_unique` auf `"Feedback"."stepId"` — verhindert doppelte Feedback-Einträge pro Step.
+- **Unique Index** `Feedback_stepId_unique` auf `"Feedback"."stepId"`, verhindert doppelte Feedback-Einträge pro Step.
 - Der Index wird beim ersten Aufruf von `upsert_feedback()` idempotent via `CREATE UNIQUE INDEX IF NOT EXISTS` angelegt.
 
 ## Datenmodell-Hintergrund
 
 Chainlit hängt Feedback an **`run`-Steps** (den `on_message`-Wrapper), nicht an
-`assistant_message`-Steps. `run`-Steps haben jedoch keinen eigenen Output — die
+`assistant_message`-Steps. `run`-Steps haben jedoch keinen eigenen Output, daher die
 eigentliche Antwort steckt in einem **Child-Step** vom Typ `assistant_message`
 mit `parentId = run.id`.
 

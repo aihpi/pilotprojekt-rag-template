@@ -35,7 +35,7 @@ def parse_my_format(source, config) -> list[Section]:
     return sections
 ```
 
-Importiere ihn einmal, damit der Decorator läuft — füge ihn der Import-Liste in
+Importiere ihn einmal, damit der Decorator läuft, und füge ihn der Import-Liste in
 `kb/parsers/__init__.py` hinzu. Dann verwenden:
 
 ```yaml
@@ -55,7 +55,7 @@ data_sources:
 
 Das mitgelieferte [`kb/parsers/example_custom.py`](https://github.com/aihpi/pilotprojekt-rag-template/blob/main/apps/chainlit/kb/parsers/example_custom.py)
 ist ein lauffähiges Beispiel (ein JSON-Lines-Parser, registriert als
-`example_jsonl`) — kopiere diese Datei als Ausgangspunkt für deinen eigenen.
+`example_jsonl`). Kopiere diese Datei als Ausgangspunkt für deinen eigenen.
 
 ## Ein eigener Chunker
 
@@ -88,6 +88,6 @@ chunking:
   strategy: sentence
 ```
 
-`doc_id` muss **stabil und eindeutig** sein — die Pipeline leitet daraus jede
+`doc_id` muss **stabil und eindeutig** sein: Die Pipeline leitet daraus jede
 Qdrant-Point-ID ab (UUID5), sodass eine deterministische ID wiederholte Ingests
 idempotent hält.
