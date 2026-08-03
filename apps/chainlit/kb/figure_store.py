@@ -81,11 +81,27 @@ def file_to_data_uri(path: Path, max_px: int | None = None, quality: int = 80) -
     return f"data:image/png;base64,{encoded}"
 
 
-def pil_to_data_uri(pil_image: Any) -> str:
-    """Encode a PIL image directly to a PNG data URI (used at ingest)."""
+def pil_to_data_uri(pil_image: Any, max_px: int | None = None, quality: int = 80) -> str:
+    """Encode a PIL image directly to a data URI (used at ingest).
+
+    Same reasoning as :func:`file_to_data_uri`: with ``max_px`` set, downscale so
+    the longest side ≤ ``max_px`` and re-encode as JPEG, because a full-res PNG
+    figure can exceed the gateway's body-size limit and come back as HTTP 413.
+    The describe step used to send raw PNG and silently lost those figures.
+    Without ``max_px`` the original PNG behaviour is kept."""
     from io import BytesIO
 
     buf = BytesIO()
+    if max_px:
+        # .copy() because thumbnail() resizes in place, and the caller still owns
+        # this image (it persists the full-res PNG from the same object).
+        img = pil_image.copy()
+        img.thumbnail((max_px, max_px))
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        img.save(buf, "JPEG", quality=quality)
+        encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+        return f"data:image/jpeg;base64,{encoded}"
     pil_image.save(buf, "PNG")
     encoded = base64.b64encode(buf.getvalue()).decode("ascii")
     return f"data:image/png;base64,{encoded}"

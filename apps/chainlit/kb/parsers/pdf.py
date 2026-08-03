@@ -449,6 +449,8 @@ def _figure_sections(
     dest = figure_dir(config)
     pdf_name = f"{stem}.pdf"
     out: list[Section] = []
+    failed = 0
+    skipped = 0
     for fig_idx, picture in enumerate(pictures):
         try:
             pil = picture.get_image(document)
@@ -472,14 +474,24 @@ def _figure_sections(
             continue
         try:
             description = describe_image_sync(
-                pil_to_data_uri(pil), images.describe_prompt, images.vision_model
+                pil_to_data_uri(pil, max_px=images.describe_image_max_px),
+                images.describe_prompt,
+                images.vision_model,
             )
         except Exception as exc:  # noqa: BLE001
             print(f"[ingest] figure description failed for {pdf_name} fig{fig_idx}: {exc}")
             description = ""
-        text = _figure_chunk_text(caption, description, fig_idx, page)
-        if not text:
+        if not description.strip():
+            failed += 1
+        # Judge on content, not on `text`: _figure_chunk_text always prepends
+        # "Abbildung N (Seite X)", so `text` is never empty and the old `if not
+        # text` guard never fired. That is how failed descriptions ended up stored
+        # as retrievable chunks carrying nothing but their own number. A caption is
+        # still worth indexing on its own; a bare number is not.
+        if not description.strip() and not caption:
+            skipped += 1
             continue
+        text = _figure_chunk_text(caption, description, fig_idx, page)
         label = caption[:80] or f"Abbildung {fig_idx + 1}"
         out.append(
             Section(
@@ -499,6 +511,14 @@ def _figure_sections(
                     "image_path": image_path,
                 },
             )
+        )
+    if failed:
+        # One line per document, because the per-figure prints above scroll past
+        # unnoticed in a long ingest and this is the number that tells you whether
+        # to re-run.
+        print(
+            f"[ingest] {pdf_name}: {failed} of {len(pictures)} figure descriptions "
+            f"failed ({skipped} figure(s) skipped, no caption to fall back on)"
         )
     return out
 

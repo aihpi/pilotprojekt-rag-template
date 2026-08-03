@@ -6,6 +6,12 @@ import litellm
 
 from settings import CHAT_MODEL, EMBED_MODEL, LITELLM_API_KEY, LITELLM_BASE_URL
 
+# Figure descriptions run once per figure during a batch ingest, where a transient
+# gateway error (typically a rate limit) used to be swallowed and the figure stored
+# with an empty description forever. Retrying is always the right answer here, so
+# this is a constant rather than a config knob. litellm handles the backoff.
+_DESCRIBE_RETRIES = 3
+
 
 def _client_args(model: str | None = None) -> dict[str, Any]:
     args: dict[str, Any] = {}
@@ -127,6 +133,7 @@ def describe_image_sync(image_data_uri: str, prompt: str, model: str) -> str:
                 ],
             }
         ],
+        num_retries=_DESCRIBE_RETRIES,
         **_client_args(model),
     )
     return (response.choices[0].message.content or "").strip()

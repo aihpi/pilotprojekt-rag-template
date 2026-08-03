@@ -369,6 +369,12 @@ class ImagesConfig(BaseModel):
     """``attach`` only: downscale each figure so its longest side ≤ this (JPEG)
     before sending to the vision model (keeps the request under the gateway size
     limit)."""
+    describe_image_max_px: int = Field(default=1536, ge=64)
+    """Ingest only: same treatment for the ``describe`` call, which used to send
+    raw full-res PNG and lost oversized figures to HTTP 413. Larger than
+    ``attach_image_max_px`` on purpose: describing a dense chart benefits from
+    detail the answer-time path does not need, and most of the size reduction
+    comes from JPEG rather than from downscaling."""
     figure_store_dir: str | None = None
     """Where figure PNGs are saved. ``None`` → ``<sources.data_dir>/figures``."""
     vision_capable_models: list[str] = Field(default_factory=lambda: ["gemma-4-31b"])
