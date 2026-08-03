@@ -14,6 +14,13 @@ dependencies = [
     "bcrypt>=4.1.0",
     "pydantic>=2.7",
     "pyyaml>=6.0",
+    # Transitive via docling, but declared directly so [tool.uv.sources] below can pin
+    # them to the CPU wheel index — uv only honours sources for direct dependencies.
+    # Ranges mirror docling's own (torch<3,>=2.2.2 / torchvision<1,>=0).
+    "torch>=2.2.2,<3",
+    "torchvision<1",
+    # Stands in for rapidocr's opencv-python (see the override in [tool.uv] below).
+    "opencv-python-headless>=4.5.1.48",
 ]
 
 [dependency-groups]
@@ -24,6 +31,33 @@ dev = [
     "mkdocstrings[python]>=0.25",
     "mkdocs-static-i18n>=1.2",
 ]
+
+# NOTE: both blocks below are uv-only. `pip install -e .` ignores them and installs the
+# CUDA torch plus BOTH OpenCV wheels — which reintroduces the `import cv2` crash. Always
+# install with `uv sync`.
+
+# docling -> rapidocr hard-requires opencv-python, the GUI build, which dlopens
+# libxcb/libGL at `import cv2` and dies on slim images. The headless wheel provides the
+# same cv2 module with no X11 linkage. uv cannot rename a dependency, so a never-true
+# marker drops rapidocr's requirement and the headless wheel declared in
+# [project.dependencies] stands in — nothing has to be uninstalled after install.
+[tool.uv]
+override-dependencies = ["opencv-python; sys_platform == 'nonexistent'"]
+
+# torch's default PyPI wheel bundles a CUDA runtime (~4.4 GB of nvidia-*/triton) that the
+# container can never use: Docker Desktop exposes no CUDA device, and docling's
+# layout/table models run fine on CPU. Resolving from the CPU index keeps that out of the
+# lockfile, so Docker, CI and local dev all agree without a post-install swap.
+# Linux only — macOS wheels on PyPI are already CPU/MPS and this index has no darwin build.
+# On a CUDA host, drop these two blocks and re-run `uv lock` to get GPU acceleration back.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

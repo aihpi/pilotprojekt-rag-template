@@ -2,31 +2,45 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
+
+# The venv lives OUTSIDE /app on purpose: docker-compose bind-mounts the repo over /app
+# at runtime, which would shadow a /app/.venv — and the developer's committed .venv is
+# macOS-native, so the container would end up importing incompatible binaries.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+# Hardlinking across the build filesystem is unreliable; copy instead. No cache layer,
+# so the uv download cache does not end up baked into the image.
+ENV UV_LINK_MODE=copy
+ENV UV_NO_CACHE=1
 
 WORKDIR /app
 
-# Dependencies first → cached unless pyproject.toml changes
-COPY pyproject.toml /app/
-# torch defaults to the CUDA build, dragging in ~4.4 GB of nvidia-*/triton
-# wheels that nothing here can use (Docker Desktop exposes no CUDA device, and
-# docling's layout/table models run fine on CPU). Installing the CPU wheel first
-# leaves torch already satisfied, so the resolve below never reaches for the GPU
-# stack. On a CUDA host, drop this line to get GPU-accelerated docling.
-#
-# docling → rapidocr hard-requires opencv-python, the GUI build, which dlopens
-# libxcb/libGL at `import cv2` and dies on slim images. Same cv2 module, no X11
-# linkage → swap in the headless wheel rather than apt-installing a GUI stack
-# this app never renders with. `pip check` flags rapidocr's now-unmet
-# opencv-python pin; that is expected, cv2 still imports.
-RUN pip install --upgrade pip \
-    && pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision \
-    && pip install -e . \
-    && pip uninstall -y opencv-python \
-    && pip install opencv-python-headless
+COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
 
-# App code + static assets last → fast rebuilds on CSS/JS changes
+# A LOGIN shell re-sources /etc/profile, which resets PATH and would drop /opt/venv/bin —
+# leaving `python` as the dependency-free system interpreter. The ingest service in
+# docker-compose.yml runs `sh -lc`, so without this its `python -m kb.ingest` would die on
+# ModuleNotFoundError. Cover login shells as well as the ENV PATH above.
+RUN printf 'export PATH=/opt/venv/bin:$PATH\n' > /etc/profile.d/10-venv.sh
+
+# Install from uv.lock so Docker, CI and local dev resolve identically. Resolving freely
+# here is what let FastAPI drift past 0.136 — silently shadowing every custom route
+# behind Chainlit's SPA catch-all — and let docling pull a GUI OpenCV that crashed on
+# `import cv2`. --frozen fails loudly if pyproject.toml and uv.lock ever drift apart.
+#
+# The lockfile also carries the two build-shaping decisions, so nothing is installed and
+# then thrown away here: torch/torchvision resolve from the CPU wheel index (no ~4.4 GB
+# of unusable nvidia-*/triton), and opencv-python-headless stands in for rapidocr's GUI
+# opencv-python. See the [tool.uv] blocks in pyproject.toml.
+#
+# Dependencies first, without the project itself → cached unless the manifests change.
+COPY pyproject.toml uv.lock /app/
+RUN uv sync --frozen --no-dev --no-install-project
+
+# App code + static assets last → fast rebuilds on CSS/JS changes. The second sync only
+# installs the project itself, which is cheap.
 COPY . /app
+RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
 
