@@ -1,125 +1,115 @@
 # Getting Started
 
-This page walks you from an empty folder to a running assistant that answers
-questions about your own documents. Copy each command into a terminal in the
-order shown.
+From nothing to a working assistant that answers questions about your own
+documents. Copy each block into a terminal in the order shown.
 
-## 1. Clone and install
+You need [Docker](https://docs.docker.com/get-docker/) and access to an AI
+service (its address and an access key).
+
+## 1. Get it running
 
 ```bash
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
 cd pilotprojekt-rag-template/apps/chainlit
-uv sync            # use uv, not pip: pip installs the wrong package versions
-cp .env.example .env   # fill in LITELLM_* and QDRANT_* secrets
+cp .env.example .env
 ```
 
-The last line creates a file called `.env`. Open it and enter the address and
-access key of your AI service. Nothing works until those are filled in.
-
-## 2. Copy the minimal config
-
-The settings file decides everything: which documents to read, which AI models to
-use, how answers are put together. Start from the smallest working example and
-change it:
+Open the new `.env` file and fill in the address and key of your AI service.
+Nothing works until those two are set. Then start everything:
 
 ```bash
-cp examples/minimal/rag.config.yaml my-rag.yaml
+docker compose up -d --build
 ```
+
+The first start takes a few minutes: it downloads the parts, reads the three
+example papers, and starts the chat window. Watch it work with
+`docker compose logs -f chainlit`.
+
+Then open <http://localhost:8000> and log in with `admin` / `admin`. Ask a
+question about the example papers and click a source under the answer. If the PDF
+opens, everything works.
+
+## 2. Use your own documents
+
+Put your PDFs into `data/documents/`, then make your own settings file so the
+example stays intact:
+
+```bash
+cp examples/papers/rag.config.yaml my-rag.yaml
+```
+
+Open `my-rag.yaml` and change three things:
 
 ```yaml
-name: minimal-rag
-
 models:
-  chat_model: gpt-oss-120b
-  embed_model: octen-embedding-8b
+  chat_model: gpt-oss-120b        # a model your AI service offers
+  embed_model: octen-embedding-8b # a search model your AI service offers
 
 vector_store:
-  collection: my_docs
-
-data_sources:
-  - name: docs
-    path: ./data
-    format: pdf
-    glob: "*.pdf"
+  collection: my_docs             # any new name you invent
 ```
 
-Three things to adjust:
+- The two **models** must be names your service actually offers. If you are not
+  sure, ask it for its list.
+- The **collection** is a name you make up. It keeps your documents separate from
+  the examples. Always pick a new one, otherwise the two get mixed together.
 
-- `data_sources[].path` is the folder your documents are in.
-- `collection` is a name you invent. It keeps this set of documents separate
-  from any other.
-- The two models must be names your AI service actually offers. If unsure, ask
-  it for its list.
+Finally, tell the app to use your file instead of the example, by setting
+`RAG_CONFIG=my-rag.yaml` in `.env`.
 
 Every available setting is listed in the
 [Configuration Reference](configuration.md).
 
-Now tell the app to use your file. This has to be repeated in every new terminal
-window:
+## 3. Read your documents in
 
 ```bash
+docker compose run --rm ingest python -m kb.ingest --recreate
+```
+
+This reads every document and stores it so it can be searched. Depending on how
+many you have, it takes anywhere from a minute to much longer.
+
+Use this same command whenever you add, remove or edit documents. Without it the
+assistant keeps answering from the old set, and nothing warns you.
+
+!!! warning "Describing pictures costs money"
+    With `images.mode: describe` (the default in the example), every picture is
+    sent to an AI model once to be described. On a large collection that adds up.
+    Set `images.mode: none` if you do not need pictures to be searchable.
+
+## 4. Restart and try it
+
+```bash
+docker compose up -d
+```
+
+Use `up -d`, not `restart`. A restart reuses the old settings, so your change to
+`RAG_CONFIG` in step 2 would be ignored and the assistant would keep answering
+from the example papers.
+
+Open <http://localhost:8000> again and ask something only your documents can
+answer. If you get a sensible answer with a working source link, you are done.
+
+If the assistant says it cannot find anything, the most likely cause is that step
+3 read in nothing. Check that your PDFs really are in `data/documents/` and that
+`RAG_CONFIG` points at your file.
+
+## Without Docker
+
+Only needed if you cannot use Docker, or if you are developing on the app itself.
+You need Python 3.12 or newer and a running Qdrant.
+
+```bash
+cd apps/chainlit
+uv sync                                   # use uv, not pip
+docker run -p 6333:6333 qdrant/qdrant     # storage for the searchable text
+
 export RAG_CONFIG=my-rag.yaml
+uv run python -m kb.ingest --recreate     # read the documents in
+uv run chainlit run app.py                # http://localhost:8000
 ```
 
-## 3. Validate parsing with `--dry-run`
-
-Before spending time and money on the real run, do a practice run. It reads your
-documents and shows how they will be cut up, but **saves nothing and costs
-nothing**:
-
-```bash
-python -m kb.ingest --dry-run --limit 5
-```
-
-```text
-DRY RUN: parsed and chunked, nothing embedded or written.
-
-  source 'docs' [pdf / fixed_size]: 12 sections -> 40 chunks
-
-  TOTAL: 40 chunks across 1 source(s)
-  ...
-```
-
-If the number of pieces is 0, the app found no documents. Check the `path` and
-`glob` lines in your settings file. This practice run is the fastest way to get a
-config right, especially for JSON/CSV files
-([field-mapping](field-mapping.md)).
-
-## 4. Ingest
-
-Now do it for real. The app reads every document and stores it so it can be
-searched. Depending on how many documents you have, this can take a while:
-
-```bash
-python -m kb.ingest              # embeds + upserts into the configured collection
-python -m kb.ingest --recreate   # rebuild the collection from scratch
-python -m kb.ingest --only docs  # ingest specific sources
-```
-
-Use the first line the first time. Use `--recreate` whenever you have changed
-your documents or your settings and want to start clean.
-
-!!! warning "`--skip-if-exists` vs. the embed-model sentinel"
-    `--skip-if-exists` **only checks whether the collection exists**. It does
-    not notice that you changed anything. So if you edit your documents or
-    settings, that option will skip the work and you will keep getting old
-    answers.
-
-    There is one thing the app does catch: on the first run it notes down which
-    model made your text searchable. If you later switch to a different one, it
-    refuses rather than mixing incompatible data. Use **`--recreate`**, or give
-    `vector_store.collection` a new name.
-
-## 5. Run the app
-
-```bash
-chainlit run app.py -w
-# or the whole stack (Qdrant + Postgres + auto-ingest + app):
-make up
-```
-
-Then open <http://localhost:8000> and ask a question. Under each answer you will
-see its sources. Click one and the original document opens at the right page.
+The `export` line has to be repeated in every new terminal window.
 
 ## Docs locally
 

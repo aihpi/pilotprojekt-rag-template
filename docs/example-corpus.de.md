@@ -68,14 +68,14 @@ davon sichtbar machen.
         - "Welche Dokumente sind in der Wissensbasis?"
     ```
 
-3. **Erst der Probelauf, dann der echte.** Der Probelauf zeigt, wie deine
-   Dokumente zerteilt werden, ohne etwas zu speichern und ohne Kosten. So fallen
-   Probleme früh auf.
+3. **Dokumente einlesen.**
 
     ```bash
-    RAG_CONFIG=my-rag.yaml python -m kb.ingest --dry-run
-    RAG_CONFIG=my-rag.yaml python -m kb.ingest             # oder --recreate
+    RAG_CONFIG=my-rag.yaml python -m kb.ingest --recreate
     ```
+
+    Führe das erneut aus, wann immer du Dokumente hinzufügst, entfernst oder
+    änderst.
 
 Danach die App wie gewohnt starten. Andere Dateiformate und Arten, Text zu
 zerteilen, stehen in [Daten hinzufügen](adding-data.md), den vollständigen

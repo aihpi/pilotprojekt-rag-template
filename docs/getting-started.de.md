@@ -1,128 +1,119 @@
 # Erste Schritte
 
-Diese Seite führt dich von einem leeren Ordner zu einem laufenden Assistenten,
-der Fragen zu deinen eigenen Dokumenten beantwortet. Kopiere die Befehle der
-Reihe nach in ein Terminal.
+Von null zu einem laufenden Assistenten, der Fragen zu deinen eigenen Dokumenten
+beantwortet. Kopiere die Blöcke der Reihe nach in ein Terminal.
 
-## 1. Klonen und installieren
+Du brauchst [Docker](https://docs.docker.com/get-docker/) und Zugang zu einem
+KI-Dienst (dessen Adresse und einen Zugangsschlüssel).
+
+## 1. Zum Laufen bringen
 
 ```bash
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
 cd pilotprojekt-rag-template/apps/chainlit
-uv sync            # uv nutzen, nicht pip: pip installiert falsche Paketversionen
-cp .env.example .env   # LITELLM_*- und QDRANT_*-Secrets eintragen
+cp .env.example .env
 ```
 
-Die letzte Zeile legt eine Datei namens `.env` an. Öffne sie und trage Adresse
-und Zugangsschlüssel deines KI-Dienstes ein. Ohne diese Angaben funktioniert
-nichts.
-
-## 2. Minimal-Konfiguration kopieren
-
-Die Einstellungsdatei entscheidet über alles: welche Dokumente gelesen werden,
-welche KI-Modelle zum Einsatz kommen, wie Antworten aufgebaut sind. Beginne mit
-dem kleinsten funktionierenden Beispiel und passe es an:
+Öffne die neue Datei `.env` und trage Adresse und Schlüssel deines KI-Dienstes
+ein. Ohne diese beiden Angaben funktioniert nichts. Dann alles starten:
 
 ```bash
-cp examples/minimal/rag.config.yaml my-rag.yaml
+docker compose up -d --build
 ```
+
+Der erste Start dauert ein paar Minuten: Die Bestandteile werden heruntergeladen,
+die drei Beispiel-Paper eingelesen und das Chat-Fenster gestartet. Zuschauen
+kannst du mit `docker compose logs -f chainlit`.
+
+Danach <http://localhost:8000> öffnen und mit `admin` / `admin` anmelden. Stell
+eine Frage zu den Beispiel-Papern und klick auf eine Quelle unter der Antwort.
+Wenn sich das PDF öffnet, läuft alles.
+
+## 2. Eigene Dokumente verwenden
+
+Lege deine PDFs in `data/documents/` und erstelle dann eine eigene
+Einstellungsdatei, damit das Beispiel unangetastet bleibt:
+
+```bash
+cp examples/papers/rag.config.yaml my-rag.yaml
+```
+
+Öffne `my-rag.yaml` und ändere drei Dinge:
 
 ```yaml
-name: minimal-rag
-
 models:
-  chat_model: gpt-oss-120b
-  embed_model: octen-embedding-8b
+  chat_model: gpt-oss-120b        # ein Modell, das dein KI-Dienst anbietet
+  embed_model: octen-embedding-8b # ein Suchmodell deines KI-Dienstes
 
 vector_store:
-  collection: my_docs
-
-data_sources:
-  - name: docs
-    path: ./data
-    format: pdf
-    glob: "*.pdf"
+  collection: my_docs             # ein neuer Name, den du dir ausdenkst
 ```
 
-Drei Dinge musst du anpassen:
+- Die beiden **Modelle** müssen Namen sein, die dein Dienst wirklich anbietet.
+  Wenn du unsicher bist, frag dort die Liste ab.
+- Die **collection** ist ein selbst ausgedachter Name. Er hält deine Dokumente
+  von den Beispielen getrennt. Nimm immer einen neuen, sonst vermischen sich
+  beide.
 
-- `data_sources[].path` ist der Ordner, in dem deine Dokumente liegen.
-- `collection` ist ein Name, den du dir ausdenkst. Er hält diesen Satz Dokumente
-  von allen anderen getrennt.
-- Die beiden Modelle müssen Namen sein, die dein KI-Dienst tatsächlich anbietet.
-  Im Zweifel dort die Liste erfragen.
+Zum Schluss sagst du der App, dass sie deine Datei statt des Beispiels nutzen
+soll: Setze dafür `RAG_CONFIG=my-rag.yaml` in `.env`.
 
 Alle verfügbaren Einstellungen stehen in der
 [Konfigurationsreferenz](configuration.md).
 
-Jetzt sagst du der App, welche Datei sie nutzen soll. Das musst du in jedem neuen
-Terminal-Fenster wiederholen:
+## 3. Dokumente einlesen
 
 ```bash
+docker compose run --rm ingest python -m kb.ingest --recreate
+```
+
+Damit wird jedes Dokument gelesen und durchsuchbar gespeichert. Je nach Menge
+dauert das von einer Minute bis deutlich länger.
+
+Denselben Befehl brauchst du immer dann, wenn du Dokumente hinzufügst, entfernst
+oder änderst. Ohne ihn antwortet der Assistent weiter aus dem alten Bestand, ohne
+dass dich etwas warnt.
+
+!!! warning "Bilder beschreiben kostet Geld"
+    Mit `images.mode: describe` (Standard im Beispiel) wird jedes Bild einmal an
+    ein KI-Modell geschickt, um beschrieben zu werden. Bei vielen Dokumenten
+    summiert sich das. Setze `images.mode: none`, wenn Bilder nicht durchsuchbar
+    sein müssen.
+
+## 4. Neu starten und ausprobieren
+
+```bash
+docker compose up -d
+```
+
+Nimm `up -d`, nicht `restart`. Ein Neustart verwendet die alten Einstellungen
+weiter, deine Änderung an `RAG_CONFIG` aus Schritt 2 würde also ignoriert und der
+Assistent würde weiter aus den Beispiel-Papern antworten.
+
+Öffne <http://localhost:8000> erneut und frag etwas, das nur deine Dokumente
+beantworten können. Wenn eine sinnvolle Antwort mit funktionierendem
+Quellen-Link kommt, bist du fertig.
+
+Sagt der Assistent, er finde nichts, wurde in Schritt 3 vermutlich nichts
+eingelesen. Prüfe, ob deine PDFs wirklich in `data/documents/` liegen und ob
+`RAG_CONFIG` auf deine Datei zeigt.
+
+## Ohne Docker
+
+Nur nötig, wenn du Docker nicht nutzen kannst oder an der App selbst
+entwickelst. Du brauchst Python 3.12 oder neuer und ein laufendes Qdrant.
+
+```bash
+cd apps/chainlit
+uv sync                                   # uv nutzen, nicht pip
+docker run -p 6333:6333 qdrant/qdrant     # Speicher für den durchsuchbaren Text
+
 export RAG_CONFIG=my-rag.yaml
+uv run python -m kb.ingest --recreate     # Dokumente einlesen
+uv run chainlit run app.py                # http://localhost:8000
 ```
 
-## 3. Parsing mit `--dry-run` prüfen
-
-Bevor du Zeit und Geld in den echten Durchlauf steckst, mach einen Probelauf. Er
-liest deine Dokumente und zeigt, wie sie zerteilt werden, **speichert aber nichts
-und kostet nichts**:
-
-```bash
-python -m kb.ingest --dry-run --limit 5
-```
-
-```text
-DRY RUN: parsed and chunked, nothing embedded or written.
-
-  source 'docs' [pdf / fixed_size]: 12 sections -> 40 chunks
-
-  TOTAL: 40 chunks across 1 source(s)
-  ...
-```
-
-Steht dort 0 Stücke, hat die App keine Dokumente gefunden. Prüfe dann `path` und
-`glob` in deiner Einstellungsdatei. Dieser Probelauf ist der schnellste Weg zu
-einer richtigen Konfiguration, besonders bei JSON/CSV-Dateien
-([Field-Mapping](field-mapping.md)).
-
-## 4. Ingestion
-
-Jetzt der echte Durchlauf. Die App liest jedes Dokument und speichert es
-durchsuchbar ab. Je nach Menge dauert das eine Weile:
-
-```bash
-python -m kb.ingest              # embedded + upsertet in die konfigurierte Collection
-python -m kb.ingest --recreate   # Collection komplett neu aufbauen
-python -m kb.ingest --only docs  # nur bestimmte Quellen ingesten
-```
-
-Beim ersten Mal nimmst du die erste Zeile. `--recreate` nutzt du immer dann, wenn
-du Dokumente oder Einstellungen geändert hast und sauber neu anfangen willst.
-
-!!! warning "`--skip-if-exists` vs. der Embedding-Modell-Wächter"
-    `--skip-if-exists` **prüft nur, ob die Collection existiert**. Es merkt
-    nicht, dass du etwas geändert hast. Wenn du also Dokumente oder Einstellungen
-    bearbeitest, überspringt diese Option die Arbeit und du bekommst weiterhin
-    alte Antworten.
-
-    Eines fängt die App aber ab: Beim ersten Durchlauf merkt sie sich, welches
-    Modell deinen Text durchsuchbar gemacht hat. Wechselst du später auf ein
-    anderes, verweigert sie den Dienst, statt unverträgliche Daten zu mischen.
-    Nimm dann **`--recreate`** oder gib `vector_store.collection` einen neuen
-    Namen.
-
-## 5. App starten
-
-```bash
-chainlit run app.py -w
-# oder der gesamte Stack (Qdrant + Postgres + Auto-Ingest + App):
-make up
-```
-
-Danach <http://localhost:8000> öffnen und eine Frage stellen. Unter jeder Antwort
-stehen die Quellen. Ein Klick öffnet das Originaldokument auf der richtigen
-Seite.
+Die `export`-Zeile musst du in jedem neuen Terminal-Fenster wiederholen.
 
 ## Doku lokal
 

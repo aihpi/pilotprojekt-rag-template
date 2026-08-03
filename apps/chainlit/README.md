@@ -53,7 +53,6 @@ You need Python 3.12 or newer, a running Qdrant, and access to an AI service.
 ```bash
 uv sync                                  # or: make local-install (uv, not pip)
 docker run -d --name qdrant -p 6333:6333 -v qdrant_data:/qdrant/storage qdrant/qdrant
-uv run python -m kb.ingest --dry-run     # inspect chunks, no embedding
 uv run python -m kb.ingest               # embed + upsert
 uv run chainlit run app.py -w            # add --port 8001 if 8000 is taken
 ```

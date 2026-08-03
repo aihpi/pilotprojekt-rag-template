@@ -66,8 +66,7 @@ uv sync                                   # uv nutzen, nicht pip (siehe „Aktua
 docker run -p 6333:6333 qdrant/qdrant     # Speicher für den durchsuchbaren Text
 
 export RAG_CONFIG=examples/papers/rag.config.yaml
-uv run python -m kb.ingest --dry-run      # nur Vorschau, ändert nichts
-uv run python -m kb.ingest                # Dokumente wirklich einlesen
+uv run python -m kb.ingest                # Dokumente einlesen
 uv run chainlit run app.py                # http://localhost:8000
 ```
 </details>

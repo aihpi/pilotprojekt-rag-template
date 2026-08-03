@@ -67,14 +67,13 @@ that.
         - "Which documents are in the knowledge base?"
     ```
 
-3. **Do a practice run, then the real one.** The practice run shows how your
-   documents will be cut up without storing anything and without costing
-   anything, so you can spot problems early.
+3. **Read your documents in.**
 
     ```bash
-    RAG_CONFIG=my-rag.yaml python -m kb.ingest --dry-run
-    RAG_CONFIG=my-rag.yaml python -m kb.ingest             # or --recreate
+    RAG_CONFIG=my-rag.yaml python -m kb.ingest --recreate
     ```
+
+    Run this again whenever you add, remove or edit documents.
 
 Then start the app as usual. Other file types and ways of splitting text are
 covered in [Adding your data](adding-data.md), and the full first-run walkthrough

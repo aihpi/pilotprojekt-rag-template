@@ -146,15 +146,12 @@ besser durchsuchen lassen als ganze Dokumente. Dafür gibt es mehrere Wege:
 Setze unter `chunking:` einen Standard für alles und überschreibe ihn für einen
 einzelnen Satz Dokumente mit einem `chunking:`-Block in dessen Eintrag.
 
-## 4. Dry-Run, dann Ingestion
-
-Mach immer zuerst den Probelauf. Er zeigt, was gespeichert würde, ohne etwas zu
-speichern und ohne Kosten:
+## 4. Dokumente einlesen
 
 ```bash
 export RAG_CONFIG=my-rag.yaml
-python -m kb.ingest --dry-run --only faq   # Text + Metadaten prüfen, kein Embedding
 python -m kb.ingest                         # embedden + in die Collection upserten
+python -m kb.ingest --only faq              # nur ein Satz Dokumente
 ```
 
 !!! warning "Erneute Ingestion nach Änderungen"

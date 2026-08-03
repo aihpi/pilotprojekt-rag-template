@@ -142,15 +142,12 @@ better on small pieces than on whole documents. There are several ways to cut:
 Set one default under `chunking:` for everything, and override it for a single
 set of documents with a `chunking:` block inside that entry.
 
-## 4. Dry-run, then ingest
-
-Always do the practice run first. It shows what would be stored, without storing
-anything and without costing anything:
+## 4. Read the documents in
 
 ```bash
 export RAG_CONFIG=my-rag.yaml
-python -m kb.ingest --dry-run --only faq   # inspect text + metadata, no embedding
 python -m kb.ingest                         # embed + upsert into the collection
+python -m kb.ingest --only faq              # just one set of documents
 ```
 
 !!! warning "Re-ingesting after changes"

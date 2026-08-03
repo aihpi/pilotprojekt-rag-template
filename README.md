@@ -64,8 +64,7 @@ uv sync                                   # use uv, not pip (see Updating below)
 docker run -p 6333:6333 qdrant/qdrant     # storage for the searchable text
 
 export RAG_CONFIG=examples/papers/rag.config.yaml
-uv run python -m kb.ingest --dry-run      # preview only, changes nothing
-uv run python -m kb.ingest                # actually read the documents in
+uv run python -m kb.ingest                # read the documents in
 uv run chainlit run app.py                # http://localhost:8000
 ```
 </details>
