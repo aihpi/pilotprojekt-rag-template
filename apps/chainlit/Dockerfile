@@ -8,8 +8,15 @@ WORKDIR /app
 
 # Dependencies first → cached unless pyproject.toml changes
 COPY pyproject.toml /app/
+# docling → rapidocr hard-requires opencv-python, the GUI build, which dlopens
+# libxcb/libGL at `import cv2` and dies on slim images. Same cv2 module, no X11
+# linkage → swap in the headless wheel rather than apt-installing a GUI stack
+# this app never renders with. `pip check` flags rapidocr's now-unmet
+# opencv-python pin; that is expected, cv2 still imports.
 RUN pip install --upgrade pip \
-    && pip install -e .
+    && pip install -e . \
+    && pip uninstall -y opencv-python \
+    && pip install opencv-python-headless
 
 # App code + static assets last → fast rebuilds on CSS/JS changes
 COPY . /app
