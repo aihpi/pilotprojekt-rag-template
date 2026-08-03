@@ -1,7 +1,7 @@
 """Tests that custom routes are not swallowed by an SPA catch-all.
 
 Chainlit registers ``@router.get("/{full_path:path}")`` to serve its frontend. Because
-Starlette matches in list order, any route added after it is unreachable — which silently
+Starlette matches in list order, any route added after it is unreachable, which silently
 broke ``/sources/pdf/*``, ``/sources/figure/*``, ``/sources/citations/*`` and both
 ``/export/*`` endpoints when FastAPI changed how ``include_router`` stores routes.
 
@@ -11,10 +11,20 @@ FastAPI changes that layout again instead of passing against an assumption.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI
-from fastapi.testclient import TestClient
+import os
 
-import app as chainlit_app
+# Importing app.py registers a Chainlit oauth_callback unconditionally, and Chainlit
+# refuses that unless at least one OAuth provider is configured. A developer's .env
+# supplies placeholders, so this passed locally and only broke in CI, which has no
+# .env. config/loader.py calls load_dotenv(override=False), so values set here win
+# in both places. Must run before `import app`.
+os.environ.setdefault("OAUTH_GITHUB_CLIENT_ID", "test-client-id")
+os.environ.setdefault("OAUTH_GITHUB_CLIENT_SECRET", "test-client-secret")
+
+from fastapi import APIRouter, FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+import app as chainlit_app  # noqa: E402
 
 CATCH_ALL = "/{full_path:path}"
 GUARDED = "/sources/pdf/{file_name:path}"
