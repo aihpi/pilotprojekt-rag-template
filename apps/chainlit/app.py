@@ -197,27 +197,74 @@ def _cache_citation_panel_content(step_id: str, panel_content: str, *, max_items
         CITATION_PANEL_CACHE.pop(oldest_key, None)
 
 
+_CATCH_ALL_SUFFIX = "/{full_path:path}"
+
+
+def _contains_catch_all(route: Any, _depth: int = 0, _seen: set[int] | None = None) -> bool:
+    """True if ``route`` IS Chainlit's SPA catch-all, or nests it.
+
+    FastAPI up to ~0.136 flattened ``include_router`` into ``app.router.routes``, so the
+    catch-all was findable by path. Newer versions insert a single opaque
+    ``_IncludedRouter`` whose children hang off ``original_router.routes`` — so matching
+    on path alone silently stops finding it. That regression is what shadowed every
+    custom GET route (citations, figures, exports) behind the SPA. Handle both layouts."""
+    path = getattr(route, "path", None)
+    if isinstance(path, str) and path.endswith(_CATCH_ALL_SUFFIX):
+        return True
+    if _depth >= 5:
+        return False
+    seen = _seen if _seen is not None else set()
+    if id(route) in seen:
+        return False
+    seen.add(id(route))
+    for holder in (getattr(route, "original_router", None), getattr(route, "router", None)):
+        nested = getattr(holder, "routes", None)
+        if isinstance(nested, list) and any(
+            _contains_catch_all(child, _depth + 1, seen) for child in nested
+        ):
+            return True
+    return False
+
+
+def _find_idx(routes: list[Any], route_path: str) -> int | None:
+    return next((i for i, r in enumerate(routes) if getattr(r, "path", None) == route_path), None)
+
+
 def _ensure_route_precedes_catch_all(fastapi_app: Any, route_path: str) -> None:
+    """Move ``route_path`` ahead of the SPA catch-all so it is not swallowed by it.
+
+    Starlette matches in list order (``fastapi.routing.Router.app`` iterates
+    ``self.routes``), so a catch-all sitting before our routes wins and the caller gets
+    the SPA's HTML instead of their PDF/CSV. Every bail-out warns on purpose: this
+    function silently became a no-op on a FastAPI upgrade and nobody noticed."""
     routes = getattr(getattr(fastapi_app, "router", None), "routes", None)
     if not isinstance(routes, list):
+        print(f"[WARN] route_order: app exposes no route list; cannot protect {route_path}")
         return
 
-    route_idx = next((i for i, route in enumerate(routes) if getattr(route, "path", None) == route_path), None)
-    catch_all_idx = next(
-        (
-            i
-            for i, route in enumerate(routes)
-            if isinstance(getattr(route, "path", None), str)
-            and str(getattr(route, "path")).endswith("/{full_path:path}")
-        ),
-        None,
-    )
-
-    if route_idx is None or catch_all_idx is None or route_idx < catch_all_idx:
+    route_idx = _find_idx(routes, route_path)
+    if route_idx is None:
+        print(f"[WARN] route_order: {route_path} is not registered; nothing to reorder")
         return
 
-    route = routes.pop(route_idx)
-    routes.insert(catch_all_idx, route)
+    catch_all_idx = next((i for i, r in enumerate(routes) if _contains_catch_all(r)), None)
+    if catch_all_idx is None:
+        print(
+            f"[WARN] route_order: no catch-all route found, so {route_path} cannot be "
+            "protected — did the FastAPI route layout change again?"
+        )
+        return
+
+    if route_idx < catch_all_idx:
+        return
+
+    routes.insert(catch_all_idx, routes.pop(route_idx))
+
+    # Confirm it actually took effect rather than trusting the mutation.
+    new_route_idx = _find_idx(routes, route_path)
+    new_catch_all_idx = next((i for i, r in enumerate(routes) if _contains_catch_all(r)), None)
+    if new_route_idx is None or new_catch_all_idx is None or new_route_idx > new_catch_all_idx:
+        print(f"[WARN] route_order: reordering {route_path} did not take effect")
 
 # Chat profiles configuration
 def _load_chat_profiles() -> dict[str, Any]:
