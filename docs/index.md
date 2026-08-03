@@ -1,27 +1,35 @@
 # RAG Template
 
-A **config-driven, modular RAG template**. One declarative YAML file describes an
-entire instance — data sources, chunking, chat & embedding models, vector store,
-retrieval, citations, prompt and profiles — so you can point the same codebase at
-a new corpus without touching code.
+A chat assistant that answers questions about your own documents and shows the
+exact page each answer came from.
 
-Stack: **Chainlit** (chat UI) · **LiteLLM** (any chat/embedding provider) ·
-**Qdrant** (vector store).
+You point it at a folder of files. It reads them, and afterwards people can ask
+questions in normal language. To set it up you edit **one settings file**. No
+programming needed.
+
+Under the hood: **Chainlit** draws the chat window, **LiteLLM** talks to the AI
+models, and **Qdrant** stores your text so it can be searched.
 
 ## What you can change from config
 
-| Concern | Where | How |
+Everything below is a setting in that one file, so you never have to touch code.
+
+| What | Setting | Your options |
 |---|---|---|
-| **Data** | `data_sources[]` | PDF (Docling), `txt`/`md`, or structured `json`/`csv` via a field-mapping |
-| **Chunking** | `chunking.strategy` | `fixed_size`, `heading`, `passthrough`, `semantic`, or `docling_hybrid` (per-source overridable) |
-| **Chat model** | `models.chat_model` | any LiteLLM `provider/model` string |
-| **Embedding model** | `models.embed_model` | any LiteLLM embedding model |
-| **Citations** | `citation.*` | segment templates, token word, page abbreviation |
-| **Prompt / roles** | `prompt`, `profiles` | system prompt, starters, optional retrieval-scoping roles |
-| **Agentic tools** | `tools.enabled` | which of the pluggable tools (`search`, `list_documents`, `fetch_document`, `expand_context`, `verify_claim`) the model may call |
-| **Figures** | `images.mode` | `none`, `describe` (searchable figure descriptions) or `attach` (figure pixels to a vision model) |
+| **Your documents** | `data_sources[]` | PDFs, plain text and Markdown, or spreadsheet-like `json`/`csv` files |
+| **How text is split up** | `chunking.strategy` | by size, by heading, one piece per record, by meaning, or Docling's own way. Can differ per document type |
+| **Which model answers** | `models.chat_model` | any model your AI service offers |
+| **Which model makes text searchable** | `models.embed_model` | any search model your AI service offers |
+| **How sources look** | `citation.*` | the wording and layout of the reference under an answer |
+| **What the assistant is told** | `prompt`, `profiles` | its instructions, the example questions, and optional roles that limit what it may search |
+| **What the assistant may do** | `tools.enabled` | search, list all documents, read a whole document, fetch surrounding text, double-check a claim |
+| **Pictures and charts** | `images.mode` | ignore them, describe them in words so they are findable, or show them to a model that can see |
 
 ## How it fits together
+
+Your documents are read, cut into pieces and stored so they can be searched. When
+a question comes in, the matching pieces are looked up and given to the AI model,
+which writes the answer and lists its sources.
 
 ```
 data_sources ─► parser (by format) ─► chunker (by strategy) ─► embed ─► Qdrant
@@ -30,13 +38,13 @@ user question ─► retrieve (top_k, optional filters) ◄───────
              └─► LLM tool loop ─► answer + config-driven citations
 ```
 
-- **[Getting Started](getting-started.md)** — clone, configure, ingest, run.
-- **[Example Corpus](example-corpus.md)** — the bundled instance a fresh clone runs on.
-- **[Adding Your Data](adding-data.md)** — declare your own sources.
-- **[Agentic Tools](tools.md)** — the pluggable tools the model can call.
-- **[Figures & Images](images.md)** — describe or attach PDF figures.
-- **[System Prompts](prompts.md)** — hand-written or auto-generated.
-- **[Configuration Reference](configuration.md)** — every field, generated from the schema.
-- **[Field-Mapping DSL](field-mapping.md)** — turn JSON/CSV into chunks.
-- **[Extending](extending.md)** — add a custom parser or chunker.
-- **[Feedback Export](feedback-export.md)** — collect and export user ratings.
+- **[Getting Started](getting-started.md)**: install it, load your documents, run it.
+- **[Example Corpus](example-corpus.md)**: the papers that come with it, and how to swap them out.
+- **[Adding Your Data](adding-data.md)**: use your own files.
+- **[Agentic Tools](tools.md)**: what the assistant is allowed to do.
+- **[Figures & Images](images.md)**: how pictures and charts are handled.
+- **[System Prompts](prompts.md)**: write the assistant's instructions, or let it write them.
+- **[Configuration Reference](configuration.md)**: every setting, in detail (technical).
+- **[Field-Mapping DSL](field-mapping.md)**: turn JSON/CSV into text (technical).
+- **[Extending](extending.md)**: support a new file type (needs Python).
+- **[Feedback Export](feedback-export.md)**: collect and download user ratings.

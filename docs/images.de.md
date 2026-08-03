@@ -1,9 +1,10 @@
 # Abbildungen & Bilder
 
-Ohne diese Funktion **verwirft der PDF-Parser Abbildungen komplett** — nur ihre
-Bildunterschriften überleben, als Text. Bei Papern und Handbüchern, deren
-Argumentation in einem Diagramm steckt, ist das ein echter Verlust. Mit dem
-`images:`-Block werden Abbildungen zu vollwertigem, durchsuchbarem Inhalt.
+Standardmäßig **wirft die App die Bilder weg**, wenn sie ein PDF liest, und
+behält nur die Bildunterschriften als Text. Bei Papern und Handbüchern, deren
+Argumentation in einem Diagramm steckt, geht damit viel verloren. Der
+`images:`-Block macht aus Bildern und Diagrammen Inhalte, die der Assistent
+wirklich finden und zeigen kann.
 
 ```yaml
 images:
@@ -18,93 +19,96 @@ images:
   vision_capable_models: [gemma-4-31b]
 ```
 
-Der Modus lässt sich ohne Änderung der YAML über die Umgebungsvariable
-`IMAGES_MODE` umschalten — praktisch für A/B-Vergleiche auf demselben Korpus.
+Den Modus kannst du ohne Bearbeiten der Datei über die Einstellung `IMAGES_MODE`
+umschalten. So lassen sich zwei Modi bequem am selben Datenbestand vergleichen.
 
 ## Drei Modi
 
-| Modus | Beim Ingest | Zur Anfragezeit |
+| Modus | Beim Einlesen der Dokumente | Wenn jemand fragt |
 |---|---|---|
-| `none` | Abbildungen ignoriert | — (die billigste Variante) |
-| `describe` | Jede Abbildung wird gerendert und von `vision_model` beschrieben, als eigener Chunk gespeichert | Die Beschreibung wird wie jeder Text-Chunk durchsucht und zitiert |
-| `attach` | Wie `describe` | Zusätzlich: die Bild-**Pixel** gehen an ein vision-fähiges Chat-Modell |
+| `none` | Bilder werden ignoriert | Nichts (die billigste Variante) |
+| `describe` | Jedes Bild wird ausgeschnitten und von `vision_model` in Worten beschrieben | Die Beschreibung wird wie jeder andere Text durchsucht und zitiert |
+| `attach` | Wie `describe` | Zusätzlich wird **das Bild selbst** einem Modell gezeigt, das sehen kann |
 
-In `describe` wird jede Abbildung zu einem normalen, durchsuchbaren und
-zitierbaren Chunk, dessen Text die vom Modell geschriebene Beschreibung ist — in
-der Sprache der Instanz. Die Metadaten führen `is_figure`, `figure_index`,
-`image_path` und die Seite. Da das Retrieval danach nur noch Text berührt,
-funktioniert `describe` anschließend mit **jedem** Chat-Modell — das
-Vision-Modell wird beim Ingest gebraucht, nicht zur Anfragezeit.
+Mit `describe` wird jedes Bild zu einem ganz normalen, durchsuchbaren Eintrag,
+dessen Text die vom Modell geschriebene Beschreibung ist, in der Sprache deiner
+Einrichtung. Dazu gespeichert werden der Hinweis, dass es eine Abbildung ist, die
+Seitenzahl und der Ort der Bilddatei.
 
-`attach` baut auf genau demselben Ingest auf und ergänzt einen Vision-Durchgang
-für die Antwort.
+Das hat einen praktischen Nebeneffekt: Weil die Suche danach nur noch Text
+berührt, funktioniert `describe` anschließend mit **jedem** Chat-Modell. Das
+Modell, das Bilder sehen kann, wird nur einmal gebraucht, beim Einlesen.
+
+`attach` nutzt genau denselben Einlese-Schritt und legt das Bild bei der Antwort
+noch obendrauf.
 
 ## Kosten und wann ein Re-Ingest nötig ist
 
-Die Regel ist einfach: **ein Vision-Aufruf pro Abbildung, beim Ingest.** In
-`describe` entstehen pro Anfrage keine weiteren Kosten.
+Die Regel ist einfach: **ein Aufruf des Bildmodells pro Abbildung, einmalig beim
+Einlesen.** Das Beantworten von Fragen kostet in `describe` nichts extra.
 
 !!! warning "Moduswechsel"
-    Der Wechsel von `none` zu `describe` oder `attach` erfordert einen
-    **Re-Ingest** — die Abbildungen wurden nie gerendert oder beschrieben. Der
-    Wechsel zwischen `describe` und `attach` **nicht**: Bilder und Beschreibungen
-    sind bereits gespeichert, es ändert sich nur das Verhalten zur Anfragezeit.
-    Die Flags dafür stehen unter [Daten hinzufügen](adding-data.md).
+    Der Wechsel von `none` zu `describe` oder `attach` bedeutet, dass **alle
+    Dokumente neu eingelesen** werden müssen, denn die Bilder wurden beim ersten
+    Mal nie ausgeschnitten oder beschrieben. Der Wechsel zwischen `describe` und
+    `attach` **nicht**: Bilder und Beschreibungen liegen bereits vor, es ändert
+    sich nur das Verhalten beim Antworten. Die nötigen Flags stehen unter
+    [Daten hinzufügen](adding-data.md).
 
 ## Abbildungen in der Antwort anzeigen
 
-Zwei unabhängige Schalter entscheiden, was der Nutzer tatsächlich sieht:
+Zwei getrennte Schalter entscheiden, was Leute tatsächlich sehen:
 
 | `inline_figures` | `show_unmarked_figures` | Ergebnis |
 |---|---|---|
-| `true` | `true` | Markierte Abbildung erscheint **über** dem Absatz, der sie beschreibt; alle übrigen abgerufenen Abbildungen als Vorschaubilder unter der Antwort (Default) |
-| `true` | `false` | Nur Abbildungen, die das Modell wirklich markiert hat — am saubersten, aber es erscheint nichts, wenn es den Marker vergisst |
-| `false` | `true` | Keine Inline-Bilder; jede abgerufene Abbildung als Vorschaubild unter der Antwort |
-| `false` | `false` | Überhaupt keine Bildanzeige — Beschreibungen bleiben durchsuchbar und zitierbar |
+| `true` | `true` | Das passende Bild erscheint **über** dem Absatz, um den es geht, weitere gefundene Bilder als kleine Vorschau unter der Antwort (Standard) |
+| `true` | `false` | Nur Bilder, auf die das Modell ausdrücklich gezeigt hat. Am aufgeräumtesten, aber es erscheint nichts, wenn das Modell das Zeigen vergisst |
+| `false` | `true` | Keine Bilder im Text, aber jedes gefundene Bild als kleine Vorschau unter der Antwort |
+| `false` | `false` | Überhaupt keine Bildanzeige. Die Beschreibungen bleiben durchsuchbar und zitierbar |
 
-`inline_figure_caption: true` gibt zusätzlich die Bildunterschrift als kursive
-Zeile unter dem eingebetteten Bild aus.
+Mit `inline_figure_caption: true` wird zusätzlich die Originalunterschrift kursiv
+unter das Bild gesetzt.
 
 ## Wie der Abbildungs-Marker funktioniert
 
 Lohnt sich zu verstehen, weil es sowohl die guten als auch die merkwürdigen Fälle
 erklärt:
 
-1. Der Retrieval-Kontext enthält pro Abbildung eine zusätzliche Zeile:
-   `Abbildungs-Marker: {{ABB:<dateiname>}}`.
-2. Eine System-Anweisung pro Anfrage bittet das Modell, diesen Marker unverändert
-   in eine eigene Zeile direkt vor den Absatz zu setzen, der die Abbildung
-   beschreibt.
-3. Die Nachbearbeitung der Antwort ersetzt den Marker durch das eigentliche Bild.
+1. Zusammen mit dem Text bekommt das Modell pro Bild eine zusätzliche Zeile, eine
+   Art Platzhalter: `Abbildungs-Marker: {{ABB:<dateiname>}}`.
+2. Es wird gebeten, diesen Platzhalter unverändert und in einer eigenen Zeile
+   direkt vor den Absatz zu setzen, der das Bild behandelt.
+3. Danach tauscht die App den Platzhalter gegen das echte Bild.
 
-Nicht auflösbare Marker werden still entfernt — Nutzer sehen nie ein rohes
-`{{ABB:…}}` — und die Abbildung erscheint dann einfach unten. Der Anweisungstext
-selbst ist über `images.figure_marker_prompt` konfigurierbar.
+Lässt sich ein Platzhalter nicht zuordnen, wird er stillschweigend entfernt
+(niemand sieht je ein rohes `{{ABB:…}}`) und das Bild erscheint einfach unter der
+Antwort. Die Anweisung an das Modell kannst du über
+`images.figure_marker_prompt` umformulieren.
 
 ## Wo die Bilder liegen
 
-Abbildungen werden als PNG unter `<sources.data_dir>/figures/` abgelegt (Pfad
-über `images.figure_store_dir` überschreibbar) und über eine
-**authentifizierte** Route ausgeliefert: `/sources/figure/<datei>` — dieselben
-Zugriffsregeln wie für deine Quelldokumente. Der Ordner steht absichtlich in
-`.gitignore`: er wird bei jedem Ingest neu erzeugt und gehört nicht ins
-Repository.
+Bilder werden als PNG-Dateien unter `<sources.data_dir>/figures/` gespeichert
+(anderer Ort über `images.figure_store_dir`). Herausgegeben werden sie nur an
+angemeldete Nutzer, also nach derselben Regel wie deine Quelldokumente. Der
+Ordner ist bewusst von der Versionsverwaltung ausgenommen: Er wird bei jedem
+Einlesen neu erzeugt und gehört nicht ins Projekt.
 
 ## `attach` braucht ein vision-fähiges Chat-Modell
 
-Das Gateway liefert kein Fähigkeits-Flag pro Modell, deshalb ist
-`images.vision_capable_models` maßgeblich. Steht das aktive Chat-Modell nicht auf
-dieser Liste, fällt die App still auf die gewöhnliche Textantwort zurück und
-loggt einen Hinweis — die Antwort ist weiterhin korrekt, nur ohne Pixel.
+Nicht jedes Chat-Modell kann Bilder ansehen, und der KI-Dienst verrät nicht,
+welche es können. Deshalb musst du sie selbst unter
+`images.vision_capable_models` auflisten. Steht das gerade genutzte Modell nicht
+auf deiner Liste, fällt die App still auf eine normale Textantwort zurück und
+notiert einen Hinweis. Die Antwort ist weiterhin korrekt, nur ohne Bild.
 
-Vor dem Aufruf wird jede Abbildung so verkleinert, dass ihre längste Seite höchstens
-`attach_image_max_px` beträgt, und als JPEG gesendet. Das nicht entfernen:
-Abbildungen in Originalauflösung lassen Gateways die Anfrage mit **HTTP 413**
-ablehnen. `max_attach_images` begrenzt, wie viele Abbildungen eine einzelne
-Antwort mitführen darf.
+Vor dem Senden wird jedes Bild so verkleinert, dass seine längste Seite höchstens
+`attach_image_max_px` beträgt, und in JPEG umgewandelt. Diesen Schritt nicht
+entfernen: Bilder in Originalauflösung lassen KI-Dienste die Anfrage rundheraus
+ablehnen (Fehler **413**). `max_attach_images` begrenzt, wie viele Bilder eine
+einzelne Antwort mitführen darf.
 
 !!! note "Eine kosmetische Eigenheit"
-    Chainlit rendert Markdown-Bilder in einem 16:9-Rahmen mit begrenzter Breite.
-    Hohe Abbildungen (Hochformat-Diagramme, gestapelte Plots) bekommen daher
-    seitliche Ränder. Es wird nichts abgeschnitten — ein Klick auf das Bild
-    öffnet es weiterhin vollständig.
+    Das Chat-Fenster zeigt Bilder in einem breiten Rahmen mit festem
+    Seitenverhältnis. Hohe Bilder, etwa Hochformat-Diagramme oder gestapelte
+    Kurven, bekommen deshalb links und rechts leere Ränder. Es wird nichts
+    abgeschnitten; ein Klick öffnet das Bild vollständig.

@@ -1,22 +1,27 @@
 # System-Prompts
 
-Der System-Prompt macht aus einer Retrieval-Pipeline *deinen* Assistenten: Er legt
-die Identität fest, erzwingt Retrieval vor der Antwort und fixiert das Zitat- und
-Anschlussfragen-Format, das die UI parst. Du kannst ihn selbst schreiben — oder
-die App beim Start einen aus deinem Korpus generieren lassen.
+Der System-Prompt ist die feste Anweisung, an die sich der Assistent in jedem
+Gespräch hält. Er macht aus einer Suchmaschine *deinen* Assistenten: Er sagt, wer
+der Assistent ist, verlangt, dass er erst nachschlägt und dann antwortet, und
+legt die genaue Schreibweise von Quellen und Anschlussfragen fest, damit die App
+daraus klickbare Links und Buttons machen kann.
+
+Du kannst ihn selbst schreiben oder die App einen aus deinen eigenen Dokumenten
+schreiben lassen.
 
 ## Woher der Prompt kommt
 
-Beim Start löst die App den Prompt aus drei Quellen auf, in dieser Reihenfolge:
+Beim Start schaut die App an drei Stellen nach, in dieser Reihenfolge, und nimmt
+die erste, die etwas liefert:
 
 | Reihenfolge | Quelle | Wann sie greift |
 |---|---|---|
-| 1 | `prompt.system_prompt_path` | Das Feld ist gesetzt **und** die Datei existiert |
-| 2 | Generierung | `prompt.auto_generate: true` (Default) — beim Start wird ein Prompt generiert |
-| 3 | `apps/chainlit/config/prompts/default_system.md` | Mitgelieferter Fallback, wenn keine der beiden Optionen einen Prompt liefert |
+| 1 | `prompt.system_prompt_path` | Du hast eine Datei angegeben **und** diese Datei existiert |
+| 2 | Generierung | `prompt.auto_generate: true` (Standard): die App schreibt beim Start einen |
+| 3 | `apps/chainlit/config/prompts/default_system.md` | Der mitgelieferte, falls keine der beiden Möglichkeiten etwas ergeben hat |
 
-`prompt.system_prompt_path` deaktiviert die Generierung also vollständig — eine
-explizite Datei gewinnt immer.
+Wegen dieser Reihenfolge schaltet eine eigene Datei das automatische Schreiben
+komplett ab. Deine Datei gewinnt immer.
 
 ```yaml
 prompt:
@@ -29,32 +34,34 @@ prompt:
 
 ## Generierung
 
-Die Generierung (`apps/chainlit/system_prompt_gen.py`) rät nicht, worum es in
-deinem Korpus geht — sie liest ihn:
+Die App rät nicht, worum es in deinen Dokumenten geht. Sie liest sie:
 
-1. Sie sampelt die **tatsächlich indexierten** Chunks der aktiven Collection
-   (Abschnittstitel pro Dokument plus einige repräsentative Ausschnitte). Wie
-   viele verwendet werden, steuert `prompt.sample_size` (Default `40`).
-2. Sie lädt eine Struktur-Vorlage — `prompt.template_path`, standardmäßig eine
-   `system.md` im Repo-Root, falls vorhanden, sonst der mitgelieferte Fallback.
-   Die Vorlage liefert Struktur und Strenge, nicht die Domänenformulierungen.
-3. Sie lässt das konfigurierte Chat-Modell daraus einen Prompt schreiben.
+1. Sie nimmt eine Stichprobe des **tatsächlich gespeicherten** Texts deiner
+   Dokumente: die Abschnittsüberschriften jedes Dokuments plus einige typische
+   Ausschnitte. Wie viel verwendet wird, steuert `prompt.sample_size`
+   (Standard `40`).
+2. Sie lädt ein Gerüst, das Struktur und Strenge vorgibt, aber keine
+   Formulierungen zu deinem Fachgebiet. Standardmäßig ist das eine `system.md`
+   neben dem Projekt, falls vorhanden, sonst die mitgelieferte. Mit
+   `prompt.template_path` zeigst du woanders hin.
+3. Sie lässt dein Chat-Modell aus beidem die Anweisung schreiben.
 
-Das Ergebnis wird als `.generated_system_prompt.<collection>.md` neben der Config
-gecacht (gitignored) und bei jedem Neustart wiederverwendet — die Generierung
-kostet also einen Modellaufruf pro Korpus, nicht einen pro Start.
+Das Ergebnis wird neben deiner Einstellungsdatei als
+`.generated_system_prompt.<collection>.md` gespeichert und bei jedem Neustart
+wiederverwendet. Das kostet also einen Modellaufruf pro Satz Dokumente, nicht
+einen pro Start.
 
-Der generierte Prompt enthält:
+Die geschriebene Anweisung deckt ab:
 
-- eine domänenspezifische Identität, aus dem Korpus abgeleitet;
-- die Pflicht zum Retrieval-First (Tool aufrufen, nur aus den gefundenen Passagen antworten);
-- das Zitierformat, das die App parst;
-- die Antwortsprache;
-- ein Längenlimit;
+- wer der Assistent ist, aus deinen Dokumenten abgeleitet;
+- die Pflicht, erst nachzuschlagen und nur aus dem Gefundenen zu antworten;
+- das genaue Format für Quellen;
+- die Sprache der Antwort;
+- eine Höchstlänge;
 - das Format der Anschlussfragen.
 
-Für eine neue Generierung die Cache-Datei löschen oder
-`REGENERATE_SYSTEM_PROMPT=true` setzen:
+Für eine neue Anweisung die gespeicherte Datei löschen oder die Einstellung
+`REGENERATE_SYSTEM_PROMPT` nutzen:
 
 ```bash
 rm .generated_system_prompt.papers.md
@@ -63,32 +70,34 @@ REGENERATE_SYSTEM_PROMPT=true chainlit run app.py
 ```
 
 !!! warning "Zitate und Anschlussfragen werden über deutsche Marker geparst"
-    Die App erkennt Zitate und Anschlussfragen derzeit an ihren **deutschen**
-    Markern: Zitate als `Quelle N: <Abschnitt> (S.<Seite>)`, Anschlussfragen unter
-    der Überschrift `Anschlussfragen:`. Wenn klickbare Zitate und
-    Anschlussfragen-Buttons funktionieren sollen, setze also `language: de`. Das
-    **Korpus** darf jede Sprache haben — das Modell liest die englischen Paper und
-    antwortet deutsch. Wenn du den Prompt selbst schreibst, übernimm diese beiden
-    Marker exakt.
+    Die App erkennt Quellen und Anschlussfragen nur an ihrer **deutschen**
+    Schreibweise: Quellen als `Quelle N: <Abschnitt> (S.<Seite>)` und
+    Anschlussfragen unter der Überschrift `Anschlussfragen:`. Wenn klickbare
+    Quellen und Anschlussfragen-Buttons funktionieren sollen, setze also
+    `language: de`.
+
+    Deine **Dokumente** dürfen jede Sprache haben. Das Modell liest problemlos
+    englische Paper und antwortet auf Deutsch. Wenn du die Anweisung selbst
+    schreibst, übernimm diese beiden Formulierungen exakt, sonst erscheinen Links
+    und Buttons nicht mehr.
 
 ## Prompt im Betrieb ansehen und bearbeiten
 
-Das Zahnrad-Panel zeigt den aktiven Prompt in einem bearbeitbaren Feld
-(„System-Prompt (bearbeitbar)"). Eine Bearbeitung dort gilt **pro Nutzer/Session**
-— sie wird als `custom_prompt` gespeichert und überschreibt den geladenen Prompt.
-Das Feld leeren führt zurück zum Standard.
+Das Zahnrad-Panel zeigt die aktive Anweisung in einem bearbeitbaren Feld
+(„System-Prompt (bearbeitbar)"). Änderungen dort gelten **nur für dich und nur in
+dieser Sitzung**. Leerst du das Feld, gilt wieder die normale Anweisung.
 
-Damit eignet sich das Panel bestens zum Iterieren an Formulierungen; ein
-Deployment-Mechanismus ist es nicht. Für eine dauerhafte Änderung die
-Prompt-Datei bearbeiten oder `prompt.system_prompt_path` auf eine eigene Datei
-zeigen lassen.
+Damit eignet sich das Panel bestens zum Ausprobieren von Formulierungen, aber
+nicht dazu, eine Änderung für alle auszurollen. Für etwas Dauerhaftes bearbeite
+die Prompt-Datei oder lass `prompt.system_prompt_path` auf eine eigene Datei
+zeigen.
 
 ## Chat-Modell wählen
 
-Im selben Zahnrad-Panel sitzt ein Chat-Modell-Selektor. Seine Liste füllt sich
-automatisch aus `/v1/models` des Gateways (Embedding-Modelle werden
-herausgefiltert) und lässt sich über `models.selectable_chat_models` ergänzen —
-nützlich, wenn das Gateway seine Modelle nicht aufzählt:
+Im selben Zahnrad-Panel sitzt eine Modellauswahl. Sie füllt sich mit dem, was
+dein KI-Dienst anbietet (Suchmodelle werden ausgeblendet, die können nicht
+chatten). Manche Dienste veröffentlichen keine Liste, dann bleibt die Auswahl
+leer. In dem Fall trägst du die Namen selbst ein:
 
 ```yaml
 models:
@@ -96,10 +105,11 @@ models:
   selectable_chat_models: []   # wird mit dem gemergt, was /v1/models meldet
 ```
 
-Die Auswahl wird pro Nutzer in der Datenbank gespeichert und gilt damit auch für
-neue Chats.
+Die Auswahl jeder Person wird gespeichert und gilt damit auch für deren neue
+Chats.
 
 !!! note "Verwandte Seiten"
     [Erste Schritte](getting-started.md) für den ersten Start,
     [Konfigurationsreferenz](configuration.md) für alle `prompt:`-Felder und
-    [Agentische Tools](tools.md) für die Tools, die der Prompt aufrufen lässt.
+    [Agentische Tools](tools.md) für die Fähigkeiten, die die Anweisung nutzen
+    lässt.

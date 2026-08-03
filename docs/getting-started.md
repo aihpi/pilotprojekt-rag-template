@@ -1,5 +1,9 @@
 # Getting Started
 
+This page walks you from an empty folder to a running assistant that answers
+questions about your own documents. Copy each command into a terminal in the
+order shown.
+
 ## 1. Clone and install
 
 ```bash
@@ -9,9 +13,14 @@ uv sync            # use uv, not pip: pip installs the wrong package versions
 cp .env.example .env   # fill in LITELLM_* and QDRANT_* secrets
 ```
 
+The last line creates a file called `.env`. Open it and enter the address and
+access key of your AI service. Nothing works until those are filled in.
+
 ## 2. Copy the minimal config
 
-Start from the smallest working config and edit it:
+The settings file decides everything: which documents to read, which AI models to
+use, how answers are put together. Start from the smallest working example and
+change it:
 
 ```bash
 cp examples/minimal/rag.config.yaml my-rag.yaml
@@ -34,11 +43,19 @@ data_sources:
     glob: "*.pdf"
 ```
 
-Point `data_sources[].path` at your documents, pick a `collection`, and set the
-models. See the [Configuration Reference](configuration.md) for every field.
+Three things to adjust:
 
-Tell the app which config to load via the `RAG_CONFIG` environment variable
-(relative to `apps/chainlit/`):
+- `data_sources[].path` is the folder your documents are in.
+- `collection` is a name you invent. It keeps this set of documents separate
+  from any other.
+- The two models must be names your AI service actually offers. If unsure, ask
+  it for its list.
+
+Every available setting is listed in the
+[Configuration Reference](configuration.md).
+
+Now tell the app to use your file. This has to be repeated in every new terminal
+window:
 
 ```bash
 export RAG_CONFIG=my-rag.yaml
@@ -46,16 +63,16 @@ export RAG_CONFIG=my-rag.yaml
 
 ## 3. Validate parsing with `--dry-run`
 
-`--dry-run` parses and chunks **without embedding or writing to Qdrant**, and
-prints the first chunks with their metadata. This is the fastest way to iterate
-on a config (especially a JSON/CSV [field-mapping](field-mapping.md)):
+Before spending time and money on the real run, do a practice run. It reads your
+documents and shows how they will be cut up, but **saves nothing and costs
+nothing**:
 
 ```bash
 python -m kb.ingest --dry-run --limit 5
 ```
 
 ```text
-DRY RUN — parsed and chunked, nothing embedded or written.
+DRY RUN: parsed and chunked, nothing embedded or written.
 
   source 'docs' [pdf / fixed_size]: 12 sections -> 40 chunks
 
@@ -63,7 +80,15 @@ DRY RUN — parsed and chunked, nothing embedded or written.
   ...
 ```
 
+If the number of pieces is 0, the app found no documents. Check the `path` and
+`glob` lines in your settings file. This practice run is the fastest way to get a
+config right, especially for JSON/CSV files
+([field-mapping](field-mapping.md)).
+
 ## 4. Ingest
+
+Now do it for real. The app reads every document and stores it so it can be
+searched. Depending on how many documents you have, this can take a while:
 
 ```bash
 python -m kb.ingest              # embeds + upserts into the configured collection
@@ -71,13 +96,19 @@ python -m kb.ingest --recreate   # rebuild the collection from scratch
 python -m kb.ingest --only docs  # ingest specific sources
 ```
 
+Use the first line the first time. Use `--recreate` whenever you have changed
+your documents or your settings and want to start clean.
+
 !!! warning "`--skip-if-exists` vs. the embed-model sentinel"
-    `--skip-if-exists` **only checks whether the collection exists** — it does
-    not detect config changes. On first ingest the pipeline writes a sentinel
-    recording the embedding model. If you later change the content or the
-    `embed_model`, re-run with **`--recreate`** (or point `vector_store.collection`
-    at a new name). Ingesting a different embedding model into an existing
-    collection is refused, because the vectors would be incompatible.
+    `--skip-if-exists` **only checks whether the collection exists**. It does
+    not notice that you changed anything. So if you edit your documents or
+    settings, that option will skip the work and you will keep getting old
+    answers.
+
+    There is one thing the app does catch: on the first run it notes down which
+    model made your text searchable. If you later switch to a different one, it
+    refuses rather than mixing incompatible data. Use **`--recreate`**, or give
+    `vector_store.collection` a new name.
 
 ## 5. Run the app
 
@@ -86,6 +117,9 @@ chainlit run app.py -w
 # or the whole stack (Qdrant + Postgres + auto-ingest + app):
 make up
 ```
+
+Then open <http://localhost:8000> and ask a question. Under each answer you will
+see its sources. Click one and the original document opens at the right page.
 
 ## Docs locally
 

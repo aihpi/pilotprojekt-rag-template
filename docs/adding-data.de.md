@@ -1,9 +1,9 @@
 # Daten hinzufügen
 
-Jeder Datenbestand ist ein `data_sources[]`-Eintrag in deiner Konfiguration. Eine
-Quelle legt fest, **wo** die Dateien liegen, **welches Format** sie haben und
-optional, wie sie gechunkt und getaggt werden. Du kannst mehrere Quellen in einer
-Collection kombinieren.
+Jeder Satz Dokumente ist ein `data_sources[]`-Eintrag in deiner
+Einstellungsdatei. Ein Eintrag sagt, **wo** die Dateien liegen, **welcher Art**
+sie sind und optional, wie sie zerteilt und beschriftet werden. Du kannst mehrere
+Sätze angeben und gemeinsam durchsuchen.
 
 ```yaml
 data_sources:
@@ -16,16 +16,16 @@ data_sources:
 ```
 
 !!! note "Pfade sind relativ zur Konfigurationsdatei"
-    Ein `path` (sowie `pdf_options.docling_json_dir`, `sources.data_dir`, …) wird
-    relativ zum **Verzeichnis der YAML-Datei** aufgelöst, nicht relativ zum
-    Arbeitsverzeichnis der Shell. Absolute Pfade werden unverändert verwendet. In
-    Docker greifen gemountete absolute Pfade (`/data/...`) bzw. die
-    `INGEST_DOCLING_JSON_DIR`-Umgebungs-Überschreibung.
+    Ein `path` zählt **ab dem Ordner, in dem die Einstellungsdatei liegt**, nicht
+    ab dem Ort, an dem du gerade im Terminal stehst. Darüber stolpern viele.
+    Pfade, die ganz vorne bei der Festplattenwurzel beginnen, werden unverändert
+    genommen. In Docker nimmst du die gemounteten Pfade (`/data/...`) oder die
+    Einstellung `INGEST_DOCLING_JSON_DIR`.
 
 ## 1. Dateien ablegen
 
-Lege deine Dokumente irgendwo ab und richte `path` darauf — z. B. einen
-`data/`-Ordner im Repo-Root:
+Lege deine Dokumente irgendwo auf deinem Rechner ab und richte `path` darauf,
+zum Beispiel auf einen `data/`-Ordner neben dem Projekt:
 
 ```
 pilotprojekt-rag-template/
@@ -41,10 +41,11 @@ pilotprojekt-rag-template/
 
 === "PDF"
 
-    Auf einen Ordner mit PDFs richten. Sie werden mit **Docling** geparst (Lazy
-    Import), das über `export_to_dict()` **strukturierte, überschriftenbasierte
-    Abschnitte** rekonstruiert (mit Abschnittstiteln und Seitenbereichen). Für
-    gescannte Dokumente OCR aktivieren.
+    Auf einen Ordner mit PDFs richten. **Docling** liest sie und erkennt dabei
+    die Struktur, weiß also, wo die Überschriften sind, welcher Text zu welchem
+    Abschnitt gehört und auf welcher Seite er stand. Schalte OCR ein, wenn deine
+    PDFs Scans sind, der Text also in Wirklichkeit ein Foto ist und sich nicht
+    markieren lässt.
 
     ```yaml
     - name: handbook
@@ -55,13 +56,11 @@ pilotprojekt-rag-template/
       pdf_options: {ocr: true, ocr_engine: tesseract, ocr_lang: [eng, deu]}
     ```
 
-    **Einmal konvertieren (Caching):** Docling + OCR ist langsam, und du wirst beim
-    Abstimmen der Konfiguration mehrfach ingesten. Exportiere die PDFs einmalig
-    nach Docling-JSON und zeige darauf, um die Live-Konvertierung bei jedem Ingest
-    zu überspringen — das Chunk-Ergebnis ist identisch, es ist reine
-    Geschwindigkeitsoptimierung. Das JSON erzeugst du mit Doclings eigener CLI
-    (eine Datei pro PDF, inklusive Seiten-/Provenance-Metadaten);
-    `pdf_options.docling_json_dir` nutzt dann diesen Schnellpfad:
+    **PDFs einmal lesen und das Ergebnis wiederverwenden.** PDFs zu lesen ist
+    langsam, mit OCR besonders, und beim Abstimmen der Einstellungen wiederholst
+    du es vermutlich mehrfach. Du kannst sie einmal umwandeln und darauf zeigen,
+    dann entfällt der langsame Schritt künftig. Das Ergebnis ist identisch, es
+    geht rein um Geschwindigkeit:
 
     ```bash
     docling --to json --output ../../data/handbook_json ../../data/handbook
@@ -76,7 +75,7 @@ pilotprojekt-rag-template/
 
 === "Text / Markdown"
 
-    Ein Abschnitt pro Datei; gut mit `fixed_size`-Chunking.
+    Jede Datei wird ein Abschnitt. Passt gut zur Aufteilung nach `fixed_size`.
 
     ```yaml
     - name: notes
@@ -87,8 +86,9 @@ pilotprojekt-rag-template/
 
 === "CSV"
 
-    Ein Chunk pro Zeile über ein [Field-Mapping](field-mapping.md). Nutze
-    `passthrough`, damit jede Zeile ein Chunk bleibt.
+    Ein Stück pro Zeile. Welche Spalten verwendet werden, beschreibst du mit
+    einem [Field-Mapping](field-mapping.md). Nimm `passthrough`, damit jede Zeile
+    ganz bleibt.
 
     ```yaml
     - name: faq
@@ -103,8 +103,8 @@ pilotprojekt-rag-template/
 
 === "JSON"
 
-    Flache Listen oder tief verschachtelte Strukturen — siehe die vollständige
-    [Field-Mapping-DSL](field-mapping.md).
+    Einfache Listen ebenso wie tief verschachtelte Dateien. Die vollständige
+    Anleitung steht in der [Field-Mapping-DSL](field-mapping.md).
 
     ```yaml
     - name: articles
@@ -118,8 +118,9 @@ pilotprojekt-rag-template/
 
 === "Custom"
 
-    Für nicht reduzierbare Sonderstrukturen einen eigenen Parser schreiben und
-    referenzieren — siehe [Erweitern](extending.md).
+    Wenn deine Dateien eine ungewöhnliche Struktur haben, auf die nichts davon
+    passt, kann jemand ein kleines Stück Python dafür schreiben. Siehe
+    [Erweitern](extending.md).
 
     ```yaml
     - name: mine
@@ -131,18 +132,24 @@ pilotprojekt-rag-template/
 
 ## 3. Chunking-Strategie wählen
 
+Dokumente werden vor dem Speichern in Stücke zerteilt, weil sich kleine Stücke
+besser durchsuchen lassen als ganze Dokumente. Dafür gibt es mehrere Wege:
+
 | Strategie | Was sie tut | Wofür |
 |---|---|---|
-| `fixed_size` | Gleitende Zeichenfenster (`max_chars`, `overlap`) | Einfache PDFs/Texte ohne Struktur |
-| `heading` | Ein Chunk pro Parser-Abschnitt; teilt nur übergroße Abschnitte | Überschriftenbasierte PDFs (Docling-JSON) |
-| `passthrough` | Genau ein Chunk pro Abschnitt — nie geteilt | Strukturierte JSON/CSV-Datensätze |
-| `semantic` | Teilt jeden Abschnitt an Bruchstellen der Embedding-Ähnlichkeit; embeddet dafür Sätze beim Ingest (kostet zusätzliche Embedding-Aufrufe) | Lange Prosa ohne brauchbare Überschriften |
-| `docling_hybrid` | Doclings eigener tokenbewusster Chunker; serialisiert Tabellen/Abbildungen selbst und dimensioniert Chunks über den Embedding-Tokenizer | Nur für PDF-Quellen |
+| `fixed_size` | Schneidet alle paar Zeichen, mit etwas Überlappung, damit an der Nahtstelle keine Sätze verlorengehen | Einfache Dokumente ohne klare Struktur |
+| `heading` | Ein Stück pro Abschnitt, teilt nur zu lange Abschnitte | Dokumente mit ordentlichen Überschriften |
+| `passthrough` | Ein Stück pro Datensatz, nie geteilt | Zeilen aus JSON/CSV-Dateien |
+| `semantic` | Schneidet dort, wo das Thema wechselt, statt nach fester Länge. Genauer, kostet aber extra, weil der Text beim Einlesen analysiert wird | Lange Fließtexte ohne brauchbare Überschriften |
+| `docling_hybrid` | Doclings eigene Methode. Kümmert sich selbst um Tabellen und Abbildungen und bemisst die Stücke so, dass sie immer ins Modell passen | Nur PDFs |
 
-Setze einen globalen Default unter `chunking:` und überschreibe pro Quelle mit
-einem quellenspezifischen `chunking:`-Block.
+Setze unter `chunking:` einen Standard für alles und überschreibe ihn für einen
+einzelnen Satz Dokumente mit einem `chunking:`-Block in dessen Eintrag.
 
 ## 4. Dry-Run, dann Ingestion
+
+Mach immer zuerst den Probelauf. Er zeigt, was gespeichert würde, ohne etwas zu
+speichern und ohne Kosten:
 
 ```bash
 export RAG_CONFIG=my-rag.yaml
@@ -151,15 +158,17 @@ python -m kb.ingest                         # embedden + in die Collection upser
 ```
 
 !!! warning "Erneute Ingestion nach Änderungen"
-    `--skip-if-exists` prüft nur, ob die Collection existiert. Nach einer Änderung
-    des Inhalts oder des `embed_model` erneut mit `--recreate` ausführen (oder eine
-    neue `vector_store.collection`) — ein abweichendes Embedding-Modell wird
-    abgelehnt, da die Vektoren inkompatibel wären.
+    `--skip-if-exists` prüft nur, ob die Collection existiert, nicht ob sich etwas
+    geändert hat. Nachdem du Dokumente oder Einstellungen bearbeitet hast, führe
+    es erneut mit `--recreate` aus (oder nimm eine neue
+    `vector_store.collection`). Ein Wechsel des `embed_model` wird rundheraus
+    abgelehnt, weil sich alte und neue Daten nicht vergleichen lassen.
 
 ## 5. Zitate sollen die Quelldatei öffnen
 
-Damit das Quellen-Seitenpanel funktioniert, müssen die ausgelieferten Dateien
-unter `sources.data_dir` liegen und ihre Endung erlaubt sein:
+Damit ein Klick auf eine Quelle das Dokument wirklich öffnet, müssen zwei Dinge
+stimmen: Die Datei muss in dem Ordner liegen, der unter `sources.data_dir` steht,
+und ihr Dateityp muss als erlaubt aufgeführt sein.
 
 ```yaml
 sources:
@@ -167,7 +176,8 @@ sources:
   served_extensions: [.pdf, .txt, .md]
 ```
 
-Zitate werden aus den Metadaten jedes Chunks gebaut (`source_file`/`title`/`page`).
-Die eingebauten Parser setzen diese bereits; ein [eigener Parser](extending.md)
-sollte das ebenfalls tun. Zusätzliche Domänenfelder erscheinen in Zitaten über
-`citation.extra_fields`.
+Die Angabe unter einer Antwort wird aus dem zusammengebaut, was sich die App beim
+Lesen notiert hat: Dateiname, Titel und Seite. Die eingebauten Leseroutinen
+füllen das automatisch aus. Wenn jemand einen [eigenen Parser](extending.md)
+schreibt, sollte er dasselbe tun. Eigene Zusatzfelder zeigst du in Zitaten über
+`citation.extra_fields` an.

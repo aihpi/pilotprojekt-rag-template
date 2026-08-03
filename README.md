@@ -6,57 +6,78 @@
 
 **🇩🇪 [Deutsche Version](README.de.md)** · 📖 **[Documentation](https://aihpi.github.io/pilotprojekt-rag-template/)**
 
-A config-driven RAG application you point at your own documents. Everything that
-usually gets hardcoded — models, chunking, retrieval, citations, prompt, tools —
-lives in one YAML file, so a new knowledge assistant is a config change, not a
-fork.
+A chat assistant that answers questions about **your own documents**, and shows
+you the exact page each answer came from.
 
-Built with [Chainlit](https://chainlit.io) (chat UI), [LiteLLM](https://litellm.ai)
-(any OpenAI-compatible model gateway), [Qdrant](https://qdrant.tech) (vector
-store) and [Docling](https://github.com/DS4SD/docling) (PDF parsing).
+You give it a folder of PDFs. It reads them, and from then on you can ask
+questions in normal language. Every answer links back to the source, so you can
+check it yourself.
 
-> **It runs out of the box.** Three open-access papers ship with the repo
-> ([sources & licence](apps/chainlit/data/documents/SOURCES.md)), so you can chat
-> with a working instance before configuring anything.
+Setting it up means editing **one settings file**. You do not need to write any
+code.
+
+> **It works straight away.** Three research papers come with the project
+> ([sources & licence](apps/chainlit/data/documents/SOURCES.md)), so you can try
+> a working assistant before you change anything.
+
+<details>
+<summary><b>Which tools this is built on</b></summary>
+
+[Chainlit](https://chainlit.io) for the chat window, [LiteLLM](https://litellm.ai)
+to talk to the AI models, [Qdrant](https://qdrant.tech) to store the searchable
+text, and [Docling](https://github.com/DS4SD/docling) to read PDFs.
+</details>
 
 ---
 
 ## Quickstart
+
+You need [Docker](https://docs.docker.com/get-docker/) installed. Then copy these
+lines into a terminal, one block at a time:
 
 ```bash
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
 cd pilotprojekt-rag-template/apps/chainlit
 
 cp .env.example .env            # put your gateway URL + API key in .env
-docker compose up -d --build    # Qdrant + Postgres + ingest + app
+docker compose up -d --build    # starts everything
 ```
 
-Open <http://localhost:8000> (default login `admin` / `admin` — change it). The
-default instance
-[`examples/papers/rag.config.yaml`](apps/chainlit/examples/papers/rag.config.yaml)
-ingests the three shipped papers with every feature enabled.
+The second command copies a template for your settings. Open the new `.env` file
+and fill in the address and key for your AI service. The last command starts the
+assistant, which takes a few minutes the first time.
+
+Then open <http://localhost:8000> and log in with `admin` / `admin`. Change that
+password before anyone else can reach the app.
+
+The assistant starts out with the three example papers already loaded, and all
+features switched on. Its settings are in
+[`examples/papers/rag.config.yaml`](apps/chainlit/examples/papers/rag.config.yaml),
+which is a good file to look at first.
 
 <details>
 <summary><b>Without Docker</b></summary>
 
 ```bash
 cd apps/chainlit
-uv sync                                   # use uv, not pip — see Updating below
-docker run -p 6333:6333 qdrant/qdrant     # vector store
+uv sync                                   # use uv, not pip (see Updating below)
+docker run -p 6333:6333 qdrant/qdrant     # storage for the searchable text
 
 export RAG_CONFIG=examples/papers/rag.config.yaml
-uv run python -m kb.ingest --dry-run      # inspect chunks, embeds nothing
-uv run python -m kb.ingest                # embed + upsert
+uv run python -m kb.ingest --dry-run      # preview only, changes nothing
+uv run python -m kb.ingest                # actually read the documents in
 uv run chainlit run app.py                # http://localhost:8000
 ```
 </details>
 
-> **Open-weight models by default, and names are gateway-specific.** The example
-> uses `gpt-oss-120b` (Apache-2.0 — the open-weight release, not the hosted GPT
-> API), `octen-embedding-8b` and `gemma-4-31b` for vision. No proprietary vendor
-> is required anywhere. Your gateway will expose its own names, so ask it
-> (`GET /v1/models`) and put those in the config — there is a commented block
-> listing other open options (Qwen3, Llama 3.x, Mistral, BGE-M3, multilingual-E5).
+> **Which AI models to use.** The example uses freely available models
+> (`gpt-oss-120b`, `octen-embedding-8b`, and `gemma-4-31b` for reading images).
+> Nothing here ties you to a paid provider.
+>
+> Model names differ from service to service, so the names above may not work
+> with yours. Ask your service which models it offers, then write those names
+> into the settings file. The file lists more open alternatives in a comment
+> (Qwen3, Llama 3.x, Mistral, BGE-M3, multilingual-E5).
 
 ## Updating to a newer version
 
@@ -71,7 +92,7 @@ docker compose up -d --build
 ```
 
 The `--build` at the end matters. Without it, Docker starts your **old** app again and
-you will not see any of the changes — with no error to warn you. Rebuilding takes about
+you will not see any of the changes, and no error warns you. Rebuilding takes about
 half a minute. (`make up` does the same thing.)
 
 **Without Docker:**
@@ -86,7 +107,7 @@ Use `uv sync`, not `pip install -e .`. Pip picks different versions of some pack
 and the app can fail to start.
 
 Then open <http://localhost:8000> and ask a question. Click one of the sources under the
-answer — the PDF should open on the right. That is the quickest way to see it worked.
+answer and the PDF should open on the right. That is the quickest way to see it worked.
 
 ### Good to know
 
@@ -100,55 +121,65 @@ answer — the PDF should open on the right. That is the quickest way to see it 
 
 ## Use your own documents
 
+First make your own copy of the settings file, so the examples stay intact:
+
 ```bash
 cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
 ```
 
-1. Drop your PDFs into `apps/chainlit/data/documents/`. Your files stay local —
-   only the three examples are versioned, and you may delete them.
-2. In `my-rag.yaml`, set a fresh `vector_store.collection`.
-3. Re-ingest: `RAG_CONFIG=my-rag.yaml uv run python -m kb.ingest --recreate`
+1. Put your PDFs into `apps/chainlit/data/documents/`. They stay on your machine.
+   Only the three example papers belong to the project, and you can delete them.
+2. Open `my-rag.yaml` and give `vector_store.collection` a new name. This keeps
+   your documents separate from the examples.
+3. Let the app read your documents:
+   `RAG_CONFIG=my-rag.yaml uv run python -m kb.ingest --recreate`
 
-Other formats (Markdown, JSON, CSV, custom parsers) and chunking options:
+It also handles Markdown, JSON and CSV files. See
 [Adding your data](docs/adding-data.md).
 
 ## What you configure
 
-| Block | What it controls |
-|---|---|
-| `models` | chat + embedding model, gateway, models offered in the UI picker |
-| `vector_store` | Qdrant URL and collection |
-| `data_sources[]` | where documents live, their format, per-source chunking |
-| `chunking` | `fixed_size` · `heading` · `passthrough` · `semantic` · `docling_hybrid` |
-| `retrieval` | `top_k`, score threshold, indexed and filterable metadata fields |
-| `tools` | which [agentic tools](docs/tools.md) the model may call |
-| `images` | [figure handling](docs/images.md): descriptions, inline placement, vision |
-| `citation` | how a source reference is rendered and which fields it shows |
-| `prompt` | system prompt (or [auto-generate](docs/prompts.md) one), starter questions |
-| `app` | streaming, personalization, settings panel |
+Everything lives in one settings file. These are its sections:
 
-Full reference: [Configuration](docs/configuration.md) — generated from the schema,
-so it cannot drift from the code.
+| Section | What it controls |
+|---|---|
+| `models` | which AI models to use, and which ones users can pick in the app |
+| `vector_store` | where the searchable text is stored |
+| `data_sources[]` | where your documents are and what type they are |
+| `chunking` | how documents get cut into pieces before they are searched |
+| `retrieval` | how many pieces to look up for each question |
+| `tools` | what the assistant is allowed to do besides searching → [more](docs/tools.md) |
+| `images` | what happens with pictures and charts in your PDFs → [more](docs/images.md) |
+| `citation` | how a source reference looks under an answer |
+| `prompt` | the instructions the assistant follows, and the example questions → [more](docs/prompts.md) |
+| `app` | appearance and behaviour of the chat window |
+
+Every single option is listed in [Configuration](docs/configuration.md).
 
 ## Features
 
-- **Agentic retrieval** — the model chooses among five tools: semantic `search`,
-  `list_documents`, `fetch_document` (a whole document, which is what summaries
-  need), `expand_context`, `verify_claim`. Enable them per instance; `search`
-  alone is classic RAG. → [docs](docs/tools.md)
-- **Figures, not just text** — figures are extracted, described by a vision model
-  and made searchable; a figure the answer discusses appears inline **above that
-  paragraph**. → [docs](docs/images.md)
-- **Tables survive ingestion** — Docling tables are serialized into their section
-  instead of being dropped.
-- **Clickable citations** — each claim carries a source that opens the original PDF
-  at the right page; the format comes from config.
-- **Self-writing system prompt** — with none configured, the app generates one from
-  your indexed documents at startup and caches it. → [docs](docs/prompts.md)
-- **Model picker and prompt editor** in the settings panel, persisted per user.
-- **Chat history, feedback and CSV/ZIP export**, GitHub OAuth or local login.
+- **The assistant decides how to look things up.** Besides plain search it can
+  list all documents, read a whole document (needed for summaries), fetch more
+  text around a hit, or double-check a claim. You choose which of these it may
+  use. → [docs](docs/tools.md)
+- **Pictures and charts are included, not skipped.** They are described in words,
+  so they can be found by a search, and a relevant figure is shown right above
+  the paragraph that discusses it. → [docs](docs/images.md)
+- **Tables are kept.** They stay part of the text instead of being thrown away.
+- **Every claim has a source.** Click it and the original PDF opens at the right
+  page.
+- **The assistant can write its own instructions.** If you do not write them
+  yourself, it creates them from your documents when it starts.
+  → [docs](docs/prompts.md)
+- **Users can switch models and edit instructions** in the settings panel, and
+  their choice is remembered.
+- **Chat history, thumbs up/down and exports**, with GitHub or local login.
 
 ## How it fits together
+
+Your documents are read, cut into pieces and stored so they can be searched. When
+someone asks a question, the matching pieces are looked up and handed to the AI
+model, which writes an answer with sources.
 
 ```
                         rag.config.yaml
@@ -159,9 +190,9 @@ so it cannot drift from the code.
   Chainlit UI ◄── citations ◄── answer ◄── LLM + tools ◄── retrieval
 ```
 
-A format lives in `kb/parsers/`, a chunking strategy in `kb/chunkers/`, a tool in
-`tools/` — each is a small registry you extend by adding one file.
-→ [Extending](docs/extending.md)
+Each step is one small folder you can extend with a single new file: document
+types in `kb/parsers/`, ways of cutting text in `kb/chunkers/`, and abilities in
+`tools/`. → [Extending](docs/extending.md)
 
 ## Documentation
 
@@ -183,17 +214,20 @@ Published in English and German at
 
 ## Limitations
 
-- **Prototype.** Not security-audited — review it before production use.
-- **Citations and follow-up questions are parsed from German markers**
-  (`Quelle N: … (S.x)`, `Anschlussfragen:`), so set `language: de` for those to
-  work. Your documents may be in any language.
-- `images.mode: describe` costs one vision call per figure at ingest time.
-- Changing the embedding model requires a re-ingest (`--recreate`).
+- **This is a prototype.** It has not been security-checked, so look it over
+  before using it with sensitive data or real users.
+- **Sources and follow-up questions only work in German.** The app looks for
+  German wording (`Quelle N: … (S.x)`, `Anschlussfragen:`), so set `language: de`
+  for those two features. Your documents themselves can be in any language.
+- **Describing pictures costs money.** With `images.mode: describe`, every figure
+  is sent to an AI model once while your documents are being read in.
+- **Changing the model that indexes your text means reading everything in again**
+  (`--recreate`).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Earlier project stages — the IT-Grundschutz
-assistant, research notebooks and evaluation scripts — remain on the
+See [CONTRIBUTING.md](CONTRIBUTING.md). Earlier project stages (the IT-Grundschutz
+assistant, research notebooks and evaluation scripts) remain on the
 `backup/pre-template-cleanup` branch.
 
 ## References
@@ -203,7 +237,7 @@ assistant, research notebooks and evaluation scripts — remain on the
 
 ## Licence
 
-Code under the [MIT licence](LICENSE). The example papers are CC BY 4.0 — see
+Code under the [MIT licence](LICENSE). The example papers are CC BY 4.0, see
 [SOURCES.md](apps/chainlit/data/documents/SOURCES.md).
 
 ---

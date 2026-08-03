@@ -1,8 +1,9 @@
 # Adding your data
 
-Every corpus is a `data_sources[]` entry in your config. A source declares
-**where** the files are, **what format** they are, and optionally how to chunk
-and tag them. You can mix several sources into one collection.
+Each set of documents is one entry under `data_sources[]` in your settings file.
+An entry says **where** the files are, **what type** they are, and optionally how
+to cut them up and label them. You can list several sets and search them all
+together.
 
 ```yaml
 data_sources:
@@ -15,15 +16,15 @@ data_sources:
 ```
 
 !!! note "Paths are relative to the config file"
-    A `path` (and `pdf_options.docling_json_dir`, `sources.data_dir`, …) is
-    resolved against the **directory of the YAML file**, not your shell's working
-    directory. Absolute paths are used as-is. In Docker, mounted absolute paths
-    (`/data/...`) or the `INGEST_DOCLING_JSON_DIR` env override apply.
+    A `path` is counted **from the folder the settings file is in**, not from
+    wherever you happen to be in the terminal. This trips people up. Paths that
+    start at the root of the disk are used as written. Inside Docker, use the
+    mounted paths (`/data/...`) or the `INGEST_DOCLING_JSON_DIR` setting.
 
 ## 1. Put the files somewhere
 
-Drop your documents anywhere and point `path` at them — e.g. a `data/` folder at
-the repo root:
+Put your documents anywhere on your machine and point `path` at them. For
+example, a `data/` folder next to the project:
 
 ```
 pilotprojekt-rag-template/
@@ -39,9 +40,10 @@ pilotprojekt-rag-template/
 
 === "PDF"
 
-    Point at a folder of PDFs. They are parsed with **Docling** (lazy import),
-    which reconstructs **structured, heading-delimited sections** (with section
-    titles and page ranges) via `export_to_dict()`. Enable OCR for scanned docs.
+    Point at a folder of PDFs. **Docling** reads them and recognises the
+    structure, so it knows the headings, which text belongs to which section, and
+    which page it was on. Switch on OCR if your PDFs are scans, meaning the text
+    is really a photo and cannot be selected.
 
     ```yaml
     - name: handbook
@@ -52,12 +54,10 @@ pilotprojekt-rag-template/
       pdf_options: {ocr: true, ocr_engine: tesseract, ocr_lang: [eng, deu]}
     ```
 
-    **Convert once (caching):** Docling + OCR is slow, and you'll re-ingest while
-    tuning the config. Pre-export the PDFs to Docling JSON once and point at that
-    directory to skip live conversion on every ingest — the chunk output is the
-    same, it's purely a speed optimization. Use Docling's own CLI to produce the
-    JSON (one file per PDF, keeping page/provenance metadata), then let
-    `pdf_options.docling_json_dir` take that fast path:
+    **Read the PDFs once and reuse the result.** Reading PDFs is slow, especially
+    with OCR, and you will likely repeat it while getting your settings right. You
+    can convert them once and point at that, which skips the slow step from then
+    on. The result is identical, it is purely about speed:
 
     ```bash
     docling --to json --output ../../data/handbook_json ../../data/handbook
@@ -72,7 +72,8 @@ pilotprojekt-rag-template/
 
 === "Text / Markdown"
 
-    One section per file; good with `fixed_size` chunking.
+    Each file becomes one section. Works well with the `fixed_size` way of
+    splitting.
 
     ```yaml
     - name: notes
@@ -83,8 +84,8 @@ pilotprojekt-rag-template/
 
 === "CSV"
 
-    One chunk per row via a [field-mapping](field-mapping.md). Use `passthrough`
-    so each row stays one chunk.
+    One piece per row. You describe which columns to use with a
+    [field-mapping](field-mapping.md). Use `passthrough` so each row stays whole.
 
     ```yaml
     - name: faq
@@ -99,8 +100,8 @@ pilotprojekt-rag-template/
 
 === "JSON"
 
-    Flat lists or deeply nested structures — see the full
-    [Field-Mapping DSL](field-mapping.md) walkthrough.
+    Simple lists as well as deeply nested files. The full walkthrough is in
+    [Field-Mapping DSL](field-mapping.md).
 
     ```yaml
     - name: articles
@@ -114,8 +115,8 @@ pilotprojekt-rag-template/
 
 === "Custom"
 
-    For irreducibly special structure, write a parser and reference it — see
-    [Extending](extending.md).
+    If your files have an unusual structure that none of the above fits, someone
+    can write a small piece of Python for it. See [Extending](extending.md).
 
     ```yaml
     - name: mine
@@ -127,18 +128,24 @@ pilotprojekt-rag-template/
 
 ## 3. Choose a chunking strategy
 
+Documents are cut into pieces before they are stored, because searching works
+better on small pieces than on whole documents. There are several ways to cut:
+
 | Strategy | What it does | Use for |
 |---|---|---|
-| `fixed_size` | Sliding character windows (`max_chars`, `overlap`) | Plain PDFs/text with no structure |
-| `heading` | One chunk per parser section; splits only oversized sections | Heading-delimited PDFs (Docling JSON) |
-| `passthrough` | Exactly one chunk per section — never split | Structured JSON/CSV records |
-| `semantic` | Splits each section at embedding-similarity breakpoints; embeds sentences at ingest (extra embedding calls, not free) | Long prose without usable headings |
-| `docling_hybrid` | Docling's native token-aware chunker; serializes tables/figures itself and sizes chunks by the embedding tokenizer | PDF sources only |
+| `fixed_size` | Cuts every so many characters, with a little overlap so sentences are not lost at the seam | Plain documents with no clear structure |
+| `heading` | One piece per section, splitting only sections that are too long | Documents with proper headings |
+| `passthrough` | One piece per record, never split | Rows from JSON/CSV files |
+| `semantic` | Cuts where the topic changes instead of at a fixed length. More accurate, but costs extra because it analyses the text while reading it in | Long flowing text without usable headings |
+| `docling_hybrid` | Docling's own method. Handles tables and figures itself and sizes the pieces so they always fit the model | PDFs only |
 
-Set a global default under `chunking:` and override per source with a source-level
-`chunking:` block.
+Set one default under `chunking:` for everything, and override it for a single
+set of documents with a `chunking:` block inside that entry.
 
 ## 4. Dry-run, then ingest
+
+Always do the practice run first. It shows what would be stored, without storing
+anything and without costing anything:
 
 ```bash
 export RAG_CONFIG=my-rag.yaml
@@ -147,15 +154,17 @@ python -m kb.ingest                         # embed + upsert into the collection
 ```
 
 !!! warning "Re-ingesting after changes"
-    `--skip-if-exists` only checks that the collection exists. After changing the
-    content or the `embed_model`, re-run with `--recreate` (or a new
-    `vector_store.collection`) — a mismatched embedding model is refused because
-    the vectors would be incompatible.
+    `--skip-if-exists` only checks that the collection exists, not whether
+    anything changed. After editing your documents or your settings, run again
+    with `--recreate` (or use a new `vector_store.collection`). Switching to a
+    different `embed_model` is refused outright, because old and new data cannot
+    be compared.
 
 ## 5. Make citations open the source file
 
-For the "open source" side panel to work, the served files must live under
-`sources.data_dir` and their extension must be allowed:
+For a click on a source to open the actual document, two things must be true: the
+file has to sit inside the folder named in `sources.data_dir`, and its file type
+has to be listed as allowed.
 
 ```yaml
 sources:
@@ -163,6 +172,8 @@ sources:
   served_extensions: [.pdf, .txt, .md]
 ```
 
-Citations are built from each chunk's metadata (`source_file`/`title`/`page`).
-The built-in parsers already set these; a [custom parser](extending.md) should
-too. Surface extra domain fields in citations via `citation.extra_fields`.
+The reference under an answer is assembled from what the app noted while reading:
+file name, title and page. The built-in readers fill this in automatically. If
+someone writes a [custom parser](extending.md), it should do the same. To show
+additional fields of your own in a citation, list them under
+`citation.extra_fields`.

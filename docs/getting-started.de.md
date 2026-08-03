@@ -1,5 +1,9 @@
 # Erste Schritte
 
+Diese Seite führt dich von einem leeren Ordner zu einem laufenden Assistenten,
+der Fragen zu deinen eigenen Dokumenten beantwortet. Kopiere die Befehle der
+Reihe nach in ein Terminal.
+
 ## 1. Klonen und installieren
 
 ```bash
@@ -9,9 +13,15 @@ uv sync            # uv nutzen, nicht pip: pip installiert falsche Paketversione
 cp .env.example .env   # LITELLM_*- und QDRANT_*-Secrets eintragen
 ```
 
+Die letzte Zeile legt eine Datei namens `.env` an. Öffne sie und trage Adresse
+und Zugangsschlüssel deines KI-Dienstes ein. Ohne diese Angaben funktioniert
+nichts.
+
 ## 2. Minimal-Konfiguration kopieren
 
-Beginne mit der kleinsten funktionierenden Konfiguration und passe sie an:
+Die Einstellungsdatei entscheidet über alles: welche Dokumente gelesen werden,
+welche KI-Modelle zum Einsatz kommen, wie Antworten aufgebaut sind. Beginne mit
+dem kleinsten funktionierenden Beispiel und passe es an:
 
 ```bash
 cp examples/minimal/rag.config.yaml my-rag.yaml
@@ -34,12 +44,19 @@ data_sources:
     glob: "*.pdf"
 ```
 
-Richte `data_sources[].path` auf deine Dokumente, wähle eine `collection` und
-setze die Modelle. Alle Felder findest du in der
+Drei Dinge musst du anpassen:
+
+- `data_sources[].path` ist der Ordner, in dem deine Dokumente liegen.
+- `collection` ist ein Name, den du dir ausdenkst. Er hält diesen Satz Dokumente
+  von allen anderen getrennt.
+- Die beiden Modelle müssen Namen sein, die dein KI-Dienst tatsächlich anbietet.
+  Im Zweifel dort die Liste erfragen.
+
+Alle verfügbaren Einstellungen stehen in der
 [Konfigurationsreferenz](configuration.md).
 
-Welche Konfiguration geladen wird, steuert die Umgebungsvariable `RAG_CONFIG`
-(relativ zu `apps/chainlit/`):
+Jetzt sagst du der App, welche Datei sie nutzen soll. Das musst du in jedem neuen
+Terminal-Fenster wiederholen:
 
 ```bash
 export RAG_CONFIG=my-rag.yaml
@@ -47,16 +64,16 @@ export RAG_CONFIG=my-rag.yaml
 
 ## 3. Parsing mit `--dry-run` prüfen
 
-`--dry-run` parst und chunkt **ohne zu embedden oder in Qdrant zu schreiben** und
-gibt die ersten Chunks mit ihren Metadaten aus. Das ist der schnellste Weg, um
-eine Konfiguration zu iterieren (besonders ein JSON/CSV-[Field-Mapping](field-mapping.md)):
+Bevor du Zeit und Geld in den echten Durchlauf steckst, mach einen Probelauf. Er
+liest deine Dokumente und zeigt, wie sie zerteilt werden, **speichert aber nichts
+und kostet nichts**:
 
 ```bash
 python -m kb.ingest --dry-run --limit 5
 ```
 
 ```text
-DRY RUN — parsed and chunked, nothing embedded or written.
+DRY RUN: parsed and chunked, nothing embedded or written.
 
   source 'docs' [pdf / fixed_size]: 12 sections -> 40 chunks
 
@@ -64,7 +81,15 @@ DRY RUN — parsed and chunked, nothing embedded or written.
   ...
 ```
 
+Steht dort 0 Stücke, hat die App keine Dokumente gefunden. Prüfe dann `path` und
+`glob` in deiner Einstellungsdatei. Dieser Probelauf ist der schnellste Weg zu
+einer richtigen Konfiguration, besonders bei JSON/CSV-Dateien
+([Field-Mapping](field-mapping.md)).
+
 ## 4. Ingestion
+
+Jetzt der echte Durchlauf. Die App liest jedes Dokument und speichert es
+durchsuchbar ab. Je nach Menge dauert das eine Weile:
 
 ```bash
 python -m kb.ingest              # embedded + upsertet in die konfigurierte Collection
@@ -72,14 +97,20 @@ python -m kb.ingest --recreate   # Collection komplett neu aufbauen
 python -m kb.ingest --only docs  # nur bestimmte Quellen ingesten
 ```
 
+Beim ersten Mal nimmst du die erste Zeile. `--recreate` nutzt du immer dann, wenn
+du Dokumente oder Einstellungen geändert hast und sauber neu anfangen willst.
+
 !!! warning "`--skip-if-exists` vs. der Embedding-Modell-Wächter"
-    `--skip-if-exists` **prüft nur, ob die Collection existiert** — es erkennt
-    keine Konfigurationsänderungen. Beim ersten Ingest schreibt die Pipeline
-    einen Sentinel mit dem verwendeten Embedding-Modell. Wenn du später den
-    Inhalt oder das `embed_model` änderst, führe erneut mit **`--recreate`** aus
-    (oder richte `vector_store.collection` auf einen neuen Namen). Ein
-    abweichendes Embedding-Modell in eine bestehende Collection zu ingesten wird
-    abgelehnt, da die Vektoren inkompatibel wären.
+    `--skip-if-exists` **prüft nur, ob die Collection existiert**. Es merkt
+    nicht, dass du etwas geändert hast. Wenn du also Dokumente oder Einstellungen
+    bearbeitest, überspringt diese Option die Arbeit und du bekommst weiterhin
+    alte Antworten.
+
+    Eines fängt die App aber ab: Beim ersten Durchlauf merkt sie sich, welches
+    Modell deinen Text durchsuchbar gemacht hat. Wechselst du später auf ein
+    anderes, verweigert sie den Dienst, statt unverträgliche Daten zu mischen.
+    Nimm dann **`--recreate`** oder gib `vector_store.collection` einen neuen
+    Namen.
 
 ## 5. App starten
 
@@ -88,6 +119,10 @@ chainlit run app.py -w
 # oder der gesamte Stack (Qdrant + Postgres + Auto-Ingest + App):
 make up
 ```
+
+Danach <http://localhost:8000> öffnen und eine Frage stellen. Unter jeder Antwort
+stehen die Quellen. Ein Klick öffnet das Originaldokument auf der richtigen
+Seite.
 
 ## Doku lokal
 

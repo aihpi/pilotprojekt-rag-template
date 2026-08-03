@@ -1,90 +1,99 @@
 # Agentic tools
 
-Classic RAG retrieves once and answers. This template instead exposes a **set of
-tools** to the model and lets it decide what to call, how often, and in which
-order — list the knowledge base, pull a whole document, widen a hit, verify a
-claim. Which tools exist is a config decision; every tool lives in
-`apps/chainlit/tools/` and registers itself in a registry.
+A simple document assistant does one search and answers from the result. This one
+instead gets a **set of abilities** and decides for itself which to use, how
+often, and in what order: list what documents exist, read a whole document,
+fetch more text around a promising passage, or check a claim before stating it.
+
+You decide which abilities it gets. Each one is a small file in
+`apps/chainlit/tools/`.
 
 ```yaml
 tools:
   enabled: [search, list_documents, fetch_document, expand_context, verify_claim]
   descriptions:
-    list_documents: "your own wording — this is what the model reads"
+    list_documents: "your own wording, this is what the model reads"
   fetch_max_chunks: 200   # whole-document size cap for fetch_document
   expand_window: 1        # default neighbor window for expand_context
 ```
 
 !!! note "The default is single-tool RAG"
-    `tools.enabled` defaults to `[search]`, so an instance that only declares the
-    classic `tool:` block keeps behaving exactly as before. Order matters: it is
-    the order in which the schemas are handed to the model. The env override
-    `RAG_TOOLS_ENABLED` takes a `||`-separated list.
+    If you say nothing, the assistant only gets `search`, so an older setup keeps
+    behaving exactly as it did. The order you list them in is the order the model
+    is told about them. There is also a setting, `RAG_TOOLS_ENABLED`, which takes
+    the names separated by `||`.
 
 ## The five built-in tools
 
-| Tool | What it does | Citations |
+| Tool | What it does | Produces sources |
 |---|---|---|
-| `search` | Semantic top-k retrieval | yes |
-| `list_documents` | Enumerate the knowledge base | no (navigational) |
-| `fetch_document` | Load one whole document in reading order | yes |
-| `expand_context` | Neighboring sections around a hit | yes |
-| `verify_claim` | Re-retrieve evidence for a drafted statement | yes |
+| `search` | Finds the passages that best match a question | yes |
+| `list_documents` | Lists what is in the knowledge base | no (just for orientation) |
+| `fetch_document` | Reads one whole document from start to finish | yes |
+| `expand_context` | Fetches the text around a passage | yes |
+| `verify_claim` | Checks a statement against the documents before it is said | yes |
 
 ### `search`
 
-Semantic top-k retrieval — the original single tool. Parameters: `query`,
-`top_k`, and an optional `document` (an **exact** `source_file`) to scope the
-search to one document. Scoping requires `retrieval.filterable_fields:
-[source_file]`, otherwise the filter is ignored. For backwards compatibility its
-function name and descriptions come from the `tool:` block, not from
-`tools.descriptions`.
+The ordinary search, and the only one older setups had. It takes a `query`, a
+number of results (`top_k`), and optionally one `document` to search inside. That
+last one only works if you allow filtering by file name, via
+`retrieval.filterable_fields: [source_file]`; otherwise it is quietly ignored.
+
+For compatibility with older setups, this one tool takes its wording from the
+`tool:` block rather than from `tools.descriptions`.
 
 ### `list_documents`
 
-Lists every document in the collection: exact `source_file`, title, chunk count
-and an approximate token size. It takes no parameters and is purely
-**navigational** — it returns no citations. It is what lets the model turn a
-fuzzy user reference ("the Kage 2018 paper") into the exact `source_file` that
-`fetch_document` and `expand_context` require, and it answers "which documents
-are in the knowledge base?" directly.
+Lists every document: its exact file name, title, how many pieces it was split
+into, and roughly how long it is. It takes no input and produces no sources,
+because it is only there for orientation.
+
+It solves a specific problem. People refer to documents loosely ("the Kage 2018
+paper"), but `fetch_document` and `expand_context` need the exact file name. This
+ability lets the assistant look that up. It also answers "which documents do you
+have?" directly.
 
 ### `fetch_document`
 
-Loads a **complete** document, all sections in reading order, by its exact
-`source_file`. This is the right tool for summaries and overviews, where
-semantic top-k only ever returns scattered fragments. The result is capped at
-`tools.fetch_max_chunks` and the payload sets `truncated: true` when the cap
-was hit, so the model knows it did not see the whole text.
+Reads a **complete** document, all sections in the right order, by its exact file
+name. This is the right choice for summaries and overviews, where ordinary search
+only ever returns scattered fragments and the assistant would miss half the
+document.
+
+Very long documents are cut off at `tools.fetch_max_chunks`, and the assistant is
+told when that happened, so it knows it did not see everything.
 
 ### `expand_context`
 
-Returns the sections within ±`window` of a given `section_index` in a document
-(`source_file`, `section_index`, `window`). Use it against RAG's classic "the
-chunk was too small" failure: the model saw a promising hit that looks cut off
-and pulls its neighbors instead of guessing.
+Fetches the sections just before and after a given one. Use it against the
+classic problem that a found passage is too short: the assistant sees something
+promising that looks cut off mid-thought and pulls in the neighbouring text
+instead of guessing.
 
 ### `verify_claim`
 
-A hallucination guard. The model passes a statement it is about to make; the
-tool re-queries the knowledge base and returns the supporting passages plus a
-`supported` signal, so an unsupported claim can be dropped or hedged before it
-reaches the user.
+A safeguard against invented answers. The assistant passes a sentence it is about
+to write, and this searches the documents again for evidence. It reports back
+whether the sentence is actually supported, so an unsupported claim can be
+dropped or softened before anyone sees it.
 
 ## Descriptions are the prompt
 
-A tool's description is the only thing the model knows about it, so it is the
-main tuning knob. Every built-in tool ships language-aware defaults in German
-and English, selected by the top-level `language:` field of your config (see
-[Configuration](configuration.md)). Override any of them per tool id under
-`tools.descriptions` — useful to speak your domain's vocabulary ("paper",
-"Baustein", "ticket") instead of the generic "document".
+The description of an ability is the only thing the model knows about it, which
+makes it the most important thing you can tune. Every built-in one comes with
+sensible wording in German and English, picked according to the `language:`
+setting (see [Configuration](configuration.md)).
+
+Override any of them under `tools.descriptions`. This is worth doing to use your
+own vocabulary: "paper", "Baustein" or "ticket" instead of the generic
+"document".
 
 ## Writing your own tool
 
-A tool is a schema builder (returns an OpenAI function schema as a `dict`) plus
-an async handler `(args: dict, ctx: ToolContext) -> ToolResult`. The types live
-in [`tools/base.py`](https://github.com/aihpi/pilotprojekt-rag-template/blob/main/apps/chainlit/tools/base.py).
+This part needs Python. An ability consists of two pieces: a description of what
+it takes as input, and a function that does the work. The types are in
+[`tools/base.py`](https://github.com/aihpi/pilotprojekt-rag-template/blob/main/apps/chainlit/tools/base.py).
 
 ```python
 # apps/chainlit/tools/count_pages.py
@@ -111,7 +120,7 @@ def _schema(cfg) -> dict[str, Any]:
 
 @register_tool("count_pages", build_schema=_schema)
 async def _count_pages(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-    from rag_tool import fetch_document          # inside the handler — see below
+    from rag_tool import fetch_document          # inside the handler, see below
 
     results = await fetch_document(
         str(args.get("source_file") or ""),
@@ -122,22 +131,22 @@ async def _count_pages(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     return ToolResult(payload={"pages": len(pages)}, results=[])
 ```
 
-Import the module at the bottom of `tools/__init__.py` so the decorator runs,
-then add the id to `tools.enabled`.
+Add the module to the import list at the bottom of `tools/__init__.py` so it gets
+registered, then add its name to `tools.enabled`.
 
 !!! warning "Two rules that will bite you"
-    **Citations come from `results`.** `ToolResult.results` must be
-    RagResult-shaped (`.text`, `.score`, `.metadata`) — those items feed the
-    aggregation and the citation panel. A purely navigational tool returns
-    `results=[]`; the `payload` alone is what the model reads.
+    **Sources come from `results`.** Whatever you put in `ToolResult.results`
+    must have `.text`, `.score` and `.metadata`, because that is what the source
+    list is built from. An ability that is only for orientation returns
+    `results=[]`, and then only the `payload` reaches the model.
 
-    **Import `rag_tool` inside the handler body**, never at module top. `tools`
-    must stay free of the `rag_tool → settings → get_config()` chain, because
-    `settings` builds the config at import time — a top-level import creates a
-    cycle.
+    **Import `rag_tool` inside the function, never at the top of the file.**
+    Loading the settings happens at import time, so importing it at the top makes
+    two modules wait for each other and the app fails to start.
 
 ## Invalid ids fail fast
 
-An unknown id in `tools.enabled` is rejected while the config loads, and the
-validator lists the registered ids in the error. A typo therefore surfaces at
-startup instead of as a silently missing capability at query time.
+A name in `tools.enabled` that does not exist is rejected while the settings are
+being read, and the error message lists the valid names. So a typo shows up
+immediately at startup, instead of quietly leaving the assistant without an
+ability you thought it had.

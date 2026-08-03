@@ -1,22 +1,27 @@
 # System Prompts
 
-The system prompt is what turns a retrieval pipeline into *your* assistant: it
-sets the identity, forces retrieval before answering, and fixes the citation and
-follow-up format the UI parses. You can write it by hand, or let the app generate
-one from your own corpus at startup.
+The system prompt is the standing instruction the assistant follows in every
+conversation. It is what turns a search engine into *your* assistant: it says who
+the assistant is, insists it looks things up before answering, and fixes the
+exact wording of sources and follow-up questions so the app can turn them into
+clickable links and buttons.
+
+You can write it yourself, or let the app write one for you based on your own
+documents.
 
 ## Where the prompt comes from
 
-At startup the app resolves the prompt from three sources, in this order:
+At startup the app looks in three places, in this order, and uses the first one
+it finds:
 
 | Order | Source | When it applies |
 |---|---|---|
-| 1 | `prompt.system_prompt_path` | The field is set **and** the file exists |
-| 2 | Auto-generation | `prompt.auto_generate: true` (the default) — one prompt is generated at startup |
-| 3 | `apps/chainlit/config/prompts/default_system.md` | Bundled fallback, used when neither of the above yields a prompt |
+| 1 | `prompt.system_prompt_path` | You named a file **and** that file exists |
+| 2 | Auto-generation | `prompt.auto_generate: true` (the default): the app writes one at startup |
+| 3 | `apps/chainlit/config/prompts/default_system.md` | The one supplied with the project, used if neither of the above produced anything |
 
-Setting `prompt.system_prompt_path` therefore disables generation entirely — an
-explicit file always wins.
+Because of that order, naming your own file switches the automatic writing off
+completely. Your file always wins.
 
 ```yaml
 prompt:
@@ -29,31 +34,32 @@ prompt:
 
 ## Auto-generation
 
-Generation (`apps/chainlit/system_prompt_gen.py`) does not guess what your corpus
-is about — it reads it:
+The app does not guess what your documents are about. It reads them:
 
-1. It samples the chunks **actually indexed** in the active collection (section
-   titles per document plus a few representative excerpts). `prompt.sample_size`
-   caps how many are used (default `40`).
-2. It loads a structural template — `prompt.template_path`, defaulting to a
-   `system.md` at the repo root if one exists, otherwise the bundled fallback.
-   The template supplies structure and rigor, not domain wording.
-3. It asks the configured chat model to write a prompt from both.
+1. It takes a sample of the text **actually stored** for your documents: the
+   section headings of each one plus a few typical excerpts. `prompt.sample_size`
+   limits how much is used (default `40`).
+2. It loads a skeleton that provides the structure and the strictness, but no
+   wording about your subject. By default this is a `system.md` next to the
+   project if one exists, otherwise the one supplied with it. You can point
+   somewhere else with `prompt.template_path`.
+3. It asks your chat model to write the instruction from those two pieces.
 
-The result is cached next to the config as
-`.generated_system_prompt.<collection>.md` (gitignored) and reused on every
-restart, so generation costs one model call per corpus, not one per boot.
+The result is saved next to your settings file as
+`.generated_system_prompt.<collection>.md` and reused on every restart. So this
+costs one model call per set of documents, not one per start.
 
-The generated prompt contains:
+The generated instruction covers:
 
-- a domain-specific identity, inferred from the corpus;
-- a retrieval-first obligation (call the tool, answer only from retrieved passages);
-- the citation format the app parses;
-- the answer language;
-- a length limit;
-- the follow-up-questions format.
+- who the assistant is, worked out from your documents;
+- the duty to look things up first and answer only from what was found;
+- the exact format for sources;
+- the language to answer in;
+- a maximum length;
+- the format for follow-up questions.
 
-To build a new one, delete the cache file or set `REGENERATE_SYSTEM_PROMPT=true`:
+To have a new one written, delete the saved file or use the
+`REGENERATE_SYSTEM_PROMPT` setting:
 
 ```bash
 rm .generated_system_prompt.papers.md
@@ -62,30 +68,32 @@ REGENERATE_SYSTEM_PROMPT=true chainlit run app.py
 ```
 
 !!! warning "Citations and follow-ups are parsed with German markers"
-    The app currently detects citations and follow-up questions by their **German**
-    markers: citations as `Quelle N: <section> (S.<page>)`, follow-ups under the
-    header `Anschlussfragen:`. So if you want clickable citations and follow-up
-    buttons, set `language: de`. The **corpus** may be in any language — the model
-    reads the English papers and answers in German. If you write the prompt by
-    hand, keep those two markers exactly.
+    The app recognises sources and follow-up questions only by their **German**
+    wording: sources as `Quelle N: <section> (S.<page>)` and follow-ups under the
+    heading `Anschlussfragen:`. So if you want clickable sources and follow-up
+    buttons, set `language: de`.
+
+    Your **documents** can be in any language. The model happily reads English
+    papers and answers in German. If you write the instruction yourself, keep
+    those two pieces of wording exactly as they are, or the links and buttons stop
+    appearing.
 
 ## Viewing and editing the prompt at runtime
 
-The gear panel shows the active prompt in an editable field
-("System-Prompt (bearbeitbar)"). An edit there applies **per user/session** — it
-is stored as `custom_prompt` and overrides the loaded prompt. Clearing the field
-returns to the default.
+The gear panel shows the active instruction in an editable box
+("System-Prompt (bearbeitbar)"). Edits there apply **only to you and only in this
+session**, and clearing the box returns to the normal one.
 
-That makes the panel ideal for iterating on wording; it is not a deployment
-mechanism. For a permanent change, edit the prompt file or point
-`prompt.system_prompt_path` at your own file.
+That makes the panel perfect for trying out wording, but it is not a way to roll
+a change out to everyone. For a permanent change, edit the prompt file, or point
+`prompt.system_prompt_path` at a file of your own.
 
 ## Choosing the chat model
 
-The same gear panel carries a chat-model selector. Its list fills itself from the
-gateway's `/v1/models` (embedding models are filtered out) and can be extended
-via `models.selectable_chat_models` — useful when the gateway does not enumerate
-its models:
+The same gear panel has a model selector. It fills itself with whatever your AI
+service offers (search models are hidden, since they cannot chat). Some services
+do not publish a list, and then the selector stays empty. In that case write the
+names in yourself:
 
 ```yaml
 models:
@@ -93,10 +101,10 @@ models:
   selectable_chat_models: []   # merged with whatever /v1/models advertises
 ```
 
-The selection is stored per user in the database, so it also applies to new
-chats.
+Each person's choice is remembered, so it also applies to their new chats.
 
 !!! note "Related pages"
     [Getting Started](getting-started.md) for the first run,
     [Configuration Reference](configuration.md) for every `prompt:` field, and
-    [Agentic Tools](tools.md) for the tools the prompt tells the model to call.
+    [Agentic Tools](tools.md) for the abilities the instruction tells the model
+    to use.

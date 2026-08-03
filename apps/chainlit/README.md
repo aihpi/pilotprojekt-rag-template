@@ -1,20 +1,22 @@
 # Chainlit RAG App
 
-This folder contains the config-driven Chainlit RAG app:
+This folder holds the actual application:
 
-- a typed config layer (`config/`) — one YAML per instance, selected by `RAG_CONFIG`,
-- a pluggable ingestion pipeline (`kb/`) — parsers × chunkers → embed → Qdrant,
-- the agentic tools the model may call (`tools/`),
-- the chat UI (`app.py`), and runnable instances under `examples/`.
+- the settings layer (`config/`): one file per setup, chosen with `RAG_CONFIG`,
+- the reading pipeline (`kb/`): read documents, cut them up, store them so they
+  can be searched,
+- the things the assistant is allowed to do (`tools/`),
+- the chat window (`app.py`), and ready-made setups under `examples/`.
 
-The active instance is chosen by the `RAG_CONFIG` env var. A fresh clone defaults
-to `examples/papers/rag.config.yaml` (a small open-access paper corpus with all
-features enabled); `config/default.yaml` is the neutral baseline, and
-`my-rag.yaml` is the gitignored slot for your own instance.
+Which setup is active is decided by `RAG_CONFIG`. A fresh clone uses
+`examples/papers/rag.config.yaml` (a small set of open-access papers with all
+features on). `config/default.yaml` is the plain baseline, and `my-rag.yaml` is
+the slot reserved for your own setup, which git ignores.
 
-**This file is the short operations guide.** For everything else — configuring an
-instance, adding data, tools, figures, prompts, the full config reference — see
-the [project docs](../../docs/index.md).
+**This file is the short operations guide**, for starting, stopping and
+troubleshooting. Everything else (setting things up, adding data, tools, figures,
+prompts, the full list of settings) is in the
+[project docs](../../docs/index.md).
 
 ## Quickstart (Docker Compose)
 
@@ -28,11 +30,13 @@ make logs                 # follow chainlit logs
 
 Then open <http://localhost:8000>.
 
-The stack starts `chainlit` (:8000), `qdrant` (:6333), `postgres` (:5432, native
-Chainlit thread history), `langflow` (:7860, optional) and a one-shot `ingest`
-container that runs `python -m kb.ingest --config "$RAG_CONFIG"` before Chainlit
-comes up. Inside Docker, services talk over service DNS names (`qdrant`,
-`postgres`), not `localhost`; Compose forces `QDRANT_URL=http://qdrant:6333`.
+Four things start together: the chat window on port 8000, the search storage
+(`qdrant`) on 6333, the database for chat history (`postgres`) on 5432, and a
+one-off job that reads your documents in before the chat window comes up. There
+is also an optional `langflow` on 7860.
+
+Inside Docker these talk to each other by name, not through `localhost`, which is
+why Compose sets `QDRANT_URL=http://qdrant:6333` for you.
 
 Day-to-day:
 
@@ -44,7 +48,7 @@ make ps           # service status
 
 ## Local (no Docker)
 
-Needs Python 3.12+, a reachable Qdrant, and an OpenAI-compatible LiteLLM endpoint.
+You need Python 3.12 or newer, a running Qdrant, and access to an AI service.
 
 ```bash
 uv sync                                  # or: make local-install (uv, not pip)
@@ -56,23 +60,24 @@ uv run chainlit run app.py -w            # add --port 8001 if 8000 is taken
 
 ## Environment
 
-`.env` holds **secrets, infrastructure and the config selector** only —
-per-instance settings (models, collection, chunking, prompt, citations, tools,
-images) live in the YAML. See `.env.example` for the annotated list; the
-essentials are:
+`.env` is only for **passwords, addresses and which setup to load**. Everything
+about a particular setup (models, collection, chunking, prompt, citations, tools,
+images) belongs in the settings file instead. `.env.example` lists everything
+with comments; the important ones are:
 
-- `RAG_CONFIG` — which YAML to load (relative to `apps/chainlit/`)
+- `RAG_CONFIG`: which settings file to load (counted from `apps/chainlit/`)
 - `LITELLM_BASE_URL`, `LITELLM_API_KEY`
 - `QDRANT_URL`, `QDRANT_API_KEY`
 - `DATABASE_URL`, `CHAINLIT_AUTH_SECRET`, `CHAINLIT_AUTH_USERNAME`/`_PASSWORD`
-  (native sidebar history + login — change the `admin/admin` default)
+  (chat history in the sidebar plus login; change the `admin/admin` default)
 - `INGEST_RECREATE`, `INGEST_BATCH_SIZE`, `INGEST_MAX_BATCH_CHARS`,
-  `INGEST_DOCLING_JSON_DIR` — auto-ingestion controls
+  `INGEST_DOCLING_JSON_DIR`: control the automatic reading-in step
 - `LANGFLOW_ENABLED`, `LANGFLOW_BASE_URL`, `LANGFLOW_FLOW_ID`,
-  `LANGFLOW_API_KEY` — exposes `langflow_agent` as an extra tool
+  `LANGFLOW_API_KEY`: adds `langflow_agent` as an extra ability
 
 Anything under "optional overrides" in `.env.example` (`CHAT_MODEL`, `TOP_K`, …)
-takes precedence over the YAML, but you rarely need it.
+beats the settings file. Handy occasionally, but easy to forget you set it, so
+use it sparingly.
 
 ## Ingestion
 
@@ -84,33 +89,32 @@ uv run python -m kb.ingest --skip-if-exists   # no-op if the collection exists
 uv run python -m kb.ingest --config examples/minimal/rag.config.yaml
 ```
 
-> `--skip-if-exists` only checks that the collection exists. After changing the
-> config's content or its `embed_model`, use `--recreate` (or a new
-> `vector_store.collection`) — a mismatched embed model is refused by the
-> sentinel guard, because the vectors would be incompatible.
+> `--skip-if-exists` only checks whether the collection is there, not whether
+> anything changed. After editing your documents or your settings, use
+> `--recreate` (or a new `vector_store.collection`). Switching the model that
+> makes text searchable is refused outright, because old and new data cannot be
+> compared.
 
-For slow PDF corpora you can pre-convert once with Docling's own CLI
-(`docling --to json --output <dir> <pdf-dir>`) and point
-`pdf_options.docling_json_dir` at the result — see
+Reading PDFs is slow. You can do it once up front with Docling's own command
+(`docling --to json --output <dir> <pdf-dir>`) and then point
+`pdf_options.docling_json_dir` at the result. See
 [Adding your data](../../docs/adding-data.md).
 
 ## Chat history & export
 
-Two layers coexist:
+There are two separate histories, which is confusing until you know:
 
-- **Native Chainlit thread history** (left sidebar) — Postgres via `DATABASE_URL`
-  plus login.
-- **Local SQLite log** used by the slash commands — DB at
-  `.chainlit/chat_history.sqlite3`, exports written to `.files/chat_exports`
-  (both overridable via `CHAT_DB_PATH` / `CHAT_EXPORT_DIR`).
+- **The sidebar history** is the real one, stored in Postgres via `DATABASE_URL`,
+  and needs login.
+- **A local file** used by the slash commands, at
+  `.chainlit/chat_history.sqlite3`, with exports written to `.files/chat_exports`
+  (both changeable via `CHAT_DB_PATH` / `CHAT_EXPORT_DIR`).
 
-In the chat UI: `/history`, `/history <session_id>`, `/export`,
-`/export <session_id>`, `/export all` (OpenAI-format JSON / JSONL).
+In the chat window: `/history`, `/history <session_id>`, `/export`,
+`/export <session_id>`, `/export all`.
 
-For a bulk download there is an **Export all chats** button in the left sidebar
-(injected by `public/custom.js`), which calls the `GET /export/all-chats` route
-and returns an OpenAI-format JSONL file. Admins can also export collected
-ratings via `GET /export/feedback` — see
+For a bulk download there is an **Export all chats** button in the left sidebar.
+Admins can also download all collected thumbs up/down ratings. See
 [Feedback export](../../docs/feedback-export.md).
 
 ## Tests
@@ -121,13 +125,16 @@ RAG_CONFIG=config/default.yaml uv run pytest tests/ -q
 
 ## Troubleshooting
 
-- **`Connection refused` to Qdrant** — not running, or wrong `QDRANT_URL`
-  (`http://qdrant:6333` inside Docker).
-- **Embedding 400 / context window exceeded** — lower `INGEST_MAX_BATCH_CHARS`
-  and/or `INGEST_BATCH_SIZE`.
-- **Large payload 400 from Qdrant** — lower the ingest batch size (256 → 128).
-- **Port 8000 already in use** — `chainlit run app.py -w --port 8001`.
-- **Citations point at the wrong text** — re-ingest with `--recreate`.
-- **`401 Unauthorized` / `404 Source not found` on `/sources/...`** — log in
-  again, and check the file lives under `sources.data_dir` with an extension
-  listed in `sources.served_extensions`.
+- **`Connection refused` to Qdrant.** It is not running, or `QDRANT_URL` is
+  wrong. Inside Docker it must be `http://qdrant:6333`, not `localhost`.
+- **Embedding 400 / context window exceeded.** Too much text at once. Lower
+  `INGEST_MAX_BATCH_CHARS` and/or `INGEST_BATCH_SIZE`.
+- **Large payload 400 from Qdrant.** Lower the batch size (256 → 128).
+- **Port 8000 already in use.** Something else has it. Run
+  `chainlit run app.py -w --port 8001`.
+- **Citations point at the wrong text.** Your documents and the stored data are
+  out of step. Read everything in again with `--recreate`.
+- **`401 Unauthorized` / `404 Source not found` on `/sources/...`.** Log in
+  again. If that does not help, the file is not inside the folder named in
+  `sources.data_dir`, or its file type is not listed in
+  `sources.served_extensions`.

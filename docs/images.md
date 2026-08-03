@@ -1,9 +1,9 @@
 # Figures & images
 
-Without this feature the PDF parser **drops figures entirely** — only their
-captions survive, as text. That is a real loss for papers and handbooks whose
-argument lives in a diagram. Turn figures into first-class, searchable content
-with the `images:` block.
+By default, when the app reads a PDF it **throws the pictures away** and keeps
+only their captions as text. For papers and handbooks whose whole argument sits
+in a diagram, that loses a lot. The `images:` block turns pictures and charts
+into content the assistant can actually find and show.
 
 ```yaml
 images:
@@ -18,86 +18,91 @@ images:
   vision_capable_models: [gemma-4-31b]
 ```
 
-The mode can be switched without touching the YAML via the `IMAGES_MODE`
-environment variable — handy for A/B comparisons of the same corpus.
+You can switch the mode without editing the file, using the `IMAGES_MODE`
+setting. That makes it easy to compare two modes on the same documents.
 
 ## Three modes
 
-| Mode | At ingest | At query time |
+| Mode | While reading documents in | When someone asks a question |
 |---|---|---|
-| `none` | Figures ignored | — (cheapest) |
-| `describe` | Each figure is rendered and described by `vision_model`, stored as its own chunk | Description is searched and cited like any text chunk |
-| `attach` | Same as `describe` | Plus: the figure **pixels** are sent to a vision-capable chat model |
+| `none` | Pictures are ignored | Nothing (cheapest) |
+| `describe` | Every picture is cut out and described in words by `vision_model` | The description is searched and quoted like any other text |
+| `attach` | Same as `describe` | Additionally, the **picture itself** is shown to a model that can see images |
 
-In `describe`, every figure becomes a normal, searchable and citable chunk whose
-text is the model-written description, in the language of the instance. Its
-metadata carries `is_figure`, `figure_index`, `image_path` and the page. Because
-retrieval then only ever touches text, `describe` works with **any** chat model
-afterwards — the vision model is needed at ingest, not at query time.
+With `describe`, each picture becomes an ordinary searchable entry whose text is
+the description the model wrote, in the language of your setup. It is stored with
+a note that it is a figure, plus its page number and where the image file lives.
 
-`attach` builds on exactly the same ingest and adds a vision pass to the answer.
+That has a useful consequence: because searching then only ever touches text,
+`describe` works with **any** chat model afterwards. The model that can see
+images is only needed once, while reading the documents in.
+
+`attach` uses exactly the same reading step and adds the picture to the answer on
+top.
 
 ## Cost, and when you must re-ingest
 
-The rule is simple: **one vision call per figure, at ingest.** Nothing is spent
-per query in `describe`.
+The rule is simple: **one call to the image model per picture, once, while
+reading documents in.** Answering questions costs nothing extra in `describe`.
 
 !!! warning "Switching modes"
-    Going from `none` to `describe` or `attach` requires a **re-ingest** — the
-    figures were never rendered or described. Switching between `describe` and
-    `attach` does **not**: the images and descriptions are already stored, only
-    the query-time behavior changes. See
-    [Adding your data](adding-data.md) for the re-ingest flags.
+    Going from `none` to `describe` or `attach` means **reading all documents in
+    again**, because the pictures were never cut out or described the first time.
+    Switching between `describe` and `attach` does **not**: images and
+    descriptions are already stored, only the behaviour when answering changes.
+    The flags for reading in again are in [Adding your data](adding-data.md).
 
 ## Showing figures in the answer
 
-Two independent switches decide what the user actually sees:
+Two separate switches decide what people actually see:
 
 | `inline_figures` | `show_unmarked_figures` | Result |
 |---|---|---|
-| `true` | `true` | Marked figure appears **above** the paragraph describing it; all other retrieved figures as thumbnails below the answer (default) |
-| `true` | `false` | Only figures the model actually marked appear — cleanest, but nothing is shown if it forgets the marker |
-| `false` | `true` | No inline images; every retrieved figure as a thumbnail below the answer |
-| `false` | `false` | No figures displayed at all — descriptions stay searchable and citable |
+| `true` | `true` | The relevant picture appears **above** the paragraph about it, and any other pictures found appear as small previews below the answer (default) |
+| `true` | `false` | Only pictures the model explicitly pointed at appear. Tidiest, but nothing shows if the model forgets to point |
+| `false` | `true` | No pictures in the text, but every picture found appears as a small preview below the answer |
+| `false` | `false` | No pictures shown at all. The descriptions stay searchable and quotable |
 
-`inline_figure_caption: true` additionally prints the figure caption as an italic
-line under the inlined image.
+Set `inline_figure_caption: true` to also print the original caption in italics
+under the picture.
 
 ## How the figure marker works
 
-Worth understanding, because it explains both the good and the odd cases:
+Worth understanding, because it explains both the good cases and the odd ones:
 
-1. The retrieval context contains one extra line per figure:
-   `Abbildungs-Marker: {{ABB:<file name>}}`.
-2. A per-request system instruction asks the model to copy that marker verbatim
-   onto its own line, directly before the paragraph that describes the figure.
-3. Answer post-processing replaces the marker with the actual image.
+1. Along with the text, the model is given one extra line per picture, a kind of
+   placeholder: `Abbildungs-Marker: {{ABB:<file name>}}`.
+2. It is asked to copy that placeholder, unchanged and on its own line, directly
+   before the paragraph that talks about the picture.
+3. Afterwards the app swaps the placeholder for the real image.
 
-Markers that cannot be resolved are removed silently — users never see a raw
-`{{ABB:…}}` — and the figure then simply shows up below the answer instead. The
-instruction text itself is configurable via `images.figure_marker_prompt`.
+If a placeholder cannot be matched, it is quietly removed (nobody ever sees a raw
+`{{ABB:…}}`) and the picture simply appears below the answer instead. You can
+reword the instruction given to the model via `images.figure_marker_prompt`.
 
 ## Where the images live
 
-Figures are written as PNGs to `<sources.data_dir>/figures/` (override the path
-with `images.figure_store_dir`) and served through an **authenticated** route,
-`/sources/figure/<file>` — the same access rules as your source documents. The
-folder is in `.gitignore` on purpose: it is regenerated on every ingest and does
-not belong in the repository.
+Pictures are saved as PNG files in `<sources.data_dir>/figures/` (change the
+location with `images.figure_store_dir`). They are only handed out to logged-in
+users, the same rule that applies to your source documents. The folder is
+deliberately excluded from version control: it is rebuilt every time documents
+are read in, so it does not belong in the project.
 
 ## `attach` needs a vision-capable chat model
 
-The gateway exposes no per-model capability flag, so `images.vision_capable_models`
-is authoritative. If the active chat model is not on that list, the app falls back
-silently to the ordinary text answer and logs a warning — the answer is still
-correct, just without the pixels.
+Not every chat model can look at pictures, and the AI service does not announce
+which ones can. So you have to list them yourself under
+`images.vision_capable_models`. If the model in use is not on your list, the app
+quietly falls back to a normal text answer and notes a warning. The answer is
+still correct, just without the picture.
 
-Before the call each figure is downscaled so its longest side is at most
-`attach_image_max_px` and sent as JPEG. Do not remove that: full-resolution
-figures make gateways reject the request with **HTTP 413**. `max_attach_images`
-caps how many figures a single answer may carry.
+Before sending, each picture is shrunk so its longest side is at most
+`attach_image_max_px`, and converted to JPEG. Do not remove that step:
+full-resolution pictures make AI services reject the request outright (error
+**413**). `max_attach_images` limits how many pictures a single answer may carry.
 
 !!! note "A cosmetic quirk"
-    Chainlit renders markdown images inside a 16:9 frame of limited width. Tall
-    figures (portrait diagrams, stacked plots) therefore get letterbox margins on
-    the sides. Nothing is cut off — clicking the image still opens it in full.
+    The chat window shows images in a wide frame of fixed proportions. Tall
+    pictures, such as portrait diagrams or stacked charts, therefore get empty
+    margins left and right. Nothing is cut off; clicking the image opens it in
+    full.

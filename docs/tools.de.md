@@ -1,95 +1,105 @@
 # Agentische Tools
 
-Klassisches RAG ruft einmal ab und antwortet. Dieses Template stellt dem Modell
-stattdessen einen **Satz von Tools** bereit und lässt es entscheiden, was es
-aufruft, wie oft und in welcher Reihenfolge — Wissensbasis auflisten, ein
-vollständiges Dokument laden, einen Treffer erweitern, eine Aussage prüfen.
-Welche Tools existieren, ist eine Konfigurationsentscheidung; jedes Tool liegt in
-`apps/chainlit/tools/` und registriert sich selbst in einer Registry.
+Ein einfacher Dokumentenassistent sucht einmal und antwortet aus dem Ergebnis.
+Dieser bekommt stattdessen einen **Satz von Fähigkeiten** und entscheidet selbst,
+welche er nutzt, wie oft und in welcher Reihenfolge: auflisten, welche Dokumente
+es gibt, ein ganzes Dokument lesen, mehr Text um eine vielversprechende Stelle
+holen oder eine Aussage prüfen, bevor er sie trifft.
+
+Du legst fest, welche Fähigkeiten er bekommt. Jede ist eine kleine Datei in
+`apps/chainlit/tools/`.
 
 ```yaml
 tools:
   enabled: [search, list_documents, fetch_document, expand_context, verify_claim]
   descriptions:
-    list_documents: "eigene Beschreibung — genau das liest das Modell"
+    list_documents: "eigene Beschreibung, genau das liest das Modell"
   fetch_max_chunks: 200   # Obergrenze für die Dokumentgröße bei fetch_document
   expand_window: 1        # Standard-Nachbarfenster für expand_context
 ```
 
 !!! note "Der Default ist Ein-Tool-RAG"
-    `tools.enabled` ist standardmäßig `[search]`, sodass eine Instanz, die nur
-    den klassischen `tool:`-Block deklariert, sich exakt wie bisher verhält. Die
-    Reihenfolge zählt: sie ist die Reihenfolge, in der die Schemas an das Modell
-    übergeben werden. Die Umgebungs-Überschreibung `RAG_TOOLS_ENABLED` erwartet
-    eine mit `||` getrennte Liste.
+    Sagst du nichts, bekommt der Assistent nur `search`, eine ältere Einrichtung
+    verhält sich also exakt wie bisher. Die Reihenfolge, in der du sie aufzählst,
+    ist die Reihenfolge, in der das Modell von ihnen erfährt. Es gibt außerdem die
+    Einstellung `RAG_TOOLS_ENABLED`, die die Namen mit `||` getrennt erwartet.
 
 ## Die fünf eingebauten Tools
 
-| Tool | Was es tut | Zitate |
+| Tool | Was es tut | Liefert Quellen |
 |---|---|---|
-| `search` | Semantische top-k-Suche | ja |
-| `list_documents` | Wissensbasis auflisten | nein (navigierend) |
-| `fetch_document` | Ein komplettes Dokument in Lesereihenfolge laden | ja |
-| `expand_context` | Nachbarabschnitte um einen Treffer | ja |
-| `verify_claim` | Belege für eine geplante Aussage erneut abrufen | ja |
+| `search` | Findet die Stellen, die am besten zur Frage passen | ja |
+| `list_documents` | Listet auf, was in der Wissensbasis liegt | nein (nur zur Orientierung) |
+| `fetch_document` | Liest ein ganzes Dokument von vorne bis hinten | ja |
+| `expand_context` | Holt den Text rund um eine Stelle | ja |
+| `verify_claim` | Prüft eine Aussage an den Dokumenten, bevor sie gesagt wird | ja |
 
 ### `search`
 
-Semantische top-k-Suche — das ursprüngliche einzelne Tool. Parameter: `query`,
-`top_k` sowie optional `document` (ein **exakter** `source_file`), um die Suche
-auf ein Dokument einzuschränken. Diese Einschränkung erfordert
-`retrieval.filterable_fields: [source_file]`, sonst wird der Filter ignoriert.
-Aus Gründen der Rückwärtskompatibilität kommen Funktionsname und Beschreibungen
-aus dem `tool:`-Block, nicht aus `tools.descriptions`.
+Die gewöhnliche Suche, und das Einzige, was ältere Einrichtungen hatten. Sie
+nimmt eine Frage (`query`), eine Trefferzahl (`top_k`) und optional ein einzelnes
+`document`, in dem gesucht werden soll. Letzteres funktioniert nur, wenn du das
+Filtern nach Dateinamen erlaubst, über
+`retrieval.filterable_fields: [source_file]`, sonst wird es stillschweigend
+ignoriert.
+
+Aus Kompatibilität mit älteren Einrichtungen nimmt ausgerechnet dieses Tool seine
+Texte aus dem `tool:`-Block statt aus `tools.descriptions`.
 
 ### `list_documents`
 
-Listet jedes Dokument der Collection auf: exakter `source_file`, Titel, Anzahl
-der Chunks und eine ungefähre Tokenzahl. Das Tool hat keine Parameter und ist
-rein **navigierend** — es liefert keine Zitate. Es ist genau das, womit das
-Modell einen unscharfen Verweis („das Kage-2018-Paper") in den exakten
-`source_file` auflöst, den `fetch_document` und `expand_context` benötigen, und
-es beantwortet direkt die Frage „welche Dokumente sind in der Wissensbasis?".
+Listet jedes Dokument auf: den exakten Dateinamen, den Titel, in wie viele Stücke
+es zerteilt wurde und ungefähr wie lang es ist. Es braucht keine Eingabe und
+liefert keine Quellen, denn es dient nur der Orientierung.
+
+Es löst ein konkretes Problem: Menschen verweisen unscharf auf Dokumente („das
+Kage-2018-Paper"), aber `fetch_document` und `expand_context` brauchen den
+exakten Dateinamen. Damit kann der Assistent ihn nachschlagen. Außerdem
+beantwortet es direkt die Frage „welche Dokumente hast du?".
 
 ### `fetch_document`
 
-Lädt ein **komplettes** Dokument, alle Abschnitte in Lesereihenfolge, anhand
-seines exakten `source_file`. Das ist das richtige Tool für Zusammenfassungen und
-Überblicke, wo eine semantische top-k-Suche immer nur verstreute Fragmente
-liefert. Das Ergebnis ist durch `tools.fetch_max_chunks` begrenzt, und das
-Payload setzt `truncated: true`, wenn die Grenze erreicht wurde — so weiß das
-Modell, dass es nicht den gesamten Text gesehen hat.
+Liest ein **komplettes** Dokument, alle Abschnitte in der richtigen Reihenfolge,
+anhand des exakten Dateinamens. Das ist die richtige Wahl für Zusammenfassungen
+und Überblicke, wo die gewöhnliche Suche immer nur verstreute Fragmente liefert
+und dem Assistenten das halbe Dokument entginge.
+
+Sehr lange Dokumente werden bei `tools.fetch_max_chunks` abgeschnitten, und der
+Assistent erfährt, dass das passiert ist. So weiß er, dass er nicht alles gesehen
+hat.
 
 ### `expand_context`
 
-Gibt die Abschnitte innerhalb von ±`window` um einen `section_index` in einem
-Dokument zurück (`source_file`, `section_index`, `window`). Nützlich gegen den
-klassischen RAG-Fehler „der Chunk war zu klein": das Modell hat einen
-vielversprechenden, aber abgeschnitten wirkenden Treffer und holt dessen
-Nachbarn, statt zu raten.
+Holt die Abschnitte direkt vor und nach einem bestimmten. Hilft gegen das
+klassische Problem, dass eine gefundene Stelle zu kurz ist: Der Assistent sieht
+etwas Vielversprechendes, das mitten im Gedanken abzubrechen scheint, und holt
+den Text drumherum, statt zu raten.
 
 ### `verify_claim`
 
-Ein Halluzinations-Schutz. Das Modell übergibt eine Aussage, die es machen will;
-das Tool fragt die Wissensbasis erneut ab und liefert die Belegstellen plus ein
-`supported`-Signal, sodass eine ungestützte Behauptung verworfen oder
-abgeschwächt werden kann, bevor sie den Nutzer erreicht.
+Ein Schutz gegen erfundene Antworten. Der Assistent übergibt einen Satz, den er
+gleich schreiben will, und hier wird noch einmal in den Dokumenten nach Belegen
+gesucht. Zurück kommt, ob der Satz tatsächlich gedeckt ist, sodass eine
+ungedeckte Behauptung verworfen oder abgeschwächt werden kann, bevor sie jemand
+zu sehen bekommt.
 
 ## Beschreibungen sind der Prompt
 
-Die Beschreibung eines Tools ist das Einzige, was das Modell darüber weiß — also
-der wichtigste Stellhebel. Alle eingebauten Tools bringen sprachabhängige
-Standardtexte auf Deutsch und Englisch mit, ausgewählt über das Top-Level-Feld
-`language:` deiner Konfiguration (siehe [Konfiguration](configuration.md)).
-Überschreibe sie pro Tool-ID unter `tools.descriptions` — sinnvoll, um das
-Vokabular deiner Domäne zu sprechen („Paper", „Baustein", „Ticket") statt des
-generischen „Dokument".
+Die Beschreibung einer Fähigkeit ist das Einzige, was das Modell darüber weiß,
+und damit der wichtigste Stellhebel. Alle eingebauten bringen sinnvolle Texte auf
+Deutsch und Englisch mit, ausgewählt über die Einstellung `language:` (siehe
+[Konfiguration](configuration.md)).
+
+Überschreibe sie unter `tools.descriptions`. Das lohnt sich, um dein eigenes
+Vokabular zu nutzen: „Paper", „Baustein" oder „Ticket" statt des generischen
+„Dokument".
 
 ## Ein eigenes Tool schreiben
 
-Ein Tool besteht aus einem Schema-Builder (liefert ein OpenAI-Function-Schema als
-`dict`) und einem async Handler `(args: dict, ctx: ToolContext) -> ToolResult`.
-Die Typen liegen in [`tools/base.py`](https://github.com/aihpi/pilotprojekt-rag-template/blob/main/apps/chainlit/tools/base.py).
+Dieser Teil braucht Python. Eine Fähigkeit besteht aus zwei Teilen: einer
+Beschreibung dessen, was sie als Eingabe erwartet, und einer Funktion, die die
+Arbeit macht. Die Typen liegen in
+[`tools/base.py`](https://github.com/aihpi/pilotprojekt-rag-template/blob/main/apps/chainlit/tools/base.py).
 
 ```python
 # apps/chainlit/tools/count_pages.py
@@ -116,7 +126,7 @@ def _schema(cfg) -> dict[str, Any]:
 
 @register_tool("count_pages", build_schema=_schema)
 async def _count_pages(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-    from rag_tool import fetch_document          # im Handler — siehe unten
+    from rag_tool import fetch_document          # im Handler, siehe unten
 
     results = await fetch_document(
         str(args.get("source_file") or ""),
@@ -127,23 +137,22 @@ async def _count_pages(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     return ToolResult(payload={"pages": len(pages)}, results=[])
 ```
 
-Importiere das Modul unten in `tools/__init__.py`, damit der Decorator läuft, und
-trage die ID dann in `tools.enabled` ein.
+Trage das Modul unten in `tools/__init__.py` in die Import-Liste ein, damit es
+registriert wird, und dann den Namen in `tools.enabled`.
 
 !!! warning "Zwei Regeln, die dich sonst einholen"
-    **Zitate entstehen aus `results`.** `ToolResult.results` muss
-    RagResult-förmig sein (`.text`, `.score`, `.metadata`) — diese Elemente
-    speisen die Aggregation und das Zitat-Panel. Ein rein navigierendes Tool gibt
-    `results=[]` zurück; nur das `payload` liest das Modell.
+    **Quellen entstehen aus `results`.** Was du in `ToolResult.results` legst,
+    muss `.text`, `.score` und `.metadata` haben, denn daraus wird die
+    Quellenliste gebaut. Eine Fähigkeit, die nur der Orientierung dient, gibt
+    `results=[]` zurück, dann erreicht nur das `payload` das Modell.
 
-    **Importiere `rag_tool` im Handler-Body**, niemals am Modulanfang. `tools`
-    muss frei von der Kette `rag_tool → settings → get_config()` bleiben, weil
-    `settings` die Konfiguration beim Import aufbaut — ein Top-Level-Import
-    erzeugt einen Zyklus.
+    **Importiere `rag_tool` innerhalb der Funktion, nie am Dateianfang.** Die
+    Einstellungen werden beim Import geladen. Ein Import ganz oben lässt deshalb
+    zwei Module aufeinander warten und die App startet nicht.
 
 ## Ungültige IDs schlagen sofort fehl
 
-Eine unbekannte ID in `tools.enabled` wird schon beim Laden der Konfiguration
-abgewiesen, und der Validator listet die registrierten IDs in der Fehlermeldung.
-Ein Tippfehler zeigt sich damit beim Start und nicht als still fehlende
-Fähigkeit zur Anfragezeit.
+Ein Name in `tools.enabled`, den es nicht gibt, wird schon beim Lesen der
+Einstellungen abgewiesen, und die Fehlermeldung listet die gültigen Namen auf.
+Ein Tippfehler fällt damit sofort beim Start auf, statt den Assistenten still und
+leise ohne eine Fähigkeit dastehen zu lassen, die du ihm zugedacht hattest.
