@@ -42,6 +42,34 @@ can be pointed at a new corpus without touching Python.
 - **Documentation site.** MkDocs Material site (English and German) with a
   configuration reference generated from the schema.
 
+### Fixed
+
+- **Oversized figures lost their description silently.** The ingest step sent
+  full-resolution PNG to the vision model, so a large figure exceeded the gateway's
+  body-size limit and came back HTTP 413. The exception was swallowed and the
+  figure stored without a description. In the shipped `papers` example this hit
+  1 of 79 figures (`Alam_2026` fig1, 1.11 MB encoded).
+
+  The describe call now downscales and re-encodes as JPEG the way the answer-time
+  path already did (that figure: 1.11 MB → 215 KB, new
+  `images.describe_image_max_px`, default 1536).
+
+- **A failed figure description is no longer retried zero times.** The vision call
+  passes `num_retries`, so a passing rate limit no longer costs a figure its
+  description permanently.
+
+- **A figure with no description and no caption is no longer stored.** The guard
+  meant to drop such chunks tested the assembled text, which always begins
+  "Abbildung N (Seite X)" and is therefore never empty, so the guard could never
+  fire. A figure now needs either a description or a real caption to be indexed,
+  and each document reports how many descriptions failed.
+
+  **Re-ingest only if you need it.** Existing collections are fine unless a figure
+  actually failed. If your ingest log showed figure-description errors, or your
+  documents contain unusually large figures, read them in once more with
+  `--recreate` (see [Figures & images](docs/images.md)); this re-describes every
+  figure and is charged accordingly.
+
 ### Changed
 
 - **Open-weight models everywhere by default.** All shipped configs, the schema

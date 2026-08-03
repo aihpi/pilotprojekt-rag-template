@@ -117,6 +117,9 @@ alles funktioniert hat.
 - **Nichts von dir wird gelöscht.** Deine Dokumente, die indexierten Daten und der
   Chat-Verlauf bleiben beim Aktualisieren erhalten. Du musst normalerweise nicht neu
   ingesten.
+- **Eine Ausnahme.** Wenn ein früherer Ingest fehlgeschlagene Abbildungs-Beschreibungen
+  gemeldet hat, lies deine Dokumente einmal neu ein, damit diese Abbildungen beschrieben
+  werden. Nur dann lohnt es sich: [Abbildungen](docs/images.de.md).
 - **Der erste Start nach dem Update dauert länger.** Die App lädt die Modelle zum Lesen
   von PDFs erneut herunter (etwa 500 MB). Das ist normal und passiert einmal pro Update.
 - **Alte Versionen belegen Speicherplatz.** Mit `docker image prune` freigeben.

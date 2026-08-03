@@ -80,6 +80,11 @@ dass dich etwas warnt.
     summiert sich das. Setze `images.mode: none`, wenn Bilder nicht durchsuchbar
     sein müssen.
 
+    Lässt sich ein Bild nicht beschreiben, wird es weggelassen statt ohne
+    Beschreibung gespeichert. Der Durchlauf meldet pro Dokument, wie viele
+    betroffen waren, achte also auf diese Zeile. Siehe
+    [Abbildungen](images.de.md).
+
 ## 4. Neu starten und ausprobieren
 
 ```bash

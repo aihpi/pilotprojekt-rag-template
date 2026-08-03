@@ -85,6 +85,52 @@ Lässt sich ein Platzhalter nicht zuordnen, wird er stillschweigend entfernt
 Antwort. Die Anweisung an das Modell kannst du über
 `images.figure_marker_prompt` umformulieren.
 
+## Wenn Abbildungen keine Beschreibung haben
+
+Manchmal scheitert das Beschreiben einer Abbildung, meist weil der KI-Dienst
+kurzzeitig ausgelastet ist oder die Abbildung ungewöhnlich groß. Die App versucht
+es einige Male erneut, und wenn es dann noch fehlschlägt, wird die Abbildung
+weggelassen statt ohne Beschreibung gespeichert.
+
+**Woran du es merkst.** Achte auf die Ausgabe, während deine Dokumente eingelesen
+werden. Jedes Dokument meldet seine Fehlschläge:
+
+```
+[ingest] Alam_2026_SciReports.pdf: 2 of 17 figure descriptions failed
+```
+
+Fehlt so eine Zeile, ist nichts fehlgeschlagen. Beurteile es nicht anhand der
+gespeicherten Einträge: Eine beschriebene Abbildung wird oft in mehrere Stücke
+zerlegt, von denen eines nur `Abbildung 7 (Seite 3)` lauten kann. Das ist normal
+und bedeutet nicht, dass die Beschreibung fehlt.
+
+**Wie du es behebst.** Nur nötig, wenn du tatsächlich Fehlschläge gesehen hast.
+Einzelne Abbildungen zu reparieren geht nicht, es wird also der ganze Bestand neu
+aufgebaut:
+
+```bash
+make reingest        # mit Docker: baut neu und startet die App neu
+```
+
+Oder ausgeschrieben:
+
+```bash
+docker compose run --rm ingest python -m kb.ingest --recreate
+docker compose up -d
+```
+
+Ohne Docker:
+
+```bash
+RAG_CONFIG=my-rag.yaml uv run python -m kb.ingest --recreate
+```
+
+!!! warning "Das kostet erneut Geld"
+    Jede Abbildung wird noch einmal beschrieben, der komplette Bestand also erneut
+    berechnet. Der Beispielkorpus hat 170 Abbildungen. Prüfe mit
+    `images.mode: none` vorab, wenn du nur testen willst, ob das Einlesen
+    überhaupt funktioniert.
+
 ## Wo die Bilder liegen
 
 Bilder werden als PNG-Dateien unter `<sources.data_dir>/figures/` gespeichert

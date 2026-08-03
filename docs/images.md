@@ -80,6 +80,49 @@ If a placeholder cannot be matched, it is quietly removed (nobody ever sees a ra
 `{{ABB:…}}`) and the picture simply appears below the answer instead. You can
 reword the instruction given to the model via `images.figure_marker_prompt`.
 
+## If your figures have no descriptions
+
+Sometimes describing a figure fails, usually because the AI service is briefly
+busy or the figure is unusually large. The app retries a few times, and if it
+still fails the figure is left out rather than stored without a description.
+
+**How to spot it.** Watch the output while your documents are read in. Each
+document reports its failures:
+
+```
+[ingest] Alam_2026_SciReports.pdf: 2 of 17 figure descriptions failed
+```
+
+No such line means nothing failed. Do not judge this from the stored entries
+themselves: a described figure is often split into several pieces, one of which
+can be as short as `Abbildung 7 (Seite 3)`. That is normal and does not mean the
+description is missing.
+
+**How to fix it.** Only needed if you actually saw failures. There is no way to
+repair single figures, so this redoes the whole collection:
+
+```bash
+make reingest        # with Docker: rebuilds and restarts the app
+```
+
+Or, spelled out:
+
+```bash
+docker compose run --rm ingest python -m kb.ingest --recreate
+docker compose up -d
+```
+
+Without Docker:
+
+```bash
+RAG_CONFIG=my-rag.yaml uv run python -m kb.ingest --recreate
+```
+
+!!! warning "This costs money again"
+    Every figure is described once more, so the whole collection is charged again.
+    The example corpus has 170 figures. Check with `images.mode: none` first if
+    you only want to test that ingestion works at all.
+
 ## Where the images live
 
 Pictures are saved as PNG files in `<sources.data_dir>/figures/` (change the

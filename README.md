@@ -112,6 +112,9 @@ answer and the PDF should open on the right. That is the quickest way to see it 
 
 - **Nothing you added gets deleted.** Your documents, indexed data and chat history all
   survive an update, so you normally do not need to ingest again.
+- **One exception.** If an earlier ingest reported failed figure descriptions, read your
+  documents in once more so those figures get described. Only worth doing if you saw
+  those errors: [Figures & images](docs/images.md).
 - **The first start after an update is slow.** The app re-downloads the models it uses to
   read PDFs (roughly 500 MB). This is normal and happens once per update.
 - **Old versions take up disk space.** Free it up with `docker image prune`.

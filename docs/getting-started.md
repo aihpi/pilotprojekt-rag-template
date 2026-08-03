@@ -77,6 +77,10 @@ assistant keeps answering from the old set, and nothing warns you.
     sent to an AI model once to be described. On a large collection that adds up.
     Set `images.mode: none` if you do not need pictures to be searchable.
 
+    If a picture cannot be described, it is left out rather than stored without a
+    description. The run reports how many were affected per document, so watch for
+    that line. See [Figures & images](images.md).
+
 ## 4. Restart and try it
 
 ```bash
