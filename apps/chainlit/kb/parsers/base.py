@@ -70,10 +70,18 @@ class FileGate:
 
     ``skip_all`` enumerates and hashes without returning anything, which is how a
     run discovers the full file list while parsing nothing.
+
+    ``stat_only`` goes further and records size plus modification time instead of a
+    hash, so a caller can tell whether anything *might* have changed without reading
+    a byte. The folder watcher polls with this: hashing the corpus every few seconds
+    would be pointless work, while a handful of stat calls is free. It is a
+    change *hint* only. Whether a file really changed is still decided by the hash
+    on the following real run.
     """
 
     known: dict[str, str] = field(default_factory=dict)
     skip_all: bool = False
+    stat_only: bool = False
     root: Path | None = None
     seen: dict[str, str] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
@@ -102,6 +110,14 @@ class FileGate:
         admitted: list[Path] = []
         for path in paths:
             gate_key = self.key(path)
+            if self.stat_only:
+                try:
+                    stat = path.stat()
+                except OSError:  # vanished between listing and stat
+                    continue
+                self.seen[gate_key] = f"{stat.st_size}:{stat.st_mtime_ns}"
+                self.skipped.append(gate_key)
+                continue
             try:
                 digest = file_digest(path)
             except OSError as exc:  # unreadable: let the parser report it

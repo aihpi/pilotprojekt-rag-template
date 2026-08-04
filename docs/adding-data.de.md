@@ -172,9 +172,10 @@ Datei wird ein Fingerabdruck ihres Inhalts gespeichert, deshalb gilt:
 Deine Dokumente zu verwalten heißt also einfach, den Ordner zu verwalten: Dateien
 hinzufügen, austauschen oder löschen und denselben Befehl noch einmal ausführen.
 Auch der komplette Austausch aller Dokumente funktioniert in einem Lauf: die alten
-Einträge werden entfernt und die neuen Dateien eingelesen. Genau das passiert auch
-bei `docker compose up -d`, weshalb Änderungen nach einem Neustart von selbst
-wirksam werden.
+Einträge werden entfernt und die neuen Dateien eingelesen. Die App macht das auch von selbst: sie beobachtet die
+Ordner und führt innerhalb von Sekunden nach einer Änderung dasselbe aus, im
+Normalbetrieb rufst du das also nie manuell auf. Mit `DOCUMENT_WATCH=false`
+schaltest du das ab.
 
 !!! warning "Eine bewusste Ausnahme"
     Ist der Ordner **völlig leer**, während die Collection Dateien kennt, wird

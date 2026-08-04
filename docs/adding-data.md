@@ -165,8 +165,9 @@ with a fingerprint of its contents, so:
 Managing your documents is therefore just managing the folder: add, replace or
 delete files and run the same command again. Replacing your whole set of documents
 in one go works too, removing the old entries and reading the new files in the same
-run. This is also what happens on `docker compose up -d`, which is why changes take
-effect after a restart without you doing anything else.
+run. The app also does this by itself: it watches the folders and runs the same thing
+within seconds of a change, so in normal use you never call this manually. Set
+`DOCUMENT_WATCH=false` to turn that off.
 
 !!! warning "One deliberate exception"
     If the folder turns out to be **completely empty** while the collection knows

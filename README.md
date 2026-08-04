@@ -128,8 +128,8 @@ answer and the PDF should open on the right. That is the quickest way to see it 
 ### Good to know
 
 - **Nothing you added gets deleted.** Your documents, indexed data and chat history all
-  survive an update, so you normally do not need to ingest again. New or edited files in
-  the documents folder are read in by themselves on the next start.
+  survive an update, so you normally do not need to ingest again. Files you add, change
+  or delete in the documents folder are picked up by themselves, within seconds.
 - **One exception.** If an earlier ingest reported failed figure descriptions, read your
   documents in once more so those figures get described. Only worth doing if you saw
   those errors: [Figures & images](docs/images.md).
@@ -158,11 +158,11 @@ cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
 It also handles Markdown, JSON and CSV files. See
 [Adding your data](docs/adding-data.md).
 
-**Changing your documents later** is the same step again. The folder decides what
-the assistant knows: add a file and only that one is read, correct a file and it is
-read again, delete a file and it stops appearing in answers. Replacing the whole set
-at once works too. Everything else is left untouched, so you do not pay for it
-twice. No restarts needed either.
+**Changing your documents later needs no commands at all.** The app watches the
+folder: add a file and it is read within seconds, correct a file and it is read
+again, delete a file and it stops appearing in answers. Everything else is left
+untouched, so you do not pay for it twice, and nothing has to be restarted. Switch it
+off with `DOCUMENT_WATCH=false` if you would rather trigger it yourself.
 → [Changing your documents](docs/managing-documents.md)
 
 ## What you configure

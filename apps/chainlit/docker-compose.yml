@@ -51,6 +51,12 @@ services:
       CHAINLIT_AUTH_USERNAME: ${CHAINLIT_AUTH_USERNAME:-admin}
       CHAINLIT_AUTH_PASSWORD: ${CHAINLIT_AUTH_PASSWORD:-admin}
       CHAINLIT_INIT_DB: ${CHAINLIT_INIT_DB:-true}
+      # Watch the document folders and index changes automatically. Defaults to on,
+      # so an .env from before this feature needs no editing; set it to false to
+      # turn it off.
+      DOCUMENT_WATCH: ${DOCUMENT_WATCH:-true}
+      DOCUMENT_WATCH_INTERVAL: ${DOCUMENT_WATCH_INTERVAL:-15}
+      DOCUMENT_WATCH_SETTLE: ${DOCUMENT_WATCH_SETTLE:-5}
       # RAG instance config (must match the ingest service).
       RAG_CONFIG: ${RAG_CONFIG:-examples/papers/rag.config.yaml}
       # IMPORTANT: inside Docker network, use service DNS name (not localhost)

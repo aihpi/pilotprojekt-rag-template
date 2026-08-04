@@ -111,6 +111,25 @@ can be pointed at a new corpus without touching Python.
 
 ### Changed
 
+- **The document folders are watched, so changes need no command.** The app polls its
+  source folders and indexes whatever was added, edited or deleted, within seconds
+  and without a restart. Putting a file into the folder is the whole workflow.
+
+  Two stages, so watching is genuinely free: a poll compares size and modification
+  time and reads no file contents, and only a hint of change starts the real run that
+  hashes and decides. Files modified in the last few seconds are left alone, so a
+  large file still being copied is never read half-written, and one pass at a time is
+  enforced. The work runs in a thread, so parsing a PDF cannot stall open chats.
+
+  Polling rather than filesystem events: event delivery from a host bind mount into a
+  container is unreliable, and a watcher that silently stops noticing is worse than
+  one that looks every few seconds.
+
+  On by default and **opt-out** via `DOCUMENT_WATCH=false`, so a `.env` copied before
+  this existed gets the feature without being touched. `DOCUMENT_WATCH_INTERVAL` and
+  `DOCUMENT_WATCH_SETTLE` tune it. This only became practical because of the change
+  below; before it, any repeated run re-embedded everything.
+
 - **Ingestion is incremental per file.** A plain `python -m kb.ingest` used to be
   all-or-nothing; it now reads only what changed. Every file is recorded with a
   sha256 of its contents, so a new file is ingested, an edited file is ingested

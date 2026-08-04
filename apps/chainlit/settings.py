@@ -80,3 +80,12 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 CHAINLIT_AUTH_USERNAME = os.getenv("CHAINLIT_AUTH_USERNAME", "admin")
 CHAINLIT_AUTH_PASSWORD = os.getenv("CHAINLIT_AUTH_PASSWORD", "admin")
 CHAINLIT_INIT_DB = (os.getenv("CHAINLIT_INIT_DB", "true") or "true").lower() == "true"
+
+# Watch the document folders and index changes automatically. On by default and
+# opt-OUT, so an existing .env written before this feature existed still gets it
+# without being re-copied; only someone who wants it off adds the variable.
+DOCUMENT_WATCH = (os.getenv("DOCUMENT_WATCH", "true") or "true").lower() == "true"
+DOCUMENT_WATCH_INTERVAL = int(os.getenv("DOCUMENT_WATCH_INTERVAL", "15"))
+"""Seconds between checks. Each check is a stat per source file, so this is cheap."""
+DOCUMENT_WATCH_SETTLE = int(os.getenv("DOCUMENT_WATCH_SETTLE", "5"))
+"""Ignore files modified within this many seconds, so half-copied files wait."""

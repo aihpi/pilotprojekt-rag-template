@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -68,6 +69,7 @@ from settings import (
     CHAT_MODEL,
     DATA_RAW_DIR,
     DATABASE_URL,
+    DOCUMENT_WATCH,
     EMBED_MODEL,
     MAX_TOP_K,
     MAX_SOURCE_LINKS,
@@ -2225,6 +2227,18 @@ async def on_app_startup() -> None:
     print("[STARTUP] native export route registered at /export/all-chats")
     print("[STARTUP] feedback export route registered at /export/feedback")
     print("[STARTUP] registration route registered at /auth/register")
+
+    if DOCUMENT_WATCH:
+        from document_watch import watch_documents
+
+        # Held on app state so the task is not garbage collected: asyncio keeps only
+        # a weak reference, so a bare create_task() can be collected mid-flight.
+        chainlit_fastapi_app.state.document_watch_task = asyncio.create_task(
+            watch_documents()
+        )
+        print("[STARTUP] watching the document folders for changes")
+    else:
+        print("[STARTUP] document watching is off (DOCUMENT_WATCH=false)")
 
 
 @cl.on_feedback

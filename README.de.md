@@ -134,8 +134,8 @@ alles funktioniert hat.
 
 - **Nichts von dir wird gelöscht.** Deine Dokumente, die indexierten Daten und der
   Chat-Verlauf bleiben beim Aktualisieren erhalten. Du musst normalerweise nicht neu
-  ingesten. Neue oder geänderte Dateien im Dokumentenordner werden beim nächsten Start
-  von selbst eingelesen.
+  ingesten. Dateien, die du im Dokumentenordner ergänzt, änderst oder löschst, werden
+  innerhalb von Sekunden von selbst übernommen.
 - **Eine Ausnahme.** Wenn ein früherer Ingest fehlgeschlagene Abbildungs-Beschreibungen
   gemeldet hat, lies deine Dokumente einmal neu ein, damit diese Abbildungen beschrieben
   werden. Nur dann lohnt es sich: [Abbildungen](docs/images.de.md).
@@ -165,12 +165,12 @@ cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
 Markdown-, JSON- und CSV-Dateien gehen ebenfalls. Siehe
 [Daten hinzufügen](docs/adding-data.de.md).
 
-**Später Dokumente ändern** ist derselbe Schritt noch einmal. Der Ordner
-entscheidet, was der Assistent weiß: Datei hinzufügen, dann wird nur diese
-gelesen; Datei korrigieren, dann wird sie erneut gelesen; Datei löschen, dann
-taucht sie nicht mehr in Antworten auf. Auch der komplette Austausch aller
-Dokumente geht in einem Schritt. Alles andere bleibt unberührt, du zahlst also
-nicht doppelt. Neu starten musst du auch nichts.
+**Später Dokumente ändern braucht gar keine Befehle.** Die App beobachtet den
+Ordner: Datei hinzufügen, dann ist sie in Sekunden eingelesen; Datei korrigieren,
+dann wird sie erneut gelesen; Datei löschen, dann taucht sie nicht mehr in Antworten
+auf. Alles andere bleibt unberührt, du zahlst also nicht doppelt, und neu starten
+musst du nichts. Mit `DOCUMENT_WATCH=false` schaltest du es ab, wenn du es lieber
+selbst anstößt.
 → [Dokumente ändern](docs/managing-documents.de.md)
 
 ## Was du konfigurierst

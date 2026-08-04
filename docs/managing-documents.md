@@ -3,10 +3,11 @@
 Once the assistant is running, you will want to add documents, correct one, or
 take one out. All of that works the same simple way:
 
-**Change the folder, then start the app again.**
+**Change the folder. That is all.**
 
-The folder decides what the assistant knows. There is nothing else to keep in
-sync, and you do not need to touch any settings.
+The app keeps an eye on your document folder and picks up anything you add, change
+or delete within a few seconds, on its own. You do not have to run a command, and
+you do not have to restart anything.
 
 ## The folder that matters
 
@@ -20,29 +21,27 @@ Put files in, take files out, replace files. That is the whole interface.
 
 ## Adding a document
 
-1. Copy the file into `apps/chainlit/data/documents/`.
-2. Run this in the `apps/chainlit` folder:
-
-```bash
-docker compose up -d
-```
+Copy the file into `apps/chainlit/data/documents/`. Within a few seconds it is read
+in and ready to be asked about.
 
 Only the new file is read. Everything already there is left alone, so you do not
 wait for it and you do not pay for it a second time.
 
+A big file being copied in is left alone until the copy has finished, so it never
+gets read half-complete.
+
 ## Correcting a document
 
-Replace the file with the corrected version and run the same command. The app
-notices that the contents changed and reads it again by itself. You do not have to
-tell it anything.
+Replace the file with the corrected version. The app notices that the contents
+changed and reads it again by itself. You do not have to tell it anything.
 
 Renaming a file counts as a change too: the old version is taken out and the new
 name is read in.
 
 ## Removing a document
 
-Delete the file from the folder and run the same command. Its content is removed
-from the assistant, so it stops turning up in answers.
+Delete the file from the folder. Its content is removed from the assistant, so it
+stops turning up in answers.
 
 This matters more than it sounds. Without it, the assistant would keep answering
 from a document you deleted, and the source link under the answer would lead
@@ -50,36 +49,44 @@ nowhere.
 
 ## Replacing everything at once
 
-You can also swap your whole set of documents in one go: delete the old files, put
-the new ones in, run the command once. The old content is removed and the new
-content is read in during the same run.
+You can also swap your whole set of documents in one go: delete the old files and
+put the new ones in. The old content is removed and the new content is read in
+together.
 
-## Do I have to restart anything?
+## Do I have to run or restart anything?
 
-No. The command above does everything, and the chat window keeps working while it
-runs. You do not have to close anything, and people using the assistant do not have
-to reload the page for later questions.
+No, neither. The chat window keeps working the whole time, and people using the
+assistant do not have to reload the page for later questions.
+
+If you would rather do it yourself, you can. Put `DOCUMENT_WATCH=false` in your
+`.env` file and nothing is picked up automatically; then this reads everything that
+changed, whenever you choose:
+
+```bash
+docker compose up -d
+```
 
 ## How do I know it worked?
 
-The run tells you in plain numbers. Reading in one new document out of nine looks
-like this:
+Watch the app's messages with:
+
+```bash
+docker compose logs -f chainlit
+```
+
+Adding a document looks like this:
 
 ```
-[ingest] 1 file(s) to ingest, 8 unchanged and skipped.
-Ingested 49 chunks into 'papers'.
+[watch] documents changed (new: 1, edited: 0, removed: 0); indexing
+[watch]   new: data/documents/Choi_2019.pdf
+[watch] done: 48 chunk(s) indexed
 ```
 
 Removing one looks like this:
 
 ```
-[ingest] removed 48 entr(ies) for deleted document data/documents/Choi_2019.pdf
-```
-
-And when there is genuinely nothing to do:
-
-```
-[ingest] nothing to do: all 9 file(s) are already indexed and unchanged.
+[watch] documents changed (new: 0, edited: 0, removed: 1); indexing
+[watch] done: 49 entr(ies) removed
 ```
 
 Then open the chat, ask something that only the changed document can answer, and

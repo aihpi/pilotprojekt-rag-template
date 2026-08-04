@@ -3,10 +3,11 @@
 Wenn der Assistent läuft, willst du irgendwann Dokumente ergänzen, eines
 korrigieren oder eines herausnehmen. Das geht immer auf dieselbe einfache Weise:
 
-**Ordner ändern, dann die App neu starten.**
+**Ordner ändern. Das ist alles.**
 
-Der Ordner entscheidet, was der Assistent weiß. Es gibt nichts anderes, das du
-gleichhalten musst, und an den Einstellungen musst du nichts anfassen.
+Die App behält deinen Dokumentenordner im Auge und übernimmt von selbst innerhalb
+weniger Sekunden, was du hinzufügst, änderst oder löschst. Du musst keinen Befehl
+ausführen und nichts neu starten.
 
 ## Der Ordner, auf den es ankommt
 
@@ -20,29 +21,27 @@ Dateien hineinlegen, herausnehmen, austauschen. Das ist alles.
 
 ## Ein Dokument hinzufügen
 
-1. Kopiere die Datei nach `apps/chainlit/data/documents/`.
-2. Führe im Ordner `apps/chainlit` das hier aus:
-
-```bash
-docker compose up -d
-```
+Kopiere die Datei nach `apps/chainlit/data/documents/`. Wenige Sekunden später ist
+sie eingelesen und du kannst dazu Fragen stellen.
 
 Gelesen wird nur die neue Datei. Alles, was schon da ist, bleibt unberührt. Du
 wartest also nicht darauf und bezahlst es nicht ein zweites Mal.
 
+Eine große Datei, die noch kopiert wird, bleibt liegen, bis das Kopieren fertig ist.
+So wird sie nie halb eingelesen.
+
 ## Ein Dokument korrigieren
 
-Ersetze die Datei durch die korrigierte Fassung und führe denselben Befehl aus. Die
-App merkt, dass sich der Inhalt geändert hat, und liest sie von selbst neu ein. Du
-musst ihr nichts sagen.
+Ersetze die Datei durch die korrigierte Fassung. Die App merkt, dass sich der Inhalt
+geändert hat, und liest sie von selbst neu ein. Du musst ihr nichts sagen.
 
 Eine Datei umzubenennen zählt ebenfalls als Änderung: die alte Fassung wird
 herausgenommen, der neue Name wird eingelesen.
 
 ## Ein Dokument entfernen
 
-Lösche die Datei aus dem Ordner und führe denselben Befehl aus. Ihr Inhalt wird aus
-dem Assistenten entfernt und taucht damit nicht mehr in Antworten auf.
+Lösche die Datei aus dem Ordner. Ihr Inhalt wird aus dem Assistenten entfernt und
+taucht damit nicht mehr in Antworten auf.
 
 Das ist wichtiger, als es klingt. Ohne diesen Schritt würde der Assistent weiter aus
 einem gelöschten Dokument antworten, und der Quellenverweis unter der Antwort würde
@@ -51,35 +50,43 @@ ins Leere führen.
 ## Alles auf einmal austauschen
 
 Du kannst auch den kompletten Dokumentenbestand in einem Zug tauschen: alte Dateien
-löschen, neue hineinlegen, den Befehl einmal ausführen. Die alten Inhalte werden
-entfernt und die neuen im selben Lauf eingelesen.
+löschen, neue hineinlegen. Die alten Inhalte werden entfernt und die neuen zusammen
+damit eingelesen.
 
-## Muss ich irgendetwas neu starten?
+## Muss ich etwas ausführen oder neu starten?
 
-Nein. Der Befehl oben macht alles, und das Chat-Fenster funktioniert währenddessen
-weiter. Du musst nichts schließen, und wer den Assistenten benutzt, muss die Seite
-für spätere Fragen nicht neu laden.
+Nein, beides nicht. Das Chat-Fenster funktioniert die ganze Zeit weiter, und wer den
+Assistenten benutzt, muss die Seite für spätere Fragen nicht neu laden.
+
+Wenn du es lieber selbst machst, kannst du das. Schreibe `DOCUMENT_WATCH=false` in
+deine `.env`-Datei, dann wird nichts mehr automatisch übernommen. Dieser Befehl liest
+dann ein, was sich geändert hat, wann du willst:
+
+```bash
+docker compose up -d
+```
 
 ## Woran sehe ich, dass es geklappt hat?
 
-Der Lauf sagt es in einfachen Zahlen. Ein neues Dokument von neun einlesen sieht so
-aus:
+Die Meldungen der App siehst du mit:
+
+```bash
+docker compose logs -f chainlit
+```
+
+Ein Dokument hinzufügen sieht so aus:
 
 ```
-[ingest] 1 file(s) to ingest, 8 unchanged and skipped.
-Ingested 49 chunks into 'papers'.
+[watch] documents changed (new: 1, edited: 0, removed: 0); indexing
+[watch]   new: data/documents/Choi_2019.pdf
+[watch] done: 48 chunk(s) indexed
 ```
 
 Eines entfernen sieht so aus:
 
 ```
-[ingest] removed 48 entr(ies) for deleted document data/documents/Choi_2019.pdf
-```
-
-Und wenn es wirklich nichts zu tun gibt:
-
-```
-[ingest] nothing to do: all 9 file(s) are already indexed and unchanged.
+[watch] documents changed (new: 0, edited: 0, removed: 1); indexing
+[watch] done: 49 entr(ies) removed
 ```
 
 Öffne danach den Chat, stelle eine Frage, die nur das geänderte Dokument beantworten
