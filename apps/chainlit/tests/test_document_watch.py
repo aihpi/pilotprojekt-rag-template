@@ -328,3 +328,46 @@ def test_an_unchanged_folder_leaves_the_status_alone(passes):
     _pass({"a.txt": "1:1"})
 
     assert document_watch.get_status()["revision"] == before["revision"]
+
+
+def test_the_status_names_the_files_for_the_hover_panel(passes):
+    """A count alone is useless ("1 new document"); the panel needs names."""
+    calls, snapshots = passes
+    snapshots.extend([
+        {"docs/a.pdf": "1:1", "docs/new_one.pdf": "2:2"},
+        {"docs/a.pdf": "1:1", "docs/new_one.pdf": "2:2"},
+    ])
+    seen: list[list[dict]] = []
+
+    async def recording_ingest():
+        seen.append(document_watch.get_status().get("files"))
+        return {"ingested": 2, "pruned": 0}
+
+    document_watch._ingest_now = recording_ingest
+    _pass({"docs/a.pdf": "1:1", "docs/gone.pdf": "9:9"})
+
+    assert seen, "status must be published before the work starts"
+    names = {f["name"]: f["action"] for f in seen[0]}
+    assert names == {"new_one.pdf": "new", "gone.pdf": "removed"}
+    assert "docs/" not in "".join(names), "basenames only, paths are noise"
+    # And the finished status keeps them, so the panel still has detail afterwards.
+    assert {f["name"] for f in document_watch.get_status()["files"]} == set(names)
+
+
+def test_a_bulk_import_does_not_produce_an_endless_list(passes):
+    calls, snapshots = passes
+    many = {f"docs/f{i}.pdf": "1:1" for i in range(40)}
+    snapshots.extend([many, many])
+    seen: list[list[dict]] = []
+
+    async def recording_ingest():
+        seen.append(document_watch.get_status().get("files"))
+        return {"ingested": 40, "pruned": 0}
+
+    document_watch._ingest_now = recording_ingest
+    _pass({})
+
+    listed = seen[0]
+    assert len(listed) == document_watch._MAX_LISTED_FILES + 1
+    assert listed[-1]["action"] == "more"
+    assert "more" in listed[-1]["name"]

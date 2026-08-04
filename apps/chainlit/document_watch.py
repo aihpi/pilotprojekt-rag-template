@@ -107,8 +107,24 @@ async def _ingest_now() -> dict[str, Any]:
     return await asyncio.to_thread(run)
 
 
+_MAX_LISTED_FILES = 12
+
+
 def _plural(count: int, singular: str, plural: str) -> str:
     return f"{count} {singular if count == 1 else plural}"
+
+
+def _file_labels(added: list[str], changed: list[str], gone: list[str]) -> list[str]:
+    """`[{"name": ..., "action": ...}]` for the hover panel, newest concern first."""
+    labels: list[dict[str, str]] = []
+    for action, keys in (("removed", gone), ("new", added), ("changed", changed)):
+        for key in keys:
+            labels.append({"name": key.rsplit("/", 1)[-1], "action": action})
+    if len(labels) > _MAX_LISTED_FILES:
+        remaining = len(labels) - _MAX_LISTED_FILES
+        labels = labels[:_MAX_LISTED_FILES]
+        labels.append({"name": f"and {remaining} more", "action": "more"})
+    return labels
 
 
 def _working_message(added: int, edited: int, removed: int) -> str:
@@ -183,6 +199,10 @@ async def run_pass(previous: dict[str, str] | None) -> dict[str, str]:
         added=len(added),
         edited=len(changed),
         removed=len(gone),
+        # File names, so hovering shows which documents rather than just a count.
+        # Basenames only: the full path is noise, and capped so a bulk import does
+        # not produce an unreadable list.
+        files=_file_labels(added, changed, gone),
     )
     try:
         async with _lock:
@@ -191,7 +211,13 @@ async def run_pass(previous: dict[str, str] | None) -> dict[str, str]:
         _set_status("error", "Indexing failed. See the app log for details.")
         raise
     print(f"[watch] done: {_describe(result)}")
-    _set_status("done", _done_message(result))
+    _set_status(
+        "done",
+        _done_message(result),
+        files=_file_labels(added, changed, gone),
+        indexed=result.get("ingested", 0),
+        removed_passages=result.get("pruned", 0),
+    )
 
     # Re-read afterwards: describing figures can take minutes, and anything that
     # arrived meanwhile should count as seen only once an ingest picked it up.
