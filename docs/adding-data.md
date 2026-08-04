@@ -176,6 +176,16 @@ effect after a restart without you doing anything else.
     writes no `source_file` cannot be matched up, so those entries are kept and
     reported, and `--recreate` clears them.
 
+!!! danger "Give every document a unique file name"
+    Documents are identified by their **file name alone**, not by which folder they
+    are in. So two files both called `intro.pdf`, in different folders of the same
+    collection, are the same document as far as the app is concerned: only one of
+    them ends up being searchable and the other is lost. Deleting one of them is
+    also refused, because its entries cannot be told apart from the other's.
+
+    A run now warns you when it sees a repeated name. If you get that warning,
+    rename the files so each is unique and read them in again with `--recreate`.
+
 !!! warning "When you do need `--recreate`"
     Fingerprints only cover the files. If you change something that affects how
     every document is cut up or searched, the existing entries are stale and the

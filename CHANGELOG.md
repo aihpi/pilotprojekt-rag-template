@@ -144,9 +144,17 @@ can be pointed at a new corpus without touching Python.
   `--recreate` to empty a collection on purpose.
 
   Matching entries to a file relies on the `source_file` payload, so it works for
-  PDF, Markdown and text sources. A `json`/`csv` source whose `field_mapping` writes
-  no `source_file` cannot be matched; those entries are kept and reported by name
-  rather than silently left behind.
+  PDF, Markdown and text sources. Entries are kept and reported, rather than
+  silently left behind, in the two cases where they cannot be matched safely: a
+  `json`/`csv` source whose `field_mapping` writes no `source_file`, and a name that
+  another file on disk still uses.
+
+- **Duplicate file names are now reported.** `doc_id`, and therefore each Qdrant
+  point id, is derived from the file name alone, so two documents called `intro.pdf`
+  in different folders of one collection collide and the second silently overwrites
+  the first. That is not new and is not fixed here, because changing the derivation
+  would invalidate every existing point id and force a full re-ingest of every
+  instance. Each run now names the clashing files and says one of them is being lost.
 
   `--recreate` is unchanged and still the right tool after altering `chunking`,
   chunk sizes or `images.mode`. `--skip-if-exists` still works but is no longer

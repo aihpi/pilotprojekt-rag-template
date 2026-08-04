@@ -496,6 +496,81 @@ def test_only_does_not_prune_the_other_sources(tmp_path, monkeypatch, fake_embed
     assert set(pipeline.read_manifest(client, "documents")) == {"docs/a.txt", "other/b.txt"}
 
 
+def test_deleting_one_of_two_files_with_the_same_name_keeps_the_survivor(
+    tmp_path, monkeypatch, fake_embed, capsys
+):
+    """Data loss, found by probing: entries are matched by file name only.
+
+    Two sources can each hold an `intro.txt`. Pruning the deleted one by name would
+    delete the surviving one's entries as well, which is exactly what happened
+    before this guard: the collection was left empty.
+    """
+    for folder in ("handbooks", "papers"):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "intro.txt").write_text(f"{folder} introduction", encoding="utf-8")
+    config = _config_at(
+        tmp_path,
+        data_sources=[
+            DataSourceConfig(name="handbooks", path="handbooks", format="txt", glob="*.txt"),
+            DataSourceConfig(name="papers", path="papers", format="txt", glob="*.txt"),
+        ],
+        chunking=ChunkingConfig(strategy="passthrough"),
+    )
+    client = FakeClient()
+    _run(config, client, monkeypatch)
+
+    (tmp_path / "handbooks" / "intro.txt").unlink()
+    result = _run(config, client, monkeypatch)
+
+    assert result["pruned"] == 0, "must not delete by an ambiguous name"
+    assert _sources_in(client) == {"intro.txt"}, "the surviving document must keep its entries"
+    out = capsys.readouterr().out
+    assert "not removing entries for handbooks/intro.txt" in out
+
+
+def test_duplicate_file_names_are_reported(tmp_path, monkeypatch, fake_embed, capsys):
+    """The pre-existing collision behind the above, previously silent.
+
+    doc_id comes from the file name and the point id from doc_id, so two files with
+    the same name produce the same id and one overwrites the other. Not fixed here,
+    because changing the derivation invalidates every existing point id, but no
+    longer silent.
+    """
+    for folder in ("a", "b"):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "same.txt").write_text(f"content {folder}", encoding="utf-8")
+    config = _config_at(
+        tmp_path,
+        data_sources=[
+            DataSourceConfig(name="a", path="a", format="txt", glob="*.txt"),
+            DataSourceConfig(name="b", path="b", format="txt", glob="*.txt"),
+        ],
+        chunking=ChunkingConfig(strategy="passthrough"),
+    )
+    _run(config, FakeClient(), monkeypatch)
+
+    out = capsys.readouterr().out
+    assert "occur more than once" in out
+    assert "same.txt: a/same.txt, b/same.txt" in out
+
+
+def test_a_renamed_file_moves_with_its_entries(tmp_path, monkeypatch, fake_embed):
+    """Same bytes, new name: the old entries go and the new name is indexed."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "old_name.txt").write_text("stable content", encoding="utf-8")
+    client = FakeClient()
+    config = _text_config(tmp_path)
+    _run(config, client, monkeypatch)
+
+    (docs / "old_name.txt").rename(docs / "new_name.txt")
+    result = _run(config, client, monkeypatch)
+
+    assert (result["pruned"], result["ingested"]) == (1, 1)
+    assert _sources_in(client) == {"new_name.txt"}
+    assert list(pipeline.read_manifest(client, "documents")) == ["docs/new_name.txt"]
+
+
 def test_unidentifiable_entries_are_reported_not_silently_kept(
     tmp_path, monkeypatch, fake_embed, capsys
 ):
@@ -517,7 +592,7 @@ def test_unidentifiable_entries_are_reported_not_silently_kept(
 
     assert result["pruned"] == 0
     out = capsys.readouterr().out
-    assert "could not be identified" in out
+    assert "could not be removed safely" in out
     assert "docs/gone.txt" in out
 
 

@@ -185,6 +185,18 @@ wirksam werden.
     diese Einträge bleiben erhalten und werden gemeldet, `--recreate` räumt sie
     weg.
 
+!!! danger "Jedes Dokument braucht einen eindeutigen Dateinamen"
+    Dokumente werden **allein über den Dateinamen** erkannt, nicht über den Ordner,
+    in dem sie liegen. Zwei Dateien, die beide `intro.pdf` heißen und in
+    verschiedenen Ordnern derselben Collection liegen, sind für die App also
+    dasselbe Dokument: nur eines davon wird durchsuchbar, das andere geht verloren.
+    Auch das Löschen eines der beiden wird abgelehnt, weil sich seine Einträge nicht
+    von denen des anderen unterscheiden lassen.
+
+    Ein Lauf warnt dich jetzt, wenn ein Name doppelt vorkommt. Wenn diese Warnung
+    erscheint, benenne die Dateien eindeutig um und lies sie mit `--recreate` neu
+    ein.
+
 !!! warning "Wann `--recreate` wirklich nötig ist"
     Fingerabdrücke betreffen nur die Dateien. Änderst du etwas, das sich auf die
     Zerlegung oder Suche **aller** Dokumente auswirkt, sind die vorhandenen

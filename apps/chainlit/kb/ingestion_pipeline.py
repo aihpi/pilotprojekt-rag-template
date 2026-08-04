@@ -363,13 +363,21 @@ def _payload_names_for(gate_key: str) -> list[str]:
     return [name, f"{name.rsplit('.', 1)[0]}.pdf"]
 
 
-def _prune_removed(client, collection: str, removed: list[str]) -> tuple[int, list[str]]:
+def _prune_removed(
+    client,
+    collection: str,
+    removed: list[str],
+    keep_names: set[str],
+) -> tuple[int, list[str]]:
     """Delete the entries of files that are gone from disk.
 
-    Returns (points deleted, keys whose entries could not be identified). A key
-    matches nothing when its source stores custom metadata (a ``json``/``csv``
-    source whose ``field_mapping`` writes no ``source_file``); those need
-    ``--recreate`` and are reported rather than silently ignored.
+    Returns (points deleted, keys whose entries could not be safely identified).
+    A key is left alone when it matches nothing (a ``json``/``csv`` source whose
+    ``field_mapping`` writes no ``source_file``) and when its identity is
+    ambiguous: entries are found by file *name*, so a deleted ``a/intro.pdf``
+    cannot be told apart from a surviving ``b/intro.pdf`` and pruning it would
+    take the survivor's entries with it. ``keep_names`` holds the names still on
+    disk, and anything colliding with them is reported instead of deleted.
     """
     from qdrant_client.models import (
         FieldCondition,
@@ -381,8 +389,16 @@ def _prune_removed(client, collection: str, removed: list[str]) -> tuple[int, li
     deleted = 0
     unmatched: list[str] = []
     for key in removed:
+        names = _payload_names_for(key)
+        if keep_names.intersection(names):
+            print(
+                f"[ingest] not removing entries for {key}: another file still on disk "
+                f"has the same name, and entries are matched by name only."
+            )
+            unmatched.append(key)
+            continue
         condition = Filter(
-            must=[FieldCondition(key="source_file", match=MatchAny(any=_payload_names_for(key)))]
+            must=[FieldCondition(key="source_file", match=MatchAny(any=names))]
         )
         try:
             found = client.count(
@@ -399,6 +415,31 @@ def _prune_removed(client, collection: str, removed: list[str]) -> tuple[int, li
         deleted += found
         print(f"[ingest] removed {found} entr(ies) for deleted document {key}")
     return deleted, unmatched
+
+
+def _warn_about_duplicate_names(gate: FileGate) -> None:
+    """Report files that share a name, because only one of them survives indexing.
+
+    Parsers derive ``doc_id`` from the file name, and the pipeline derives each
+    Qdrant point id from ``doc_id``, so two files called ``intro.pdf`` in different
+    directories produce identical ids and the second silently overwrites the first.
+    That predates the incremental ingest and is not fixed here (changing the id
+    derivation would invalidate every existing point id and force a full re-ingest),
+    but it is no longer silent.
+    """
+    by_name: dict[str, list[str]] = {}
+    for key in sorted(gate.seen):
+        by_name.setdefault(key.rsplit("/", 1)[-1], []).append(key)
+    clashes = {name: keys for name, keys in by_name.items() if len(keys) > 1}
+    if not clashes:
+        return
+    print(
+        f"[ingest] WARNING: {len(clashes)} file name(s) occur more than once. Documents "
+        "are identified by name, so only one of each set ends up in the collection and "
+        "the others are lost. Rename them to be unique:"
+    )
+    for name, keys in clashes.items():
+        print(f"[ingest]   {name}: {', '.join(keys)}")
 
 
 def _removed_keys(
@@ -473,6 +514,7 @@ async def ingest_all(
 
     gate = FileGate(known=manifest, root=config.resolve_path("."))
     per_source, all_chunks = plan_ingest(config, only=only, gate=gate)
+    _warn_about_duplicate_names(gate)
 
     # Deletions are handled whether or not there is anything new to ingest, and in
     # the same run, so replacing a whole corpus in one go both removes the old
@@ -480,13 +522,15 @@ async def ingest_all(
     removed = [] if recreate else _removed_keys(manifest, gate, only=only)
     pruned = 0
     if removed and exists:
-        pruned, unmatched = _prune_removed(client, collection, removed)
+        keep_names = {name for key in gate.seen for name in _payload_names_for(key)}
+        pruned, unmatched = _prune_removed(client, collection, removed, keep_names)
         if unmatched:
             print(
                 f"[ingest] WARNING: {len(unmatched)} deleted document(s) left entries "
-                "that could not be identified, so they stay searchable. This happens "
-                "when a source writes its own metadata (a json/csv field_mapping "
-                "without source_file). Use --recreate to clear them:"
+                "that could not be removed safely, so they stay searchable. Either the "
+                "source writes its own metadata (a json/csv field_mapping without "
+                "source_file), or another file on disk has the same name. Use "
+                "--recreate to clear them:"
             )
             for key in unmatched:
                 print(f"[ingest]   - {key}")
