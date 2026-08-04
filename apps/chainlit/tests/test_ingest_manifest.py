@@ -410,6 +410,45 @@ def test_replacing_the_whole_corpus_prunes_and_ingests_in_one_run(
     }
 
 
+def test_one_deleted_one_added_and_the_rest_untouched(tmp_path, monkeypatch, fake_embed):
+    """The everyday case: swap a single document out of a larger set.
+
+    All three states occur in one run, which the other tests only cover in
+    isolation: two files unchanged, one pruned, one ingested.
+    """
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    for name, text in (
+        ("stay_a.txt", "alpha stays"),
+        ("stay_b.txt", "beta stays"),
+        ("outgoing.txt", "outgoing content"),
+    ):
+        (docs / name).write_text(text, encoding="utf-8")
+    client = FakeClient()
+    config = _text_config(tmp_path)
+    _run(config, client, monkeypatch)
+    assert _sources_in(client) == {"stay_a.txt", "stay_b.txt", "outgoing.txt"}
+
+    (docs / "outgoing.txt").unlink()
+    (docs / "incoming.txt").write_text("incoming content", encoding="utf-8")
+    fake_embed.clear()
+    result = _run(config, client, monkeypatch)
+
+    assert result["pruned"] == 1
+    assert result["ingested"] == 1
+    assert result["skipped"] == 2
+    assert _sources_in(client) == {"stay_a.txt", "stay_b.txt", "incoming.txt"}
+    assert set(pipeline.read_manifest(client, "documents")) == {
+        "docs/stay_a.txt",
+        "docs/stay_b.txt",
+        "docs/incoming.txt",
+    }
+    # The two survivors must not have been re-embedded.
+    embedded = [t for batch in fake_embed for t in batch]
+    assert any("incoming content" in t for t in embedded)
+    assert not any("stays" in t for t in embedded)
+
+
 def test_an_empty_folder_is_not_treated_as_a_deletion(tmp_path, monkeypatch, fake_embed, capsys):
     """The footgun: a bind mount that did not come up would otherwise wipe everything."""
     docs = tmp_path / "docs"
