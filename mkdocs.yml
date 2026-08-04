@@ -41,6 +41,7 @@ plugins:
             Getting Started: Erste Schritte
             Changing Your Documents: Dokumente ändern
             Adding Your Data: Daten hinzufügen
+            Troubleshooting: Fehlerbehebung
             Configuration Reference: Konfigurationsreferenz
             Field-Mapping DSL: Field-Mapping-DSL
             Example Corpus: Beispielkorpus
@@ -80,6 +81,7 @@ nav:
   - Agentic Tools: tools.md
   - Figures & Images: images.md
   - System Prompts: prompts.md
+  - Troubleshooting: troubleshooting.md
   - Configuration Reference: configuration.md
   - Field-Mapping DSL: field-mapping.md
   - Extending (parsers & chunkers): extending.md

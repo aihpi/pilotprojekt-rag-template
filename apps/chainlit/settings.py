@@ -73,6 +73,11 @@ PERSONALIZED_FOLLOWUPS_COUNT = _cfg.app.personalized_followups_count
 CHAT_DB_PATH = Path(
     os.getenv("CHAT_DB_PATH", str((BASE_DIR / ".chainlit" / "chat_history.sqlite3").resolve()))
 )
+# Where the chat history used to live. Under Docker, CHAT_DB_PATH now points at a
+# named volume instead, because .chainlit/ is bind-mounted from the host and SQLite
+# in WAL mode is not safe on Docker Desktop's emulated filesystem. Kept so an
+# existing history can be carried over once; see chat_history.migrate_legacy_db.
+LEGACY_CHAT_DB_PATH = (BASE_DIR / ".chainlit" / "chat_history.sqlite3").resolve()
 CHAT_EXPORT_DIR = Path(
     os.getenv("CHAT_EXPORT_DIR", str((BASE_DIR / ".files" / "chat_exports").resolve()))
 )

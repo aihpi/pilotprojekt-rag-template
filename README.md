@@ -228,6 +228,7 @@ types in `kb/parsers/`, ways of cutting text in `kb/chunkers/`, and abilities in
 |---|---|
 | [Getting started](docs/getting-started.md) | install, ingest, run |
 | [Changing your documents](docs/managing-documents.md) | add, correct, remove, rebuild |
+| [Troubleshooting](docs/troubleshooting.md) | common errors and what to do |
 | [Example corpus](docs/example-corpus.md) | what ships and how to swap it |
 | [Adding your data](docs/adding-data.md) | formats, chunking, citations |
 | [Agentic tools](docs/tools.md) | the five tools, writing your own |

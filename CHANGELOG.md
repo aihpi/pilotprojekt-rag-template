@@ -44,6 +44,25 @@ can be pointed at a new corpus without touching Python.
 
 ### Fixed
 
+- **The chat history could be corrupted, and was.** It is SQLite in WAL mode and lived
+  under `.chainlit/`, which Docker bind-mounts from the host. WAL needs a shared-memory
+  companion file and real POSIX locking, and Docker Desktop only emulates both across
+  the macOS/Windows filesystem boundary, so a write interrupted at the wrong moment left
+  `sqlite3.DatabaseError: database disk image is malformed` on every chat start. Hit
+  during development after a series of container restarts; the file was recoverable with
+  `sqlite3 old ".recover"`.
+
+  Under Docker the database now lives on a named `chat_db` volume, which is a real Linux
+  filesystem inside the VM where WAL behaves correctly. An existing history is carried
+  over once on startup via SQLite's backup API, not a file copy: in WAL mode a database
+  is several files and recently committed rows can still sit in the `-wal`, so copying
+  only the main file loses them. A damaged legacy file is deliberately not carried over
+  and is left in place, with the recovery command printed.
+
+  Running without Docker is unaffected and keeps the old path: a native filesystem
+  handles WAL fine. Linux hosts were never affected either, since a bind mount there is
+  the same kernel filesystem.
+
 - **Self-registration never worked.** `POST /auth/register` was broken three
   independent ways, each sufficient on its own.
 

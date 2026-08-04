@@ -237,6 +237,7 @@ erweiterst: Dateiformate in `kb/parsers/`, Arten des Textteilens in
 |---|---|
 | [Erste Schritte](docs/getting-started.de.md) | Installation, Ingest, Start |
 | [Dokumente ändern](docs/managing-documents.de.md) | ergänzen, korrigieren, entfernen, neu aufbauen |
+| [Fehlerbehebung](docs/troubleshooting.de.md) | häufige Fehler und was zu tun ist |
 | [Beispielkorpus](docs/example-corpus.de.md) | was mitgeliefert wird und wie man es tauscht |
 | [Daten hinzufügen](docs/adding-data.de.md) | Formate, Chunking, Zitate |
 | [Agentische Tools](docs/tools.de.md) | die fünf Tools, eigene schreiben |

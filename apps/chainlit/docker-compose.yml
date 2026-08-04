@@ -51,6 +51,12 @@ services:
       CHAINLIT_AUTH_USERNAME: ${CHAINLIT_AUTH_USERNAME:-admin}
       CHAINLIT_AUTH_PASSWORD: ${CHAINLIT_AUTH_PASSWORD:-admin}
       CHAINLIT_INIT_DB: ${CHAINLIT_INIT_DB:-true}
+      # The chat history is SQLite in WAL mode, which needs a shared-memory file and
+      # real POSIX locking. Docker Desktop only emulates those across the host
+      # filesystem boundary, so keeping this on the bind-mounted ./.chainlit could
+      # corrupt it ("database disk image is malformed"). The chat_db volume below is
+      # a real Linux filesystem. An existing history is copied over once on startup.
+      CHAT_DB_PATH: /app/.chatdb/chat_history.sqlite3
       # Watch the document folders and index changes automatically. Defaults to on,
       # so an .env from before this feature needs no editing; set it to false to
       # turn it off.
@@ -72,6 +78,8 @@ services:
       # /root/.cache/huggingface. Without this volume every rebuild, and every
       # `run --rm ingest`, downloads them again.
       - model_cache:/root/.cache
+      # SQLite must not live on the bind mount above; see CHAT_DB_PATH.
+      - chat_db:/app/.chatdb
     ports:
       - "${APP_PORT:-8000}:8000"
 
@@ -153,4 +161,5 @@ volumes:
   postgres_data:
   qdrant_data:
   model_cache:
+  chat_db:
   langflow_data:

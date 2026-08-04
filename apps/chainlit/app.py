@@ -31,6 +31,7 @@ from chat_history import (
     get_user_selected_chat_model,
     get_user_selected_chat_profile,
     init_chat_db,
+    migrate_legacy_db,
     list_chat_sessions,
     set_session_title_if_missing,
     set_user_selected_chat_model,
@@ -70,6 +71,7 @@ from settings import (
     DATA_RAW_DIR,
     DATABASE_URL,
     DOCUMENT_WATCH,
+    LEGACY_CHAT_DB_PATH,
     EMBED_MODEL,
     MAX_TOP_K,
     MAX_SOURCE_LINKS,
@@ -2107,6 +2109,7 @@ async def on_app_startup() -> None:
     if DATABASE_URL and CHAINLIT_INIT_DB:
         await ensure_native_schema(DATABASE_URL)
 
+    migrate_legacy_db(CHAT_DB_PATH, LEGACY_CHAT_DB_PATH)
     init_chat_db(CHAT_DB_PATH)
     CHAT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
