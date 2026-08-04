@@ -170,7 +170,8 @@ entscheidet, was der Assistent weiß: Datei hinzufügen, dann wird nur diese
 gelesen; Datei korrigieren, dann wird sie erneut gelesen; Datei löschen, dann
 taucht sie nicht mehr in Antworten auf. Auch der komplette Austausch aller
 Dokumente geht in einem Schritt. Alles andere bleibt unberührt, du zahlst also
-nicht doppelt.
+nicht doppelt. Neu starten musst du auch nichts.
+→ [Dokumente ändern](docs/managing-documents.de.md)
 
 ## Was du konfigurierst
 
@@ -235,6 +236,7 @@ erweiterst: Dateiformate in `kb/parsers/`, Arten des Textteilens in
 | Seite | |
 |---|---|
 | [Erste Schritte](docs/getting-started.de.md) | Installation, Ingest, Start |
+| [Dokumente ändern](docs/managing-documents.de.md) | ergänzen, korrigieren, entfernen, neu aufbauen |
 | [Beispielkorpus](docs/example-corpus.de.md) | was mitgeliefert wird und wie man es tauscht |
 | [Daten hinzufügen](docs/adding-data.de.md) | Formate, Chunking, Zitate |
 | [Agentische Tools](docs/tools.de.md) | die fünf Tools, eigene schreiben |

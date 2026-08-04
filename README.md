@@ -162,7 +162,8 @@ It also handles Markdown, JSON and CSV files. See
 the assistant knows: add a file and only that one is read, correct a file and it is
 read again, delete a file and it stops appearing in answers. Replacing the whole set
 at once works too. Everything else is left untouched, so you do not pay for it
-twice.
+twice. No restarts needed either.
+→ [Changing your documents](docs/managing-documents.md)
 
 ## What you configure
 
@@ -226,6 +227,7 @@ types in `kb/parsers/`, ways of cutting text in `kb/chunkers/`, and abilities in
 | Page | |
 |---|---|
 | [Getting started](docs/getting-started.md) | install, ingest, run |
+| [Changing your documents](docs/managing-documents.md) | add, correct, remove, rebuild |
 | [Example corpus](docs/example-corpus.md) | what ships and how to swap it |
 | [Adding your data](docs/adding-data.md) | formats, chunking, citations |
 | [Agentic tools](docs/tools.md) | the five tools, writing your own |

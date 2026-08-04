@@ -148,6 +148,11 @@ einzelnen Satz Dokumente mit einem `chunking:`-Block in dessen Eintrag.
 
 ## 4. Dokumente einlesen
 
+!!! tip "Nur ein Dokument ergänzen oder entfernen?"
+    [Dokumente ändern](managing-documents.de.md) ist die kurze, allgemein
+    verständliche Fassung dieses Schritts. Der Rest dieser Seite dreht sich um
+    Formate und Chunking.
+
 ```bash
 export RAG_CONFIG=my-rag.yaml
 python -m kb.ingest                         # embedden + in die Collection upserten

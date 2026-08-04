@@ -144,6 +144,10 @@ set of documents with a `chunking:` block inside that entry.
 
 ## 4. Read the documents in
 
+!!! tip "Just adding or removing a document?"
+    [Changing your documents](managing-documents.md) is the short, plain-language
+    version of this step. The rest of this page is about formats and chunking.
+
 ```bash
 export RAG_CONFIG=my-rag.yaml
 python -m kb.ingest                         # embed + upsert into the collection
