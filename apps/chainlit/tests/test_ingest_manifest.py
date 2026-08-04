@@ -94,6 +94,39 @@ def test_gate_keys_are_relative_to_the_config_dir(tmp_path):
     assert list(gate.seen) == ["data/documents/paper.pdf"]
 
 
+def test_keys_stay_relative_when_the_source_is_outside_the_config_dir(tmp_path):
+    """The shipped layout, and the case that first went wrong.
+
+    examples/papers/rag.config.yaml points at ../../data/documents, so the files
+    are not below the config directory. Path.relative_to cannot express that and
+    fell back to an absolute path, which differs between a Docker run
+    (/app/data/...) and a local one (/Users/.../data/...). The manifest then missed
+    on every file and would have re-ingested the whole corpus, vision calls
+    included.
+    """
+    config_dir = tmp_path / "examples" / "papers"
+    config_dir.mkdir(parents=True)
+    docs = tmp_path / "data" / "documents"
+    docs.mkdir(parents=True)
+    paper = docs / "paper.pdf"
+    paper.write_bytes(b"%PDF-1.4")
+
+    gate = FileGate(root=config_dir)
+    gate.admit([paper])
+
+    assert list(gate.seen) == ["../../data/documents/paper.pdf"]
+    # The same relative key must come out from a different absolute prefix.
+    other = tmp_path / "elsewhere"
+    (other / "examples" / "papers").mkdir(parents=True)
+    (other / "data" / "documents").mkdir(parents=True)
+    twin = other / "data" / "documents" / "paper.pdf"
+    twin.write_bytes(b"%PDF-1.4")
+    twin_gate = FileGate(root=other / "examples" / "papers")
+    twin_gate.admit([twin])
+
+    assert list(twin_gate.seen) == list(gate.seen)
+
+
 def test_iter_source_files_applies_the_active_gate(tmp_path):
     (tmp_path / "a.txt").write_text("a", encoding="utf-8")
     (tmp_path / "b.txt").write_text("b", encoding="utf-8")

@@ -14,6 +14,7 @@ it deterministic keeps re-ingests idempotent.
 from __future__ import annotations
 
 import hashlib
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -78,12 +79,21 @@ class FileGate:
     skipped: list[str] = field(default_factory=list)
 
     def key(self, path: Path) -> str:
-        """Stable identity for a file: relative to ``root`` when possible."""
+        """Stable identity for a file, relative to ``root``.
+
+        Uses ``os.path.relpath`` rather than ``Path.relative_to`` because sources
+        routinely sit *outside* the config directory: the shipped example config is
+        in ``examples/papers/`` and points at ``../../data/documents``.
+        ``relative_to`` cannot express that and would fall back to an absolute
+        path, which differs between a Docker run (``/app/data/...``) and a local
+        one (``/Users/.../data/...``). The manifest would then miss on every file
+        and re-ingest the whole corpus, vision calls included.
+        """
         resolved = path.resolve()
         if self.root:
             try:
-                return resolved.relative_to(self.root.resolve()).as_posix()
-            except ValueError:  # outside the config dir — fall back to the full path
+                return Path(os.path.relpath(resolved, self.root.resolve())).as_posix()
+            except ValueError:  # different drives on Windows
                 pass
         return resolved.as_posix()
 
