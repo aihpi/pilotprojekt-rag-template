@@ -18,6 +18,7 @@ from config import RagConfig, get_config
 from kb.chunkers import get_chunker
 from kb.chunkers.base import Chunk
 from kb.parsers import get_parser
+from kb.parsers.base import FileGate, file_gate
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,15 @@ ProgressCallback = Callable[[int, int], Awaitable[None]]
 # no "text" payload, so retrieval (which drops text-less payloads) never
 # surfaces it as a result.
 _SENTINEL_KEY = "__ingest_meta__"
+
+# Second metadata point: which files this collection was built from, as
+# {path relative to the config dir: sha256}. Keyed by path rather than by the
+# payload's ``source_file`` on purpose — that key is parser-defined and
+# inconsistent (the PDF parser stores "<stem>.pdf", so a docling-JSON source
+# indexes X.pdf for a file named X.json, and the CSV/JSON parsers store whatever
+# the user's field_mapping produces). Hashing paths sidesteps all of it and, as a
+# bonus, an edited document is re-ingested instead of going stale.
+_MANIFEST_KEY = "__ingest_manifest__"
 
 
 def _point_id(doc_id: str) -> str:
@@ -40,10 +50,24 @@ def plan_ingest(
     config: RagConfig | None = None,
     *,
     only: set[str] | None = None,
+    gate: FileGate | None = None,
 ) -> tuple[list[dict[str, Any]], list[Chunk]]:
     """Parse and chunk every (selected) data source. Returns (per-source
-    summary, all chunks). No I/O beyond reading source files."""
+    summary, all chunks). No I/O beyond reading source files.
+
+    With ``gate``, files whose contents are already indexed are not parsed, and
+    the gate collects what it saw. A gate in ``skip_all`` mode enumerates the
+    files without parsing any of them.
+    """
     config = config or get_config()
+    with file_gate(gate):
+        return _plan_ingest(config, only)
+
+
+def _plan_ingest(
+    config: RagConfig,
+    only: set[str] | None,
+) -> tuple[list[dict[str, Any]], list[Chunk]]:
     per_source: list[dict[str, Any]] = []
     all_chunks: list[Chunk] = []
     for src in config.data_sources:
@@ -126,6 +150,65 @@ def _read_sentinel(client, name: str) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001
         return None
     return dict(records[0].payload) if records else None
+
+
+def read_manifest(client, name: str) -> dict[str, str] | None:
+    """Files this collection was built from, or None if it predates the manifest."""
+    try:
+        records = client.retrieve(
+            collection_name=name, ids=[_point_id(_MANIFEST_KEY)], with_payload=True
+        )
+    except Exception:  # noqa: BLE001 — collection may not exist yet
+        return None
+    if not records:
+        return None
+    files = dict(records[0].payload or {}).get("files")
+    return dict(files) if isinstance(files, dict) else None
+
+
+def write_manifest(client, name: str, files: dict[str, str], vector: list[float]) -> None:
+    from qdrant_client.models import PointStruct
+
+    client.upsert(
+        collection_name=name,
+        points=[
+            PointStruct(
+                id=_point_id(_MANIFEST_KEY),
+                vector=vector,
+                payload={"_meta": True, "files": dict(files)},
+            )
+        ],
+    )
+
+
+def indexed_source_files(client, name: str) -> set[str]:
+    """Distinct ``source_file`` payload values in a collection.
+
+    One scroll fetching a single payload field, not one filtered count per file:
+    ``retrieval.payload_indexes`` is empty by default, so every filtered count
+    would scan the whole collection.
+    """
+    found: set[str] = set()
+    offset = None
+    while True:
+        try:
+            points, offset = client.scroll(
+                collection_name=name,
+                limit=1000,
+                offset=offset,
+                with_payload=["source_file"],
+                with_vectors=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ingest] could not list indexed documents: {exc}")
+            return found
+        for point in points:
+            value = (point.payload or {}).get("source_file")
+            if isinstance(value, str):
+                found.add(value)
+        if offset is None:
+            break
+    return found
 
 
 def _write_sentinel(client, name: str, embed_model: str, size: int, vector: list[float]) -> None:
@@ -228,6 +311,47 @@ async def ingest_chunks(
     return len(chunks)
 
 
+def _adopt(client, collection: str, config: RagConfig, only: set[str] | None) -> dict[str, str]:
+    """Record what an existing pre-manifest collection was built from.
+
+    Enumerates and hashes every source file without parsing any of it, so the
+    first run under the new code costs nothing and every later run is
+    incremental. The alternative, treating a manifest-less collection as empty,
+    would silently re-embed (and re-describe every figure in) corpora that are
+    already indexed.
+
+    The assumption is that the collection matches the folder. Rather than trust
+    it, cross-check against the payload: a file with no chunks under either
+    naming convention is reported, because that is a document the user believes
+    is searchable and is not.
+    """
+    gate = FileGate(skip_all=True, root=config.resolve_path("."))
+    plan_ingest(config, only=only, gate=gate)
+
+    indexed = indexed_source_files(client, collection)
+    unmatched = [
+        key
+        for key in sorted(gate.seen)
+        # Two candidate keys cover both conventions without a per-format switch:
+        # text.py stores path.name, pdf.py stores "<stem>.pdf".
+        if not {(name := key.rsplit("/", 1)[-1]), f"{name.rsplit('.', 1)[0]}.pdf"} & indexed
+    ]
+
+    print(
+        f"[ingest] adopting existing collection '{collection}': "
+        f"{len(gate.seen)} file(s) recorded, nothing re-ingested."
+    )
+    if unmatched:
+        print(
+            f"[ingest] WARNING: {len(unmatched)} file(s) have no chunks in "
+            f"'{collection}' and were adopted anyway, so they stay unsearchable. "
+            f"Re-ingest with --recreate to index them:"
+        )
+        for key in unmatched:
+            print(f"[ingest]   - {key}")
+    return dict(gate.seen)
+
+
 async def ingest_all(
     config: RagConfig | None = None,
     *,
@@ -235,18 +359,95 @@ async def ingest_all(
     only: set[str] | None = None,
     progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
+    """Ingest every configured source, skipping files that are already indexed.
+
+    Without ``recreate`` this is incremental: a file is parsed only if it is new
+    or its contents changed. Adding a document to the folder and restarting is
+    therefore enough to index it, which is what the ``ingest`` compose service
+    relies on.
+
+    Note that a file *removed* from disk keeps its chunks; deleting those needs a
+    delete-by-filter pass that does not exist yet.
+    """
     config = config or get_config()
-    per_source, all_chunks = plan_ingest(config, only=only)
+    collection = config.vector_store.collection
+    client = get_client()
+    exists = collection_exists(client, collection)
+
+    manifest: dict[str, str] = {}
+    if not recreate and exists:
+        stored = read_manifest(client, collection)
+        if stored is None:
+            adopted = _adopt(client, collection, config, only)
+            if adopted:
+                _store_manifest(client, collection, adopted)
+            return {
+                "ingested": 0,
+                "collection": collection,
+                "sources": [],
+                "adopted": len(adopted),
+            }
+        manifest = stored
+
+    gate = FileGate(known=manifest, root=config.resolve_path("."))
+    per_source, all_chunks = plan_ingest(config, only=only, gate=gate)
+
+    if not all_chunks and gate.skipped and not recreate:
+        print(
+            f"[ingest] nothing to do: all {len(gate.skipped)} file(s) are already "
+            f"indexed in '{collection}' and unchanged."
+        )
+        return {"ingested": 0, "collection": collection, "sources": per_source, "skipped": len(gate.skipped)}
+
+    parsed = len(gate.seen) - len(gate.skipped)
+    if gate.seen:
+        print(
+            f"[ingest] {parsed} file(s) to ingest, {len(gate.skipped)} unchanged and skipped."
+        )
+
     count = await ingest_chunks(
         all_chunks,
-        collection=config.vector_store.collection,
+        collection=collection,
         distance=config.vector_store.distance,
         payload_indexes=config.retrieval.payload_indexes,
         recreate=recreate,
         embed_model=config.models.embed_model,
         progress=progress,
     )
-    return {"ingested": count, "collection": config.vector_store.collection, "sources": per_source}
+
+    # Merge rather than replace: a run limited by --only must not drop the other
+    # sources' files from the manifest and make them look new next time.
+    merged = {**manifest, **gate.seen} if not recreate else dict(gate.seen)
+    _store_manifest(client, collection, merged)
+
+    return {
+        "ingested": count,
+        "collection": collection,
+        "sources": per_source,
+        "skipped": len(gate.skipped),
+    }
+
+
+def _manifest_vector(client, collection: str) -> list[float] | None:
+    """Reuse the sentinel's vector: the manifest point needs one of the right size."""
+    sentinel = None
+    try:
+        records = client.retrieve(
+            collection_name=collection, ids=[_point_id(_SENTINEL_KEY)], with_vectors=True
+        )
+        sentinel = records[0] if records else None
+    except Exception:  # noqa: BLE001
+        return None
+    vector = getattr(sentinel, "vector", None)
+    return list(vector) if isinstance(vector, list) else None
+
+
+def _store_manifest(client, collection: str, files: dict[str, str]) -> None:
+    vector = _manifest_vector(client, collection)
+    if vector is None:
+        print("[ingest] could not store the file manifest (no sentinel vector to reuse).")
+        return
+    write_manifest(client, collection, files, vector)
 
 
 def drop_collection(name: str) -> None:

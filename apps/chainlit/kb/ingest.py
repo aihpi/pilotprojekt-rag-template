@@ -1,12 +1,15 @@
 """Generic ingestion CLI.
 
+A plain run is incremental: files already indexed and unchanged are skipped, so
+adding a document to the folder and running again indexes just that document.
+
 Examples::
 
+    python -m kb.ingest                           # index new and changed files
     python -m kb.ingest --dry-run                 # parse+chunk, print samples, no embed
     python -m kb.ingest --config examples/minimal/rag.config.yaml
-    python -m kb.ingest --recreate                # rebuild the collection
+    python -m kb.ingest --recreate                # rebuild the collection from scratch
     python -m kb.ingest --only faq handbook       # ingest specific sources
-    python -m kb.ingest --skip-if-exists          # no-op if the collection exists
 """
 
 from __future__ import annotations
@@ -41,14 +44,19 @@ def _print_dry_run(per_source, chunks, limit: int) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Ingest configured data sources into the vector store.")
     ap.add_argument("--config", default=os.getenv(CONFIG_PATH_ENV), help="Path to a rag config YAML.")
-    ap.add_argument("--recreate", action="store_true", help="Drop and rebuild the collection.")
+    ap.add_argument(
+        "--recreate",
+        action="store_true",
+        help="Drop and rebuild the collection, re-reading every file. Needed after "
+        "changing the chunking strategy or the embed model.",
+    )
     ap.add_argument("--only", nargs="*", help="Ingest only these data source names.")
     ap.add_argument(
         "--skip-if-exists",
         action="store_true",
-        help="Exit successfully if the collection already exists (ignored with --recreate). "
-        "NOTE: this only checks existence. After changing the config's content or embed "
-        "model you must use --recreate (or a new collection).",
+        help="Deprecated and rarely useful: exit without doing anything if the "
+        "collection exists. A plain run already skips files that are indexed and "
+        "unchanged, so this only prevents NEW files from being picked up.",
     )
     ap.add_argument("--dry-run", action="store_true", help="Parse and chunk only; print samples.")
     ap.add_argument("--limit", type=int, default=5, help="How many sample chunks --dry-run prints.")
@@ -72,7 +80,12 @@ def main() -> None:
             return
 
     result = asyncio.run(ingest_all(config, recreate=args.recreate, only=only))
-    print(f"Ingested {result['ingested']} chunks into '{result['collection']}'.")
+    # ingest_all already explains the adoption and nothing-to-do cases; repeating
+    # "Ingested 0 chunks" underneath them only reads like something went wrong.
+    if result.get("adopted") or (result["ingested"] == 0 and result.get("skipped")):
+        return
+    suffix = f" ({result['skipped']} file(s) unchanged)" if result.get("skipped") else ""
+    print(f"Ingested {result['ingested']} chunks into '{result['collection']}'.{suffix}")
 
 
 if __name__ == "__main__":

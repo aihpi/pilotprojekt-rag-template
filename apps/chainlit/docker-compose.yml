@@ -62,6 +62,10 @@ services:
       - .:/app
       - ./.chainlit:/app/.chainlit
       - ./.files:/app/.files
+      # Docling's PDF models (~500 MB) cache under /root/.cache/docling and
+      # /root/.cache/huggingface. Without this volume every rebuild, and every
+      # `run --rm ingest`, downloads them again.
+      - model_cache:/root/.cache
     ports:
       - "${APP_PORT:-8000}:8000"
 
@@ -104,6 +108,10 @@ services:
       INGEST_MAX_BATCH_CHARS: ${INGEST_MAX_BATCH_CHARS:-20000}
     volumes:
       - .:/app
+      # Same model cache as the chainlit service. This is the container that
+      # actually reads PDFs, and it runs with --rm, so without a volume it
+      # re-downloads Docling's models on every single ingest run.
+      - model_cache:/root/.cache
     command:
       - /bin/sh
       - -lc
@@ -131,31 +139,6 @@ services:
         print(f"Qdrant did not become ready in time: {url}", file=sys.stderr)
         sys.exit(1)
         PY
-        if [ "$$INGEST_RECREATE" != "true" ]; then
-          echo "Checking whether the target collection already exists ...";
-          python - <<'PY'
-        import json
-        import os
-        import sys
-        import urllib.request
-
-        base = (os.environ.get("QDRANT_URL") or "http://qdrant:6333").rstrip("/")
-        from config import load_config
-        collection = os.environ.get("QDRANT_COLLECTION") or load_config().vector_store.collection
-        url = f"{base}/collections"
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-        names = {c.get("name") for c in payload.get("result", {}).get("collections", []) if isinstance(c, dict)}
-        if collection in names:
-            print(f"Collection already exists: {collection}. Skipping ingestion.")
-            sys.exit(0)
-        print(f"Collection not found: {collection}. Ingestion will run.")
-        sys.exit(1)
-        PY
-          if [ "$$?" = "0" ]; then
-            exit 0;
-          fi;
-        fi;
         python -m kb.ingest --config "$$RAG_CONFIG" \
           $$( [ "$$INGEST_RECREATE" = "true" ] && echo "--recreate" );
     restart: "no"
@@ -163,4 +146,5 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
+  model_cache:
   langflow_data:
