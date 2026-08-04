@@ -31,10 +31,28 @@ Lesen der PDFs.
 
 ---
 
+## Was du brauchst
+
+Nur drei Dinge auf dem Rechner:
+
+| | |
+|---|---|
+| **[Docker](https://docs.docker.com/get-docker/)** | Führt alles aus. Unter Windows läuft es über WSL2, das Docker Desktop selbst einrichtet. |
+| **Git** | Um das Projekt herunterzuladen. Wer das nicht installieren möchte, nimmt auf GitHub den grünen *Code*-Knopf und *Download ZIP*. |
+| **Einen Texteditor** | Um eine Einstellungsdatei auszufüllen. Jeder Editor genügt. |
+
+**Nicht nötig sind** Python, uv, pip, Node, Qdrant oder PostgreSQL. Das steckt
+alles im Container.
+
+**Eines ist nicht dabei: das KI-Modell.** Mitgeliefert werden die Chat-Anwendung,
+die Datenbank und der Suchindex, aber kein Modell. Du verweist auf einen
+bestehenden Dienst, indem du Adresse und Schlüssel in die Datei `.env` einträgst.
+Das kann ein Dienst deiner Einrichtung sein oder ein Modellserver auf deinem
+eigenen Rechner.
+
 ## Schnellstart
 
-Du brauchst [Docker](https://docs.docker.com/get-docker/). Dann kopierst du diese
-Zeilen blockweise in ein Terminal:
+Kopiere diese Zeilen blockweise in ein Terminal:
 
 ```bash
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
@@ -116,12 +134,14 @@ alles funktioniert hat.
 
 - **Nichts von dir wird gelöscht.** Deine Dokumente, die indexierten Daten und der
   Chat-Verlauf bleiben beim Aktualisieren erhalten. Du musst normalerweise nicht neu
-  ingesten.
+  ingesten. Neue oder geänderte Dateien im Dokumentenordner werden beim nächsten Start
+  von selbst eingelesen.
 - **Eine Ausnahme.** Wenn ein früherer Ingest fehlgeschlagene Abbildungs-Beschreibungen
   gemeldet hat, lies deine Dokumente einmal neu ein, damit diese Abbildungen beschrieben
   werden. Nur dann lohnt es sich: [Abbildungen](docs/images.de.md).
-- **Der erste Start nach dem Update dauert länger.** Die App lädt die Modelle zum Lesen
-  von PDFs erneut herunter (etwa 500 MB). Das ist normal und passiert einmal pro Update.
+- **Das allererste Einlesen dauert länger.** Die App lädt die Modelle zum Lesen von PDFs
+  herunter (etwa 500 MB). Sie bleiben danach gespeichert, das passiert also einmal und
+  nicht bei jedem Update.
 - **Alte Versionen belegen Speicherplatz.** Mit `docker image prune` freigeben.
 - **Etwas zickt?** Alles stoppen und neu starten:
   `docker compose down && docker compose up -d --build`
@@ -136,14 +156,19 @@ cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
 ```
 
 1. Lege deine PDFs in `apps/chainlit/data/documents/`. Sie bleiben auf deinem
-   Rechner. Nur die drei Beispiel-Paper gehören zum Projekt und dürfen weg.
+   Rechner. Nur die Beispiel-Paper gehören zum Projekt und dürfen weg.
 2. Öffne `my-rag.yaml` und gib `vector_store.collection` einen neuen Namen. So
    bleiben deine Dokumente von den Beispielen getrennt.
 3. Lass die App deine Dokumente einlesen:
-   `RAG_CONFIG=my-rag.yaml uv run python -m kb.ingest --recreate`
+   `RAG_CONFIG=my-rag.yaml docker compose up -d`
 
 Markdown-, JSON- und CSV-Dateien gehen ebenfalls. Siehe
 [Daten hinzufügen](docs/adding-data.de.md).
+
+**Später weitere Dokumente ergänzen** ist derselbe Schritt noch einmal. Datei in
+den Ordner legen, App starten: gelesen wird nur die neue Datei, alles andere
+bleibt unberührt. Auch ein geändertes Dokument gilt als neu, eine korrigierte
+Datei wird also von selbst noch einmal gelesen.
 
 ## Was du konfigurierst
 

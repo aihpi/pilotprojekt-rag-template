@@ -30,10 +30,27 @@ text, and [Docling](https://github.com/DS4SD/docling) to read PDFs.
 
 ---
 
+## What you need
+
+Only three things on your machine:
+
+| | |
+|---|---|
+| **[Docker](https://docs.docker.com/get-docker/)** | Runs everything. On Windows it uses WSL2, which Docker Desktop sets up for you. |
+| **Git** | To download the project. If you would rather not install it, use the green *Code* button on GitHub and pick *Download ZIP*. |
+| **A text editor** | To fill in one settings file. Any editor works. |
+
+**You do not need** Python, uv, pip, Node, Qdrant or PostgreSQL. Those are all
+inside the container.
+
+**One thing is not included: the AI model.** The project ships the chat app, the
+database and the search index, but no model. You point it at an existing service
+by putting an address and a key into the `.env` file. That can be a service your
+organisation provides, or a model server running on your own machine.
+
 ## Quickstart
 
-You need [Docker](https://docs.docker.com/get-docker/) installed. Then copy these
-lines into a terminal, one block at a time:
+Copy these lines into a terminal, one block at a time:
 
 ```bash
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
@@ -111,12 +128,14 @@ answer and the PDF should open on the right. That is the quickest way to see it 
 ### Good to know
 
 - **Nothing you added gets deleted.** Your documents, indexed data and chat history all
-  survive an update, so you normally do not need to ingest again.
+  survive an update, so you normally do not need to ingest again. New or edited files in
+  the documents folder are read in by themselves on the next start.
 - **One exception.** If an earlier ingest reported failed figure descriptions, read your
   documents in once more so those figures get described. Only worth doing if you saw
   those errors: [Figures & images](docs/images.md).
-- **The first start after an update is slow.** The app re-downloads the models it uses to
-  read PDFs (roughly 500 MB). This is normal and happens once per update.
+- **The very first document import is slow.** The app downloads the models it uses to read
+  PDFs (roughly 500 MB). They are kept afterwards, so this happens once, not once per
+  update.
 - **Old versions take up disk space.** Free it up with `docker image prune`.
 - **Something acting up?** Stop everything and start fresh:
   `docker compose down && docker compose up -d --build`
@@ -130,14 +149,18 @@ cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
 ```
 
 1. Put your PDFs into `apps/chainlit/data/documents/`. They stay on your machine.
-   Only the three example papers belong to the project, and you can delete them.
+   Only the example papers belong to the project, and you can delete them.
 2. Open `my-rag.yaml` and give `vector_store.collection` a new name. This keeps
    your documents separate from the examples.
 3. Let the app read your documents:
-   `RAG_CONFIG=my-rag.yaml uv run python -m kb.ingest --recreate`
+   `RAG_CONFIG=my-rag.yaml docker compose up -d`
 
 It also handles Markdown, JSON and CSV files. See
 [Adding your data](docs/adding-data.md).
+
+**Adding more documents later** is the same step again. Put the file in the folder
+and start the app; only the new file is read, the rest is left alone. Editing a
+document also counts as new, so a corrected file gets read again by itself.
 
 ## What you configure
 

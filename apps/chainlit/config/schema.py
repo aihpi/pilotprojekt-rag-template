@@ -144,8 +144,20 @@ class PdfOptions(BaseModel):
     docling_service_url: str | None = None
     """Optional remote Docling service (else local CPU conversion)."""
     ocr: bool = False
+    """Read text off the page as an image. Only needed for scans: PDFs that
+    already carry a text layer are read correctly with ``ocr: false``, and OCR
+    makes ingestion much slower.
+
+    **The shipped Docker image contains no OCR engine**, deliberately, to keep it
+    small. Turning this on there fails immediately with an explanation. To use it,
+    build a derived image that installs ``tesseract-ocr`` plus the language data
+    you need, or run outside Docker with a ``tesseract`` on your PATH."""
     ocr_engine: Literal["tesseract", "mac"] = "tesseract"
+    """``tesseract`` needs the binary on the PATH. ``mac`` uses the OCR built into
+    macOS and needs nothing installed, but only works outside Docker."""
     ocr_lang: list[str] = Field(default_factory=lambda: ["eng", "deu"])
+    """Language codes passed to the OCR engine. For ``tesseract`` each one needs
+    its own package (e.g. ``tesseract-ocr-deu``)."""
     device: Literal["cpu", "mps", "cuda", "auto"] = "cpu"
     include_tables: bool = True
     """Serialize each table (as a Markdown grid) into the section it appears in,

@@ -3,8 +3,27 @@
 From nothing to a working assistant that answers questions about your own
 documents. Copy each block into a terminal in the order shown.
 
-You need [Docker](https://docs.docker.com/get-docker/) and access to an AI
-service (its address and an access key).
+## What you need
+
+- **[Docker](https://docs.docker.com/get-docker/)**. On Windows it runs through
+  WSL2, which Docker Desktop sets up for you.
+- **Git**, to download the project. Or the *Download ZIP* button on GitHub.
+- **Access to an AI service**: an address and an access key.
+
+You do not need Python, uv, pip, Qdrant or PostgreSQL on your machine. They are
+all inside the container.
+
+!!! note "No model is included"
+    The project brings the chat app, the database and the search index, but no AI
+    model. It always talks to a service somewhere else, which is what the address
+    and key in step 1 are for.
+
+    Running a model server on your own machine works too, but inside a container
+    `localhost` means the container itself, not your machine. Use
+    `http://host.docker.internal:11434/v1` instead of
+    `http://localhost:11434/v1` (11434 is the usual port for a local model
+    server). You will also have to put the model names your server offers into the
+    settings file, since the preset names come from a hosted service.
 
 ## 1. Get it running
 

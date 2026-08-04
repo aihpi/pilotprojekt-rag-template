@@ -154,12 +154,39 @@ python -m kb.ingest                         # embedden + in die Collection upser
 python -m kb.ingest --only faq              # nur ein Satz Dokumente
 ```
 
-!!! warning "Erneute Ingestion nach Änderungen"
-    `--skip-if-exists` prüft nur, ob die Collection existiert, nicht ob sich etwas
-    geändert hat. Nachdem du Dokumente oder Einstellungen bearbeitet hast, führe
-    es erneut mit `--recreate` aus (oder nimm eine neue
-    `vector_store.collection`). Ein Wechsel des `embed_model` wird rundheraus
-    abgelehnt, weil sich alte und neue Daten nicht vergleichen lassen.
+Ein normaler Lauf liest nur, was er lesen muss. Zu jeder Datei wird ein
+Fingerabdruck ihres Inhalts gespeichert, deshalb gilt:
+
+- eine **neue** Datei wird eingelesen,
+- eine **geänderte** Datei wird erneut eingelesen, weil sich der Fingerabdruck
+  geändert hat,
+- eine **unveränderte** Datei wird übersprungen und kostet nichts.
+
+Ein Dokument hinzuzufügen heißt also: in den Ordner legen und denselben Befehl
+noch einmal ausführen. Genau das passiert auch bei `docker compose up -d`, weshalb
+ein neues Dokument nach einem Neustart von selbst auftaucht.
+
+!!! warning "Wann `--recreate` wirklich nötig ist"
+    Fingerabdrücke betreffen nur die Dateien. Änderst du etwas, das sich auf die
+    Zerlegung oder Suche **aller** Dokumente auswirkt, sind die vorhandenen
+    Einträge veraltet und der ganze Bestand muss neu aufgebaut werden:
+
+    ```bash
+    python -m kb.ingest --recreate
+    ```
+
+    Das betrifft eine andere `chunking`-Strategie, andere Chunk-Größen oder den
+    Wechsel von `images.mode: none` auf etwas anderes. Ein Wechsel des
+    `embed_model` wird rundheraus abgelehnt, weil sich alte und neue Vektoren nicht
+    vergleichen lassen; nimm `--recreate` oder eine neue
+    `vector_store.collection`.
+
+    Eine Datei, die du aus dem Ordner **löschst**, behält ihre Einträge und bleibt
+    damit auffindbar. Mit `--recreate` wird sie entfernt.
+
+    Das alte `--skip-if-exists` gibt es weiterhin, nützt aber nichts mehr: es
+    bricht den Lauf ab, sobald die Collection existiert, und verhindert damit genau,
+    dass neue Dateien bemerkt werden.
 
 ## 5. Zitate sollen die Quelldatei öffnen
 

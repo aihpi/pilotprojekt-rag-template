@@ -3,8 +3,28 @@
 Von null zu einem laufenden Assistenten, der Fragen zu deinen eigenen Dokumenten
 beantwortet. Kopiere die Blöcke der Reihe nach in ein Terminal.
 
-Du brauchst [Docker](https://docs.docker.com/get-docker/) und Zugang zu einem
-KI-Dienst (dessen Adresse und einen Zugangsschlüssel).
+## Was du brauchst
+
+- **[Docker](https://docs.docker.com/get-docker/)**. Unter Windows läuft es über
+  WSL2, das Docker Desktop selbst einrichtet.
+- **Git**, um das Projekt herunterzuladen. Oder den Knopf *Download ZIP* auf
+  GitHub.
+- **Zugang zu einem KI-Dienst**: eine Adresse und einen Zugangsschlüssel.
+
+Python, uv, pip, Qdrant oder PostgreSQL brauchst du nicht auf dem Rechner. Das
+steckt alles im Container.
+
+!!! note "Kein Modell ist dabei"
+    Mitgeliefert werden die Chat-Anwendung, die Datenbank und der Suchindex, aber
+    kein KI-Modell. Die App spricht immer mit einem Dienst woanders, dafür sind
+    Adresse und Schlüssel in Schritt 1 da.
+
+    Ein Modellserver auf dem eigenen Rechner geht auch, aber im Container bedeutet
+    `localhost` den Container selbst, nicht deinen Rechner. Nimm deshalb
+    `http://host.docker.internal:11434/v1` statt `http://localhost:11434/v1`
+    (11434 ist der übliche Port für einen lokalen Modellserver). Außerdem musst du
+    die Modellnamen deines Servers in die Einstellungsdatei schreiben, denn die
+    voreingestellten Namen kommen von einem gehosteten Dienst.
 
 ## 1. Zum Laufen bringen
 

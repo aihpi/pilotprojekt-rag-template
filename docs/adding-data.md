@@ -150,12 +150,37 @@ python -m kb.ingest                         # embed + upsert into the collection
 python -m kb.ingest --only faq              # just one set of documents
 ```
 
-!!! warning "Re-ingesting after changes"
-    `--skip-if-exists` only checks that the collection exists, not whether
-    anything changed. After editing your documents or your settings, run again
-    with `--recreate` (or use a new `vector_store.collection`). Switching to a
-    different `embed_model` is refused outright, because old and new data cannot
-    be compared.
+A plain run only reads what it has to. Each file is remembered with a fingerprint
+of its contents, so:
+
+- a **new** file is read in,
+- an **edited** file is read again, because its fingerprint changed,
+- an **unchanged** file is skipped, costing nothing.
+
+So adding a document means putting it in the folder and running the same command
+again. This is also what happens on `docker compose up -d`, which is why a new
+document appears after a restart without you doing anything else.
+
+!!! warning "When you do need `--recreate`"
+    Fingerprints only cover the files. If you change something that affects how
+    every document is cut up or searched, the existing entries are stale and the
+    whole collection has to be rebuilt:
+
+    ```bash
+    python -m kb.ingest --recreate
+    ```
+
+    That applies to a different `chunking` strategy, different chunk sizes, or
+    switching `images.mode` from `none`. Switching `embed_model` is refused
+    outright, because old and new vectors cannot be compared; use `--recreate` or
+    a new `vector_store.collection`.
+
+    A file you **delete** from the folder keeps its entries, so it stays findable.
+    Use `--recreate` to clear it out.
+
+    The old `--skip-if-exists` flag still exists but is no longer useful: it stops
+    the run entirely when the collection exists, which is exactly what prevents new
+    files from being noticed.
 
 ## 5. Make citations open the source file
 

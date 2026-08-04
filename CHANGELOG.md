@@ -44,6 +44,45 @@ can be pointed at a new corpus without touching Python.
 
 ### Fixed
 
+- **Self-registration never worked.** `POST /auth/register` was broken three
+  independent ways, each sufficient on its own.
+
+  `app.py` uses `from __future__ import annotations`, so FastAPI receives the
+  handler's annotation as the string `"RegisterRequest"` and resolves it against
+  module globals. The model was declared inside the `on_app_startup` hook, making
+  the name a local. FastAPI did not raise: it downgraded the parameter to a
+  **query** parameter. Every JSON body was ignored (422 with
+  `loc: ["query", "request"]`), a query parameter reached the handler as a `str`
+  and raised (500), and `/openapi.json` returned 500 because the schema could not
+  be built. The model is now defined at module level.
+
+  `/openapi.json` still failed afterwards for an unrelated reason:
+  `chainlit.auth.cookie.OAuth2PasswordBearerWithCookie` subclasses FastAPI's
+  `SecurityBase` but never sets `self.model`, which the schema generator reads.
+  The missing metadata is now supplied, guarded so it goes inert once Chainlit
+  fixes it upstream.
+
+  `create_user` carried two `ON CONFLICT` clauses, one per unique constraint.
+  PostgreSQL allows a single clause per statement, so registration failed with a
+  syntax error even once the body parsed. One untargeted `ON CONFLICT DO NOTHING`
+  covers both constraints.
+
+- **Documents added to the folder were never indexed, and nothing said so.** The
+  `ingest` compose service exited successfully as soon as the target collection
+  existed, so dropping a PDF into `data/documents/` and restarting did nothing at
+  all. See *Changed* below for the new behaviour.
+
+- **Docling's PDF models were re-downloaded on every ingest run.** Roughly 500 MB,
+  each time. They cache under `/root/.cache`, and the ingest container mounted only
+  the project directory and ran with `--rm`. A named `model_cache` volume now keeps
+  them. The README claimed this happened "once per update", which was wrong twice
+  over.
+
+- **`pdf_options.ocr: true` failed late and unhelpfully.** The shipped image
+  installs no apt packages by design, so it has no OCR engine. The run now stops in
+  the first second, naming the package to install and pointing out that PDFs with a
+  text layer need no OCR at all.
+
 - **Oversized figures lost their description silently.** The ingest step sent
   full-resolution PNG to the vision model, so a large figure exceeded the gateway's
   body-size limit and came back HTTP 413. The exception was swallowed and the
@@ -71,6 +110,30 @@ can be pointed at a new corpus without touching Python.
   figure and is charged accordingly.
 
 ### Changed
+
+- **Ingestion is incremental per file.** A plain `python -m kb.ingest` used to be
+  all-or-nothing; it now reads only what changed. Every file is recorded with a
+  sha256 of its contents, so a new file is ingested, an edited file is ingested
+  again, and an unchanged file is skipped for free. Adding a document is therefore
+  just putting it in the folder and starting the app.
+
+  The record lives in a metadata point in the collection, keyed by file path rather
+  than by the payload's `source_file`, because that key is parser-defined and
+  inconsistent. Filtering happens in `kb/parsers/base.py:iter_source_files`, which
+  every built-in parser already used, so the `ParserFn` extension point keeps its
+  signature and custom parsers keep working.
+
+  **Existing collections are adopted, not rebuilt.** A collection created before
+  this has no record of its files. Treating it as empty would re-embed everything
+  and, with `images.mode: describe`, re-describe every figure, so the first run
+  instead records the current files without ingesting anything and cross-checks them
+  against the collection, warning about any file that has no entries. Nothing to do
+  and nothing charged.
+
+  `--recreate` is unchanged and still the right tool after altering `chunking`,
+  chunk sizes or `images.mode`. `--skip-if-exists` still works but is no longer
+  useful, since it is what suppressed new files. A file deleted from disk keeps its
+  entries; clearing those needs `--recreate`.
 
 - **Open-weight models everywhere by default.** All shipped configs, the schema
   defaults, `docker-compose.yml` and the docs now use `gpt-oss-120b` (Apache-2.0),
