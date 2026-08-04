@@ -2171,6 +2171,22 @@ async def on_app_startup() -> None:
         )
         return FileResponse(path=str(bundle), media_type="application/zip", filename=bundle.name)
 
+    @chainlit_fastapi_app.get("/ingest-status")
+    async def ingest_status(current_user=Depends(get_current_user)):
+        """What the folder watcher is doing, for the toast in the browser.
+
+        The watcher is a background task with no Chainlit session, so it cannot push
+        anything to a user. The browser polls this instead. Behind auth like every
+        other route here, because the messages name your documents.
+        """
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        if not DOCUMENT_WATCH:
+            return {"state": "off", "message": "", "revision": 0}
+        from document_watch import get_status
+
+        return get_status()
+
     # Registration endpoint for self-registration
     @chainlit_fastapi_app.post("/auth/register")
     async def register_user(request: RegisterRequest):
@@ -2220,6 +2236,7 @@ async def on_app_startup() -> None:
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/all-chats")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/feedback")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/auth/register")
+    _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/ingest-status")
 
     _patch_cookie_security_openapi_model()
 

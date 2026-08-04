@@ -68,7 +68,16 @@ docker compose up -d
 
 ## Woran sehe ich, dass es geklappt hat?
 
-Die Meldungen der App siehst du mit:
+**Im Chat-Fenster.** Unten rechts in der Ecke sitzt eine kleine Anzeige. Sie ist
+blass und hält sich zurück; fahre mit der Maus darüber, um zu lesen, was gerade
+passiert.
+
+- ein ruhiger Punkt heißt, es ist nichts im Gange, und beim Darüberfahren siehst du
+  die letzte Änderung
+- ein drehender Kreis mit kurzem Text heißt, es arbeitet gerade
+- ein grüner Haken heißt, es ist fertig
+
+**Im Protokoll**, wenn du die Details willst:
 
 ```bash
 docker compose logs -f chainlit

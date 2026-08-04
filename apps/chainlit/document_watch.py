@@ -30,6 +30,29 @@ from settings import (
 # figures would duplicate work and could interleave manifest writes.
 _lock = asyncio.Lock()
 
+# What the UI shows. A background task has no Chainlit session, so it cannot push a
+# message to anyone; the browser polls `/ingest-status` for this instead. A plain
+# dict is enough: single process, single writer, and readers only ever see a whole
+# replacement because the assignment is atomic.
+_status: dict[str, Any] = {"state": "idle", "message": "", "revision": 0}
+
+
+def get_status() -> dict[str, Any]:
+    """Current indexing state, for the status endpoint."""
+    return dict(_status)
+
+
+def _set_status(state: str, message: str, **extra: Any) -> None:
+    global _status
+    # The revision lets the browser tell "finished indexing" from "finished
+    # indexing again" when both carry the same text, so a second run still shows.
+    _status = {
+        "state": state,
+        "message": message,
+        "revision": _status.get("revision", 0) + 1,
+        **extra,
+    }
+
 
 def _snapshot() -> dict[str, str]:
     """Cheap `{file: "size:mtime"}` map of every configured source file.
@@ -84,6 +107,37 @@ async def _ingest_now() -> dict[str, Any]:
     return await asyncio.to_thread(run)
 
 
+def _plural(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
+
+
+def _working_message(added: int, edited: int, removed: int) -> str:
+    """Say what is happening in the user's terms, not in ours.
+
+    Deleting is called out separately: it is the one action people worry about, so
+    "removing" should never be hidden behind a generic "indexing".
+    """
+    parts = []
+    if added:
+        parts.append(f"{_plural(added, 'new document', 'new documents')}")
+    if edited:
+        parts.append(f"{_plural(edited, 'changed document', 'changed documents')}")
+    if removed:
+        parts.append(f"removing {_plural(removed, 'document', 'documents')}")
+    if not parts:
+        return "Change detected. Indexing..."
+    return "Change detected: " + ", ".join(parts) + "..."
+
+
+def _done_message(result: dict[str, Any]) -> str:
+    parts = []
+    if result.get("ingested"):
+        parts.append(f"{_plural(result['ingested'], 'passage', 'passages')} indexed")
+    if result.get("pruned"):
+        parts.append(f"{_plural(result['pruned'], 'passage', 'passages')} removed")
+    return "Done: " + ", ".join(parts) if parts else "Done. Nothing to change."
+
+
 def _describe(result: dict[str, Any]) -> str:
     parts = []
     if result.get("ingested"):
@@ -123,9 +177,21 @@ async def run_pass(previous: dict[str, str] | None) -> dict[str, str]:
         for key in keys:
             print(f"[watch]   {label}: {key}")
 
-    async with _lock:
-        result = await _ingest_now()
+    _set_status(
+        "working",
+        _working_message(len(added), len(changed), len(gone)),
+        added=len(added),
+        edited=len(changed),
+        removed=len(gone),
+    )
+    try:
+        async with _lock:
+            result = await _ingest_now()
+    except Exception:
+        _set_status("error", "Indexing failed. See the app log for details.")
+        raise
     print(f"[watch] done: {_describe(result)}")
+    _set_status("done", _done_message(result))
 
     # Re-read afterwards: describing figures can take minutes, and anything that
     # arrived meanwhile should count as seen only once an ingest picked it up.

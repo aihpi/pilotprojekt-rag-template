@@ -237,3 +237,94 @@ def test_a_failing_pass_does_not_kill_the_loop(monkeypatch):
         asyncio.run(document_watch.watch_documents())
 
     assert len(attempts) == 3, "the loop must keep polling after an error"
+
+
+# --------------------------------------------------------------------------- #
+# What the UI is told
+# --------------------------------------------------------------------------- #
+# Chainlit has no toast API, and a background task has no session to push to, so
+# the browser polls /ingest-status for this state instead.
+def test_status_starts_idle_and_says_nothing():
+    status = document_watch.get_status()
+    assert status["state"] in {"idle", "done", "working", "error"}
+    assert "revision" in status
+
+
+def test_status_goes_working_then_done(passes):
+    calls, snapshots = passes
+    snapshots.extend([{"a.txt": "1:1", "b.txt": "2:2"}, {"a.txt": "1:1", "b.txt": "2:2"}])
+    seen: list[tuple[str, str]] = []
+
+    async def recording_ingest():
+        seen.append((document_watch.get_status()["state"], document_watch.get_status()["message"]))
+        return {"ingested": 3, "pruned": 0}
+
+    document_watch._ingest_now = recording_ingest
+    _pass({"a.txt": "1:1"})
+
+    assert seen and seen[0][0] == "working", "must report working while it runs"
+    assert "new document" in seen[0][1]
+    final = document_watch.get_status()
+    assert final["state"] == "done"
+    assert "3 passages indexed" in final["message"]
+
+
+def test_removal_is_named_explicitly(passes):
+    """Deleting is what people worry about, so it must not hide behind 'indexing'."""
+    calls, snapshots = passes
+    snapshots.extend([{"a.txt": "1:1"}, {"a.txt": "1:1"}])
+    seen: list[str] = []
+
+    async def recording_ingest():
+        seen.append(document_watch.get_status()["message"])
+        return {"ingested": 0, "pruned": 7}
+
+    document_watch._ingest_now = recording_ingest
+    _pass({"a.txt": "1:1", "b.txt": "2:2"})
+
+    assert seen and "removing 1 document" in seen[0]
+    assert "7 passages removed" in document_watch.get_status()["message"]
+
+
+def test_a_failed_run_is_reported_as_an_error(passes):
+    calls, snapshots = passes
+    snapshots.append({"a.txt": "9:9"})
+
+    async def failing_ingest():
+        raise RuntimeError("gateway down")
+
+    document_watch._ingest_now = failing_ingest
+    with pytest.raises(RuntimeError):
+        _pass({"a.txt": "1:1"})
+
+    status = document_watch.get_status()
+    assert status["state"] == "error"
+    assert "failed" in status["message"].lower()
+
+
+def test_the_revision_advances_so_repeats_still_show(passes):
+    """Two identical runs must look different to the browser, or the second is silent."""
+    calls, snapshots = passes
+    snapshots.extend([{"a.txt": "2:2"}, {"a.txt": "2:2"}, {"a.txt": "3:3"}, {"a.txt": "3:3"}])
+
+    async def ingest():
+        return {"ingested": 1, "pruned": 0}
+
+    document_watch._ingest_now = ingest
+    _pass({"a.txt": "1:1"})
+    first = document_watch.get_status()
+    _pass({"a.txt": "2:2"})
+    second = document_watch.get_status()
+
+    assert second["revision"] > first["revision"]
+    assert second["message"] == first["message"], "same text, so only revision separates them"
+
+
+def test_an_unchanged_folder_leaves_the_status_alone(passes):
+    calls, snapshots = passes
+    snapshots.append({"a.txt": "1:1"})
+    before = document_watch.get_status()
+
+    _pass({"a.txt": "1:1"})
+
+    assert document_watch.get_status()["revision"] == before["revision"]

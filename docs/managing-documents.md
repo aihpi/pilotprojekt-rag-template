@@ -68,7 +68,14 @@ docker compose up -d
 
 ## How do I know it worked?
 
-Watch the app's messages with:
+**In the chat window.** A small marker sits in the bottom right corner. It is faint
+and stays out of your way; hover over it to read what it is doing.
+
+- a quiet dot means nothing is going on, and hovering shows the last change
+- a turning circle with a short text means it is working right now
+- a green tick means it has finished
+
+**In the log**, if you want the detail:
 
 ```bash
 docker compose logs -f chainlit

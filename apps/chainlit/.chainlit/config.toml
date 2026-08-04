@@ -135,7 +135,11 @@ custom_css = "/public/custom.css"
 
 # Specify a JavaScript file that can be used to customize the user interface.
 # The JavaScript file can be served from the public directory.
-# custom_js = "/public/test.js"
+# Shows a toast in the top right while the document watcher is indexing. Only ONE
+# custom_js can be set, which is why this is its own file: public/custom.js holds
+# older, never-enabled code, and switching that on as a side effect would surprise
+# people.
+custom_js = "/public/ingest-status.js"
 
 # The style of alert boxes. Can be "classic" or "modern".
 alert_style = "classic"
