@@ -168,6 +168,27 @@ class FakeClient:
         self.points: dict[str, _Record] = {}
         self.collections = set(collections)
         self.upserts: list[list] = []
+        self.deletes: list = []
+
+    def _matching(self, condition):
+        """Resolve a MatchAny filter on source_file against the stored payloads."""
+        wanted: set[str] = set()
+        for cond in condition.must:
+            wanted.update(cond.match.any)
+        return [
+            pid
+            for pid, rec in self.points.items()
+            if (rec.payload or {}).get("source_file") in wanted
+        ]
+
+    def count(self, collection_name, count_filter=None, exact=True):
+        n = len(self._matching(count_filter)) if count_filter else len(self.points)
+        return type("C", (), {"count": n})()
+
+    def delete(self, collection_name, points_selector=None):
+        self.deletes.append(points_selector)
+        for pid in self._matching(points_selector.filter):
+            del self.points[pid]
 
     def get_collections(self):
         names = [type("C", (), {"name": n})() for n in self.collections]
@@ -329,6 +350,136 @@ def test_adoption_warns_about_files_that_have_no_chunks(tmp_path, monkeypatch, f
     out = capsys.readouterr().out
     assert "docs/missing.txt" in out
     assert "docs/indexed.txt" not in out.split("WARNING")[-1]
+
+
+# --------------------------------------------------------------------------- #
+# Deleted documents
+# --------------------------------------------------------------------------- #
+def _sources_in(client) -> set[str]:
+    return {
+        (r.payload or {}).get("source_file")
+        for r in client.points.values()
+        if r.payload and not r.payload.get("_meta")
+    }
+
+
+def test_a_deleted_document_loses_its_entries(tmp_path, monkeypatch, fake_embed):
+    """Otherwise the assistant keeps answering from, and citing, a file that is gone."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "keep.txt").write_text("kept content", encoding="utf-8")
+    (docs / "gone.txt").write_text("secret project zeta", encoding="utf-8")
+    client = FakeClient()
+    config = _text_config(tmp_path)
+    _run(config, client, monkeypatch)
+    assert _sources_in(client) == {"keep.txt", "gone.txt"}
+
+    (docs / "gone.txt").unlink()
+    result = _run(config, client, monkeypatch)
+
+    assert result["pruned"] == 1
+    assert _sources_in(client) == {"keep.txt"}
+    # Dropped from the manifest too, so the file coming back later is ingested again.
+    assert list(pipeline.read_manifest(client, "documents")) == ["docs/keep.txt"]
+
+
+def test_replacing_the_whole_corpus_prunes_and_ingests_in_one_run(
+    tmp_path, monkeypatch, fake_embed
+):
+    """Delete every old document and add new ones: both halves happen at once."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "old_a.txt").write_text("old alpha", encoding="utf-8")
+    (docs / "old_b.txt").write_text("old beta", encoding="utf-8")
+    client = FakeClient()
+    config = _text_config(tmp_path)
+    _run(config, client, monkeypatch)
+
+    for name in ("old_a.txt", "old_b.txt"):
+        (docs / name).unlink()
+    (docs / "new_a.txt").write_text("new alpha", encoding="utf-8")
+    (docs / "new_b.txt").write_text("new beta", encoding="utf-8")
+    result = _run(config, client, monkeypatch)
+
+    assert result["pruned"] == 2, "old entries must go"
+    assert result["ingested"] == 2, "new documents must be indexed in the same run"
+    assert _sources_in(client) == {"new_a.txt", "new_b.txt"}
+    assert set(pipeline.read_manifest(client, "documents")) == {
+        "docs/new_a.txt",
+        "docs/new_b.txt",
+    }
+
+
+def test_an_empty_folder_is_not_treated_as_a_deletion(tmp_path, monkeypatch, fake_embed, capsys):
+    """The footgun: a bind mount that did not come up would otherwise wipe everything."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.txt").write_text("alpha", encoding="utf-8")
+    client = FakeClient()
+    config = _text_config(tmp_path)
+    _run(config, client, monkeypatch)
+
+    (docs / "a.txt").unlink()
+    result = _run(config, client, monkeypatch)
+
+    assert result["pruned"] == 0
+    assert _sources_in(client) == {"a.txt"}, "nothing may be deleted"
+    out = capsys.readouterr().out
+    assert "Refusing to treat that as a deletion" in out
+    assert "--recreate" in out, "must name the intentional way to empty a collection"
+
+
+def test_only_does_not_prune_the_other_sources(tmp_path, monkeypatch, fake_embed):
+    """--only looks at a subset, so the unvisited sources' files are not deletions."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    (docs / "a.txt").write_text("alpha", encoding="utf-8")
+    (other / "b.txt").write_text("beta", encoding="utf-8")
+    config = _config_at(
+        tmp_path,
+        data_sources=[
+            DataSourceConfig(name="docs", path="docs", format="txt", glob="*.txt"),
+            DataSourceConfig(name="other", path="other", format="txt", glob="*.txt"),
+        ],
+        chunking=ChunkingConfig(strategy="passthrough"),
+    )
+    client = FakeClient()
+    _run(config, client, monkeypatch)
+    assert _sources_in(client) == {"a.txt", "b.txt"}
+
+    (docs / "a.txt").write_text("alpha edited", encoding="utf-8")
+    result = _run(config, client, monkeypatch, only={"docs"})
+
+    assert result["pruned"] == 0
+    assert _sources_in(client) == {"a.txt", "b.txt"}, "b.txt was never visited, not deleted"
+    assert set(pipeline.read_manifest(client, "documents")) == {"docs/a.txt", "other/b.txt"}
+
+
+def test_unidentifiable_entries_are_reported_not_silently_kept(
+    tmp_path, monkeypatch, fake_embed, capsys
+):
+    """A csv/json field_mapping may write no source_file, so nothing matches."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.txt").write_text("alpha", encoding="utf-8")
+    (docs / "gone.txt").write_text("beta", encoding="utf-8")
+    client = FakeClient()
+    config = _text_config(tmp_path)
+    _run(config, client, monkeypatch)
+
+    # Strip the identifying metadata, as a custom field_mapping would.
+    for rec in client.points.values():
+        if rec.payload and rec.payload.get("source_file") == "gone.txt":
+            rec.payload.pop("source_file")
+    (docs / "gone.txt").unlink()
+    result = _run(config, client, monkeypatch)
+
+    assert result["pruned"] == 0
+    out = capsys.readouterr().out
+    assert "could not be identified" in out
+    assert "docs/gone.txt" in out
 
 
 def test_adoption_matches_the_pdf_naming_convention(tmp_path, monkeypatch, fake_embed, capsys):

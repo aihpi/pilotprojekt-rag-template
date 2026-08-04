@@ -158,9 +158,11 @@ cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
 It also handles Markdown, JSON and CSV files. See
 [Adding your data](docs/adding-data.md).
 
-**Adding more documents later** is the same step again. Put the file in the folder
-and start the app; only the new file is read, the rest is left alone. Editing a
-document also counts as new, so a corrected file gets read again by itself.
+**Changing your documents later** is the same step again. The folder decides what
+the assistant knows: add a file and only that one is read, correct a file and it is
+read again, delete a file and it stops appearing in answers. Replacing the whole set
+at once works too. Everything else is left untouched, so you do not pay for it
+twice.
 
 ## What you configure
 

@@ -352,6 +352,91 @@ def _adopt(client, collection: str, config: RagConfig, only: set[str] | None) ->
     return dict(gate.seen)
 
 
+def _payload_names_for(gate_key: str) -> list[str]:
+    """Payload ``source_file`` values a manifest key could have produced.
+
+    Two candidates, the same pair the adoption cross-check uses: parsers store
+    either the plain file name (``text.py``) or ``"<stem>.pdf"`` (``pdf.py``, which
+    is why a docling-JSON source indexes ``X.pdf`` for a file named ``X.json``).
+    """
+    name = gate_key.rsplit("/", 1)[-1]
+    return [name, f"{name.rsplit('.', 1)[0]}.pdf"]
+
+
+def _prune_removed(client, collection: str, removed: list[str]) -> tuple[int, list[str]]:
+    """Delete the entries of files that are gone from disk.
+
+    Returns (points deleted, keys whose entries could not be identified). A key
+    matches nothing when its source stores custom metadata (a ``json``/``csv``
+    source whose ``field_mapping`` writes no ``source_file``); those need
+    ``--recreate`` and are reported rather than silently ignored.
+    """
+    from qdrant_client.models import (
+        FieldCondition,
+        Filter,
+        FilterSelector,
+        MatchAny,
+    )
+
+    deleted = 0
+    unmatched: list[str] = []
+    for key in removed:
+        condition = Filter(
+            must=[FieldCondition(key="source_file", match=MatchAny(any=_payload_names_for(key)))]
+        )
+        try:
+            found = client.count(
+                collection_name=collection, count_filter=condition, exact=True
+            ).count
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ingest] could not look up entries for {key}: {exc}")
+            unmatched.append(key)
+            continue
+        if not found:
+            unmatched.append(key)
+            continue
+        client.delete(collection_name=collection, points_selector=FilterSelector(filter=condition))
+        deleted += found
+        print(f"[ingest] removed {found} entr(ies) for deleted document {key}")
+    return deleted, unmatched
+
+
+def _removed_keys(
+    manifest: dict[str, str],
+    gate: FileGate,
+    *,
+    only: set[str] | None,
+) -> list[str]:
+    """Manifest entries whose file is no longer on disk, or [] if unsafe to say.
+
+    Two cases must never be mistaken for deletions:
+
+    - ``--only`` deliberately looks at a subset of the sources, so every file
+      belonging to the other sources is simply not enumerated.
+    - Nothing at all was found while the manifest is not empty. A documents folder
+      that is suddenly empty is far more likely a bind mount that did not come up,
+      or a wrong ``path``, than someone deleting the whole corpus, and acting on it
+      would clear the collection.
+
+    Replacing the whole corpus is *not* one of those cases and does prune: swapping
+    every old document for new ones leaves files on disk, so the old entries are
+    correctly recognised as gone.
+    """
+    if only:
+        return []
+    removed = [key for key in sorted(manifest) if key not in gate.seen]
+    if removed and not gate.seen:
+        print(
+            f"[ingest] WARNING: not one of the {len(manifest)} known file(s) was found, "
+            "and the folder holds nothing else. Refusing to treat that as a deletion, "
+            "because this is usually a mount that did not come up or a wrong 'path'. "
+            "Nothing was removed. If you really do want to empty the collection, use "
+            "--recreate."
+        )
+        return []
+    return removed
+
+
 async def ingest_all(
     config: RagConfig | None = None,
     *,
@@ -362,12 +447,9 @@ async def ingest_all(
     """Ingest every configured source, skipping files that are already indexed.
 
     Without ``recreate`` this is incremental: a file is parsed only if it is new
-    or its contents changed. Adding a document to the folder and restarting is
-    therefore enough to index it, which is what the ``ingest`` compose service
-    relies on.
-
-    Note that a file *removed* from disk keeps its chunks; deleting those needs a
-    delete-by-filter pass that does not exist yet.
+    or its contents changed, and a file deleted from disk has its entries removed.
+    Adding, editing or deleting a document and restarting is therefore enough,
+    which is what the ``ingest`` compose service relies on.
     """
     config = config or get_config()
     collection = config.vector_store.collection
@@ -392,39 +474,62 @@ async def ingest_all(
     gate = FileGate(known=manifest, root=config.resolve_path("."))
     per_source, all_chunks = plan_ingest(config, only=only, gate=gate)
 
-    if not all_chunks and gate.skipped and not recreate:
+    # Deletions are handled whether or not there is anything new to ingest, and in
+    # the same run, so replacing a whole corpus in one go both removes the old
+    # entries and indexes the new documents.
+    removed = [] if recreate else _removed_keys(manifest, gate, only=only)
+    pruned = 0
+    if removed and exists:
+        pruned, unmatched = _prune_removed(client, collection, removed)
+        if unmatched:
+            print(
+                f"[ingest] WARNING: {len(unmatched)} deleted document(s) left entries "
+                "that could not be identified, so they stay searchable. This happens "
+                "when a source writes its own metadata (a json/csv field_mapping "
+                "without source_file). Use --recreate to clear them:"
+            )
+            for key in unmatched:
+                print(f"[ingest]   - {key}")
+
+    count = 0
+    if all_chunks:
+        parsed = len(gate.seen) - len(gate.skipped)
+        print(f"[ingest] {parsed} file(s) to ingest, {len(gate.skipped)} unchanged and skipped.")
+        count = await ingest_chunks(
+            all_chunks,
+            collection=collection,
+            distance=config.vector_store.distance,
+            payload_indexes=config.retrieval.payload_indexes,
+            recreate=recreate,
+            embed_model=config.models.embed_model,
+            progress=progress,
+        )
+    elif gate.skipped and not removed:
         print(
             f"[ingest] nothing to do: all {len(gate.skipped)} file(s) are already "
             f"indexed in '{collection}' and unchanged."
         )
-        return {"ingested": 0, "collection": collection, "sources": per_source, "skipped": len(gate.skipped)}
-
-    parsed = len(gate.seen) - len(gate.skipped)
-    if gate.seen:
-        print(
-            f"[ingest] {parsed} file(s) to ingest, {len(gate.skipped)} unchanged and skipped."
-        )
-
-    count = await ingest_chunks(
-        all_chunks,
-        collection=collection,
-        distance=config.vector_store.distance,
-        payload_indexes=config.retrieval.payload_indexes,
-        recreate=recreate,
-        embed_model=config.models.embed_model,
-        progress=progress,
-    )
 
     # Merge rather than replace: a run limited by --only must not drop the other
-    # sources' files from the manifest and make them look new next time.
-    merged = {**manifest, **gate.seen} if not recreate else dict(gate.seen)
-    _store_manifest(client, collection, merged)
+    # sources' files from the manifest and make them look new next time. Pruned
+    # files are dropped, so a document that comes back later is ingested again.
+    if recreate:
+        merged = dict(gate.seen)
+    else:
+        merged = {**manifest, **gate.seen}
+        for key in removed:
+            merged.pop(key, None)
+
+    if merged or count or pruned:
+        _store_manifest(client, collection, merged)
 
     return {
         "ingested": count,
         "collection": collection,
         "sources": per_source,
         "skipped": len(gate.skipped),
+        "removed": len(removed),
+        "pruned": pruned,
     }
 
 

@@ -154,17 +154,36 @@ python -m kb.ingest                         # embedden + in die Collection upser
 python -m kb.ingest --only faq              # nur ein Satz Dokumente
 ```
 
-Ein normaler Lauf liest nur, was er lesen muss. Zu jeder Datei wird ein
-Fingerabdruck ihres Inhalts gespeichert, deshalb gilt:
+Ein normaler Lauf hält die Collection im Gleichstand mit dem Ordner. Zu jeder
+Datei wird ein Fingerabdruck ihres Inhalts gespeichert, deshalb gilt:
 
 - eine **neue** Datei wird eingelesen,
 - eine **geänderte** Datei wird erneut eingelesen, weil sich der Fingerabdruck
   geändert hat,
-- eine **unveränderte** Datei wird übersprungen und kostet nichts.
+- eine **unveränderte** Datei wird übersprungen und kostet nichts,
+- eine **gelöschte** Datei verliert ihre Einträge und taucht damit nicht mehr in
+  Antworten auf.
 
-Ein Dokument hinzuzufügen heißt also: in den Ordner legen und denselben Befehl
-noch einmal ausführen. Genau das passiert auch bei `docker compose up -d`, weshalb
-ein neues Dokument nach einem Neustart von selbst auftaucht.
+Deine Dokumente zu verwalten heißt also einfach, den Ordner zu verwalten: Dateien
+hinzufügen, austauschen oder löschen und denselben Befehl noch einmal ausführen.
+Auch der komplette Austausch aller Dokumente funktioniert in einem Lauf: die alten
+Einträge werden entfernt und die neuen Dateien eingelesen. Genau das passiert auch
+bei `docker compose up -d`, weshalb Änderungen nach einem Neustart von selbst
+wirksam werden.
+
+!!! warning "Eine bewusste Ausnahme"
+    Ist der Ordner **völlig leer**, während die Collection Dateien kennt, wird
+    nichts gelöscht. Ein leerer Ordner liegt fast immer daran, dass eine
+    Einbindung nicht hochkam oder `path` falsch ist, und die Collection deswegen
+    stillschweigend zu leeren wäre schlimmer als nichts zu tun. Du bekommst einen
+    entsprechenden Hinweis. Um eine Collection absichtlich zu leeren, nimm
+    `--recreate`.
+
+    Zum Löschen muss klar sein, welche Einträge zu der Datei gehören. Bei PDF-,
+    Markdown- und Textquellen ist das der Fall. Eine `json`- oder `csv`-Quelle,
+    deren `field_mapping` kein `source_file` schreibt, lässt sich nicht zuordnen;
+    diese Einträge bleiben erhalten und werden gemeldet, `--recreate` räumt sie
+    weg.
 
 !!! warning "Wann `--recreate` wirklich nötig ist"
     Fingerabdrücke betreffen nur die Dateien. Änderst du etwas, das sich auf die
@@ -181,12 +200,9 @@ ein neues Dokument nach einem Neustart von selbst auftaucht.
     vergleichen lassen; nimm `--recreate` oder eine neue
     `vector_store.collection`.
 
-    Eine Datei, die du aus dem Ordner **löschst**, behält ihre Einträge und bleibt
-    damit auffindbar. Mit `--recreate` wird sie entfernt.
-
     Das alte `--skip-if-exists` gibt es weiterhin, nützt aber nichts mehr: es
     bricht den Lauf ab, sobald die Collection existiert, und verhindert damit genau,
-    dass neue Dateien bemerkt werden.
+    dass hinzugefügte, geänderte und gelöschte Dateien bemerkt werden.
 
 ## 5. Zitate sollen die Quelldatei öffnen
 

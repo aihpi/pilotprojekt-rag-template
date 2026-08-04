@@ -150,16 +150,31 @@ python -m kb.ingest                         # embed + upsert into the collection
 python -m kb.ingest --only faq              # just one set of documents
 ```
 
-A plain run only reads what it has to. Each file is remembered with a fingerprint
-of its contents, so:
+A plain run keeps the collection in step with the folder. Each file is remembered
+with a fingerprint of its contents, so:
 
 - a **new** file is read in,
 - an **edited** file is read again, because its fingerprint changed,
-- an **unchanged** file is skipped, costing nothing.
+- an **unchanged** file is skipped, costing nothing,
+- a **deleted** file has its entries removed, so it stops turning up in answers.
 
-So adding a document means putting it in the folder and running the same command
-again. This is also what happens on `docker compose up -d`, which is why a new
-document appears after a restart without you doing anything else.
+Managing your documents is therefore just managing the folder: add, replace or
+delete files and run the same command again. Replacing your whole set of documents
+in one go works too, removing the old entries and reading the new files in the same
+run. This is also what happens on `docker compose up -d`, which is why changes take
+effect after a restart without you doing anything else.
+
+!!! warning "One deliberate exception"
+    If the folder turns out to be **completely empty** while the collection knows
+    about files, nothing is deleted. An empty folder is almost always a mount that
+    did not come up or a wrong `path`, and quietly wiping the collection over that
+    would be worse than doing nothing. You get a warning saying so. To empty a
+    collection on purpose, use `--recreate`.
+
+    Deleting entries needs to know which ones belong to the file. That works for
+    PDF, Markdown and text sources. A `json` or `csv` source whose `field_mapping`
+    writes no `source_file` cannot be matched up, so those entries are kept and
+    reported, and `--recreate` clears them.
 
 !!! warning "When you do need `--recreate`"
     Fingerprints only cover the files. If you change something that affects how
@@ -175,12 +190,9 @@ document appears after a restart without you doing anything else.
     outright, because old and new vectors cannot be compared; use `--recreate` or
     a new `vector_store.collection`.
 
-    A file you **delete** from the folder keeps its entries, so it stays findable.
-    Use `--recreate` to clear it out.
-
     The old `--skip-if-exists` flag still exists but is no longer useful: it stops
-    the run entirely when the collection exists, which is exactly what prevents new
-    files from being noticed.
+    the run entirely when the collection exists, which is exactly what prevents
+    added, edited and deleted files from being noticed.
 
 ## 5. Make citations open the source file
 

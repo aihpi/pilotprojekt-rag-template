@@ -165,10 +165,12 @@ cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
 Markdown-, JSON- und CSV-Dateien gehen ebenfalls. Siehe
 [Daten hinzufügen](docs/adding-data.de.md).
 
-**Später weitere Dokumente ergänzen** ist derselbe Schritt noch einmal. Datei in
-den Ordner legen, App starten: gelesen wird nur die neue Datei, alles andere
-bleibt unberührt. Auch ein geändertes Dokument gilt als neu, eine korrigierte
-Datei wird also von selbst noch einmal gelesen.
+**Später Dokumente ändern** ist derselbe Schritt noch einmal. Der Ordner
+entscheidet, was der Assistent weiß: Datei hinzufügen, dann wird nur diese
+gelesen; Datei korrigieren, dann wird sie erneut gelesen; Datei löschen, dann
+taucht sie nicht mehr in Antworten auf. Auch der komplette Austausch aller
+Dokumente geht in einem Schritt. Alles andere bleibt unberührt, du zahlst also
+nicht doppelt.
 
 ## Was du konfigurierst
 

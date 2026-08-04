@@ -82,9 +82,15 @@ def main() -> None:
     result = asyncio.run(ingest_all(config, recreate=args.recreate, only=only))
     # ingest_all already explains the adoption and nothing-to-do cases; repeating
     # "Ingested 0 chunks" underneath them only reads like something went wrong.
-    if result.get("adopted") or (result["ingested"] == 0 and result.get("skipped")):
+    nothing_happened = not result["ingested"] and not result.get("pruned")
+    if result.get("adopted") or (nothing_happened and result.get("skipped")):
         return
-    suffix = f" ({result['skipped']} file(s) unchanged)" if result.get("skipped") else ""
+    parts = []
+    if result.get("skipped"):
+        parts.append(f"{result['skipped']} file(s) unchanged")
+    if result.get("pruned"):
+        parts.append(f"{result['pruned']} entr(ies) removed for deleted documents")
+    suffix = f" ({', '.join(parts)})" if parts else ""
     print(f"Ingested {result['ingested']} chunks into '{result['collection']}'.{suffix}")
 
 

@@ -130,10 +130,27 @@ can be pointed at a new corpus without touching Python.
   against the collection, warning about any file that has no entries. Nothing to do
   and nothing charged.
 
+  **A document deleted from the folder loses its entries.** Otherwise the assistant
+  kept answering from, and citing, a file that no longer existed, with a source link
+  that could only 404. Deletions are handled in the same run as additions, so
+  replacing an entire corpus at once both removes the old entries and indexes the
+  new documents.
+
+  Two safeguards, because this makes ingestion destructive. A run limited by
+  `--only` never prunes, since the sources it did not visit are not deletions. And
+  if *no* file at all is found while the collection knows about some, nothing is
+  removed and a warning explains why: an empty documents folder is almost always a
+  mount that did not come up or a wrong `path`, not an intentional wipe. Use
+  `--recreate` to empty a collection on purpose.
+
+  Matching entries to a file relies on the `source_file` payload, so it works for
+  PDF, Markdown and text sources. A `json`/`csv` source whose `field_mapping` writes
+  no `source_file` cannot be matched; those entries are kept and reported by name
+  rather than silently left behind.
+
   `--recreate` is unchanged and still the right tool after altering `chunking`,
   chunk sizes or `images.mode`. `--skip-if-exists` still works but is no longer
-  useful, since it is what suppressed new files. A file deleted from disk keeps its
-  entries; clearing those needs `--recreate`.
+  useful, since it is what suppressed added, edited and deleted files alike.
 
 - **Open-weight models everywhere by default.** All shipped configs, the schema
   defaults, `docker-compose.yml` and the docs now use `gpt-oss-120b` (Apache-2.0),
