@@ -2009,6 +2009,51 @@ async def auth_callback(username: str, password: str) -> cl.User | None:
     return None
 
 
+def _patch_cookie_security_openapi_model() -> None:
+    """Give Chainlit's cookie security scheme the ``model`` FastAPI expects.
+
+    ``chainlit.auth.cookie.OAuth2PasswordBearerWithCookie`` subclasses FastAPI's
+    ``SecurityBase`` but never sets ``self.model``, so building the OpenAPI schema
+    raises ``AttributeError: ... has no attribute 'model'`` and ``/openapi.json``
+    (and therefore ``/docs``) returns 500. Upstream bug; this only adds the
+    missing schema metadata, which nothing reads at request time.
+
+    Guarded with ``hasattr`` so it goes inert once Chainlit ships a fix.
+    """
+    try:
+        from chainlit.auth.cookie import OAuth2PasswordBearerWithCookie
+        from fastapi.openapi.models import OAuth2 as OAuth2Model
+        from fastapi.openapi.models import OAuthFlowPassword, OAuthFlows
+    except ImportError as exc:  # noqa: BLE001 — upstream moved or renamed it
+        print(f"[WARN] openapi_security: could not import Chainlit's cookie scheme: {exc}")
+        return
+
+    if getattr(OAuth2PasswordBearerWithCookie, "model", None) is not None:
+        return
+
+    OAuth2PasswordBearerWithCookie.model = OAuth2Model(
+        flows=OAuthFlows(password=OAuthFlowPassword(tokenUrl="/login"))
+    )
+    print("[STARTUP] patched Chainlit cookie security scheme for /openapi.json")
+
+
+class RegisterRequest(BaseModel):
+    """Body of ``POST /auth/register``.
+
+    MUST stay at module level. This file uses ``from __future__ import
+    annotations``, so FastAPI sees the handler's annotation as the *string*
+    ``"RegisterRequest"`` and resolves it against this module's globals. Defined
+    inside the startup hook instead, the name is a local, resolution fails, and
+    FastAPI silently downgrades the parameter to a **query** parameter: the JSON
+    body is ignored (422 ``loc: ["query", "request"]``) and ``/openapi.json``
+    returns 500. Nothing warns at startup.
+    """
+
+    username: str
+    email: str
+    password: str
+
+
 @cl.on_app_startup
 async def on_app_startup() -> None:
     global SYSTEM_PROMPT
@@ -2125,11 +2170,6 @@ async def on_app_startup() -> None:
         return FileResponse(path=str(bundle), media_type="application/zip", filename=bundle.name)
 
     # Registration endpoint for self-registration
-    class RegisterRequest(BaseModel):
-        username: str
-        email: str
-        password: str
-
     @chainlit_fastapi_app.post("/auth/register")
     async def register_user(request: RegisterRequest):
         # Validate input
@@ -2178,6 +2218,8 @@ async def on_app_startup() -> None:
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/all-chats")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/feedback")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/auth/register")
+
+    _patch_cookie_security_openapi_model()
 
     chainlit_fastapi_app.state.native_export_route_added = True
     print("[STARTUP] native export route registered at /export/all-chats")
