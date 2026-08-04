@@ -118,111 +118,122 @@ def test_a_malformed_token_is_not_allowed_to_stall_the_watcher(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# The loop
+# One pass
 # --------------------------------------------------------------------------- #
+# These call run_pass directly. An earlier version drove watch_documents and
+# counted event-loop yields to decide when a pass had happened, which passed
+# locally and failed on CI's slower runner: two of the tests never reached their
+# second pass. Scheduling is not something a test should be betting on.
 @pytest.fixture
-def loop_harness(monkeypatch):
-    """Drive watch_documents deterministically: fixed snapshots, no sleeping."""
-    calls: list[int] = []
+def passes(monkeypatch):
+    """Fixed snapshots and a recording ingest, so a pass is fully determined."""
+    calls: list[dict[str, str]] = []
     snapshots: list[dict[str, str]] = []
 
     async def fake_ingest():
-        calls.append(1)
+        calls.append({"ingested": 1})
         return {"ingested": 1, "pruned": 0}
 
-    def next_snapshot():
-        return snapshots.pop(0) if snapshots else {}
-
-    monkeypatch.setattr(document_watch, "_snapshot", next_snapshot)
+    monkeypatch.setattr(document_watch, "_snapshot", lambda: snapshots.pop(0) if snapshots else {})
     monkeypatch.setattr(document_watch, "_ingest_now", fake_ingest)
     monkeypatch.setattr(document_watch, "DOCUMENT_WATCH_SETTLE", 0)
-    monkeypatch.setattr(document_watch, "DOCUMENT_WATCH_INTERVAL", 0)
     return calls, snapshots
 
 
-def _run_passes(n: int):
-    """Run the watcher for n polls, then stop it."""
-
-    async def main():
-        task = asyncio.create_task(document_watch.watch_documents())
-        for _ in range(n * 4):  # generous: let the loop yield through its awaits
-            await asyncio.sleep(0)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-
-    asyncio.run(main())
+def _pass(previous):
+    return asyncio.run(document_watch.run_pass(previous))
 
 
-def test_the_first_pass_only_learns_the_state(loop_harness):
+def test_the_first_pass_only_learns_the_state(passes):
     """The startup ingest has already run, so acting on pass one would repeat it."""
-    calls, snapshots = loop_harness
+    calls, snapshots = passes
+    snapshots.append({"a.txt": "1:1"})
+
+    baseline = _pass(None)
+
+    assert baseline == {"a.txt": "1:1"}
+    assert calls == [], "the first pass must never ingest"
+
+
+def test_an_unchanged_folder_does_nothing(passes):
+    calls, snapshots = passes
+    snapshots.append({"a.txt": "1:1"})
+
+    result = _pass({"a.txt": "1:1"})
+
+    assert result == {"a.txt": "1:1"}
+    assert calls == []
+
+
+def test_a_new_file_triggers_one_ingest(passes):
+    calls, snapshots = passes
+    snapshots.extend([{"a.txt": "1:1", "b.txt": "2:2"}, {"a.txt": "1:1", "b.txt": "2:2"}])
+
+    result = _pass({"a.txt": "1:1"})
+
+    assert len(calls) == 1
+    assert result == {"a.txt": "1:1", "b.txt": "2:2"}
+
+
+def test_a_deletion_triggers_an_ingest_too(passes):
+    """The folder is the source of truth, so removals must be acted on as well."""
+    calls, snapshots = passes
     snapshots.extend([{"a.txt": "1:1"}, {"a.txt": "1:1"}])
 
-    _run_passes(2)
+    result = _pass({"a.txt": "1:1", "b.txt": "2:2"})
 
-    assert calls == [], "an unchanged folder must never trigger an ingest"
+    assert len(calls) == 1
+    assert result == {"a.txt": "1:1"}
 
 
-def test_a_change_triggers_exactly_one_ingest(loop_harness):
-    calls, snapshots = loop_harness
+def test_an_edit_triggers_an_ingest(passes):
+    calls, snapshots = passes
+    snapshots.extend([{"a.txt": "9:9"}, {"a.txt": "9:9"}])
+
+    _pass({"a.txt": "1:1"})
+
+    assert len(calls) == 1
+
+
+def test_the_baseline_is_re_read_after_indexing(passes):
+    """A long ingest can outlast further edits; the baseline must reflect reality."""
+    calls, snapshots = passes
     snapshots.extend([
-        {"a.txt": "1:1"},              # pass 1: baseline
-        {"a.txt": "1:1", "b.txt": "2:2"},  # pass 2: b.txt appeared -> ingest
-        {"a.txt": "1:1", "b.txt": "2:2"},  # re-read after the ingest
-        {"a.txt": "1:1", "b.txt": "2:2"},  # pass 3: nothing new
+        {"a.txt": "1:1", "b.txt": "2:2"},          # what triggered the ingest
+        {"a.txt": "1:1", "b.txt": "2:2", "c.txt": "3:3"},  # arrived during it
     ])
 
-    _run_passes(3)
+    result = _pass({"a.txt": "1:1"})
 
-    assert calls == [1], f"expected one ingest, got {len(calls)}"
-
-
-def test_a_deletion_triggers_an_ingest_too(loop_harness):
-    """The folder is the source of truth, so removals must be acted on as well."""
-    calls, snapshots = loop_harness
-    snapshots.extend([
-        {"a.txt": "1:1", "b.txt": "2:2"},
-        {"a.txt": "1:1"},
-        {"a.txt": "1:1"},
-        {"a.txt": "1:1"},
-    ])
-
-    _run_passes(3)
-
-    assert calls == [1]
+    assert len(calls) == 1
+    assert "c.txt" in result, "a file that appeared mid-ingest must be in the baseline"
 
 
-def test_an_edit_triggers_an_ingest(loop_harness):
-    calls, snapshots = loop_harness
-    snapshots.extend([
-        {"a.txt": "1:1"},
-        {"a.txt": "9:9"},
-        {"a.txt": "9:9"},
-        {"a.txt": "9:9"},
-    ])
+# --------------------------------------------------------------------------- #
+# The loop around it
+# --------------------------------------------------------------------------- #
+def test_a_failing_pass_does_not_kill_the_loop(monkeypatch):
+    """A watcher that dies on one error stops noticing changes, silently.
 
-    _run_passes(3)
-
-    assert calls == [1]
-
-
-def test_a_failing_pass_does_not_kill_the_watcher(monkeypatch):
-    """A watcher that dies on one error stops noticing changes, silently."""
+    Ends the loop by raising CancelledError from the sleep, which watch_documents
+    re-raises, so the number of passes is exact rather than time dependent.
+    """
     attempts: list[int] = []
 
-    def flaky():
+    async def flaky(_previous):
         attempts.append(1)
         if len(attempts) == 1:
             raise RuntimeError("qdrant briefly unreachable")
         return {}
 
-    monkeypatch.setattr(document_watch, "_snapshot", flaky)
-    monkeypatch.setattr(document_watch, "DOCUMENT_WATCH_INTERVAL", 0)
-    monkeypatch.setattr(document_watch, "DOCUMENT_WATCH_SETTLE", 0)
+    async def stop_after_three(_seconds):
+        if len(attempts) >= 3:
+            raise asyncio.CancelledError
 
-    _run_passes(3)
+    monkeypatch.setattr(document_watch, "run_pass", flaky)
+    monkeypatch.setattr(document_watch.asyncio, "sleep", stop_after_three)
 
-    assert len(attempts) >= 2, "the loop must keep polling after an error"
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(document_watch.watch_documents())
+
+    assert len(attempts) == 3, "the loop must keep polling after an error"

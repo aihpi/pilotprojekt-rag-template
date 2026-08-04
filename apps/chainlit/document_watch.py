@@ -95,38 +95,49 @@ def _describe(result: dict[str, Any]) -> str:
     return ", ".join(parts) or "no change"
 
 
-async def watch_documents() -> None:
-    """Poll the document folders forever, indexing whatever changed."""
+async def run_pass(previous: dict[str, str] | None) -> dict[str, str]:
+    """One poll: look, and index if anything changed. Returns the new baseline.
+
+    Separate from the loop on purpose. Everything worth testing lives here, and it
+    can be called directly, so tests do not have to drive an event loop and guess
+    how many times to yield.
+    """
     import time
 
+    current = _settled(await asyncio.to_thread(_snapshot), time.time_ns())
+    if previous is None:
+        # First pass only learns the current state. The startup ingest has already
+        # run by now, so acting here would just repeat it.
+        return current
+    if current == previous:
+        return previous
+
+    added = sorted(set(current) - set(previous))
+    gone = sorted(set(previous) - set(current))
+    changed = sorted(k for k in set(current) & set(previous) if current[k] != previous[k])
+    print(
+        f"[watch] documents changed (new: {len(added)}, edited: {len(changed)}, "
+        f"removed: {len(gone)}); indexing"
+    )
+    for label, keys in (("new", added), ("edited", changed), ("removed", gone)):
+        for key in keys:
+            print(f"[watch]   {label}: {key}")
+
+    async with _lock:
+        result = await _ingest_now()
+    print(f"[watch] done: {_describe(result)}")
+
+    # Re-read afterwards: describing figures can take minutes, and anything that
+    # arrived meanwhile should count as seen only once an ingest picked it up.
+    return _settled(await asyncio.to_thread(_snapshot), time.time_ns())
+
+
+async def watch_documents() -> None:
+    """Poll the document folders forever, indexing whatever changed."""
     previous: dict[str, str] | None = None
     while True:
         try:
-            current = _settled(await asyncio.to_thread(_snapshot), time.time_ns())
-            if previous is None:
-                # First pass only learns the current state. The startup ingest has
-                # already run by now, so acting here would just repeat it.
-                previous = current
-            elif current != previous:
-                added = sorted(set(current) - set(previous))
-                gone = sorted(set(previous) - set(current))
-                changed = sorted(
-                    k for k in set(current) & set(previous) if current[k] != previous[k]
-                )
-                print(
-                    f"[watch] documents changed (new: {len(added)}, edited: "
-                    f"{len(changed)}, removed: {len(gone)}); indexing"
-                )
-                for label, keys in (("new", added), ("edited", changed), ("removed", gone)):
-                    for key in keys:
-                        print(f"[watch]   {label}: {key}")
-                async with _lock:
-                    result = await _ingest_now()
-                print(f"[watch] done: {_describe(result)}")
-                # Re-read afterwards: describing figures can take minutes, and
-                # anything that arrived meanwhile should count as already seen only
-                # if the ingest actually picked it up.
-                previous = _settled(await asyncio.to_thread(_snapshot), time.time_ns())
+            previous = await run_pass(previous)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — a watcher must not die on one error
