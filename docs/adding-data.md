@@ -144,18 +144,70 @@ set of documents with a `chunking:` block inside that entry.
 
 ## 4. Read the documents in
 
+!!! tip "Just adding or removing a document?"
+    [Changing your documents](managing-documents.md) is the short, plain-language
+    version of this step. The rest of this page is about formats and chunking.
+
 ```bash
 export RAG_CONFIG=my-rag.yaml
 python -m kb.ingest                         # embed + upsert into the collection
 python -m kb.ingest --only faq              # just one set of documents
 ```
 
-!!! warning "Re-ingesting after changes"
-    `--skip-if-exists` only checks that the collection exists, not whether
-    anything changed. After editing your documents or your settings, run again
-    with `--recreate` (or use a new `vector_store.collection`). Switching to a
-    different `embed_model` is refused outright, because old and new data cannot
-    be compared.
+A plain run keeps the collection in step with the folder. Each file is remembered
+with a fingerprint of its contents, so:
+
+- a **new** file is read in,
+- an **edited** file is read again, because its fingerprint changed,
+- an **unchanged** file is skipped, costing nothing,
+- a **deleted** file has its entries removed, so it stops turning up in answers.
+
+Managing your documents is therefore just managing the folder: add, replace or
+delete files and run the same command again. Replacing your whole set of documents
+in one go works too, removing the old entries and reading the new files in the same
+run. The app also does this by itself: it watches the folders and runs the same thing
+within seconds of a change, so in normal use you never call this manually. Set
+`DOCUMENT_WATCH=false` to turn that off.
+
+!!! warning "One deliberate exception"
+    If the folder turns out to be **completely empty** while the collection knows
+    about files, nothing is deleted. An empty folder is almost always a mount that
+    did not come up or a wrong `path`, and quietly wiping the collection over that
+    would be worse than doing nothing. You get a warning saying so. To empty a
+    collection on purpose, use `--recreate`.
+
+    Deleting entries needs to know which ones belong to the file. That works for
+    PDF, Markdown and text sources. A `json` or `csv` source whose `field_mapping`
+    writes no `source_file` cannot be matched up, so those entries are kept and
+    reported, and `--recreate` clears them.
+
+!!! danger "Give every document a unique file name"
+    Documents are identified by their **file name alone**, not by which folder they
+    are in. So two files both called `intro.pdf`, in different folders of the same
+    collection, are the same document as far as the app is concerned: only one of
+    them ends up being searchable and the other is lost. Deleting one of them is
+    also refused, because its entries cannot be told apart from the other's.
+
+    A run now warns you when it sees a repeated name. If you get that warning,
+    rename the files so each is unique and read them in again with `--recreate`.
+
+!!! warning "When you do need `--recreate`"
+    Fingerprints only cover the files. If you change something that affects how
+    every document is cut up or searched, the existing entries are stale and the
+    whole collection has to be rebuilt:
+
+    ```bash
+    python -m kb.ingest --recreate
+    ```
+
+    That applies to a different `chunking` strategy, different chunk sizes, or
+    switching `images.mode` from `none`. Switching `embed_model` is refused
+    outright, because old and new vectors cannot be compared; use `--recreate` or
+    a new `vector_store.collection`.
+
+    The old `--skip-if-exists` flag still exists but is no longer useful: it stops
+    the run entirely when the collection exists, which is exactly what prevents
+    added, edited and deleted files from being noticed.
 
 ## 5. Make citations open the source file
 

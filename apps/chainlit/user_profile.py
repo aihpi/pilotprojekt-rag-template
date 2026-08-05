@@ -23,7 +23,6 @@ from chat_history import (
 from llm import chat, embed
 from settings import (
     CHAT_DB_PATH,
-    PERSONALIZATION_ENABLED,
     PROFILE_MIN_MESSAGES,
     PROFILE_RELEVANCE_THRESHOLD,
     PROFILE_TOPIC_LIMIT,

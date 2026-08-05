@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import mimetypes
 import os
 import re
 from datetime import datetime, timezone
@@ -30,6 +32,7 @@ from chat_history import (
     get_user_selected_chat_model,
     get_user_selected_chat_profile,
     init_chat_db,
+    migrate_legacy_db,
     list_chat_sessions,
     set_session_title_if_missing,
     set_user_selected_chat_model,
@@ -49,7 +52,7 @@ from native_chat import (
     upsert_feedback,
 )
 from config import get_config
-from rag_tool import build_context, extract_page, extract_source_file, format_citations, retrieve
+from rag_tool import build_context, extract_page, extract_source_file, retrieve
 from figure_markers import (
     build_figure_candidates,
     figure_display_name,
@@ -68,6 +71,8 @@ from settings import (
     CHAT_MODEL,
     DATA_RAW_DIR,
     DATABASE_URL,
+    DOCUMENT_WATCH,
+    LEGACY_CHAT_DB_PATH,
     EMBED_MODEL,
     MAX_TOP_K,
     MAX_SOURCE_LINKS,
@@ -102,6 +107,14 @@ CITATION_HISTORY_SIDEBAR_TITLE = get_config().citation.labels.get(
 )
 
 
+def _served_suffixes() -> set[str]:
+    """Extensions the /sources routes will serve, from ``sources.served_extensions``.
+
+    Normalised, because a config may write ``pdf``, ``.PDF`` or ``.pdf``.
+    """
+    return {f".{e.lstrip('.').lower()}" for e in get_config().sources.served_extensions}
+
+
 def _allowed_source_pdf_names() -> set[str]:
     if not DATA_RAW_DIR.is_dir():
         return set()
@@ -109,7 +122,7 @@ def _allowed_source_pdf_names() -> set[str]:
         return {
             entry.name
             for entry in DATA_RAW_DIR.iterdir()
-            if entry.is_file() and entry.suffix.lower() == ".pdf"
+            if entry.is_file() and entry.suffix.lower() in _served_suffixes()
         }
     except OSError:
         return set()
@@ -130,7 +143,7 @@ def _resolve_source_pdf_path(file_name: str, allowed_names: set[str] | None = No
     except ValueError:
         return None
 
-    if not file_path.is_file() or file_path.suffix.lower() != ".pdf":
+    if not file_path.is_file() or file_path.suffix.lower() not in _served_suffixes():
         return None
     return file_path
 
@@ -1003,7 +1016,7 @@ def _inject_named_source_refs(
 
     entries = []
     for _, alias, file_name, page_start, page_end, section_title, _ in source_rows:
-        file_stem = file_name.lower().removesuffix(".pdf")
+        file_stem = Path(file_name).stem.lower()
         entries.append(
             {
                 "alias": alias,
@@ -2009,6 +2022,51 @@ async def auth_callback(username: str, password: str) -> cl.User | None:
     return None
 
 
+def _patch_cookie_security_openapi_model() -> None:
+    """Give Chainlit's cookie security scheme the ``model`` FastAPI expects.
+
+    ``chainlit.auth.cookie.OAuth2PasswordBearerWithCookie`` subclasses FastAPI's
+    ``SecurityBase`` but never sets ``self.model``, so building the OpenAPI schema
+    raises ``AttributeError: ... has no attribute 'model'`` and ``/openapi.json``
+    (and therefore ``/docs``) returns 500. Upstream bug; this only adds the
+    missing schema metadata, which nothing reads at request time.
+
+    Guarded with ``hasattr`` so it goes inert once Chainlit ships a fix.
+    """
+    try:
+        from chainlit.auth.cookie import OAuth2PasswordBearerWithCookie
+        from fastapi.openapi.models import OAuth2 as OAuth2Model
+        from fastapi.openapi.models import OAuthFlowPassword, OAuthFlows
+    except ImportError as exc:  # noqa: BLE001 — upstream moved or renamed it
+        print(f"[WARN] openapi_security: could not import Chainlit's cookie scheme: {exc}")
+        return
+
+    if getattr(OAuth2PasswordBearerWithCookie, "model", None) is not None:
+        return
+
+    OAuth2PasswordBearerWithCookie.model = OAuth2Model(
+        flows=OAuthFlows(password=OAuthFlowPassword(tokenUrl="/login"))
+    )
+    print("[STARTUP] patched Chainlit cookie security scheme for /openapi.json")
+
+
+class RegisterRequest(BaseModel):
+    """Body of ``POST /auth/register``.
+
+    MUST stay at module level. This file uses ``from __future__ import
+    annotations``, so FastAPI sees the handler's annotation as the *string*
+    ``"RegisterRequest"`` and resolves it against this module's globals. Defined
+    inside the startup hook instead, the name is a local, resolution fails, and
+    FastAPI silently downgrades the parameter to a **query** parameter: the JSON
+    body is ignored (422 ``loc: ["query", "request"]``) and ``/openapi.json``
+    returns 500. Nothing warns at startup.
+    """
+
+    username: str
+    email: str
+    password: str
+
+
 @cl.on_app_startup
 async def on_app_startup() -> None:
     global SYSTEM_PROMPT
@@ -2060,6 +2118,7 @@ async def on_app_startup() -> None:
     if DATABASE_URL and CHAINLIT_INIT_DB:
         await ensure_native_schema(DATABASE_URL)
 
+    migrate_legacy_db(CHAT_DB_PATH, LEGACY_CHAT_DB_PATH)
     init_chat_db(CHAT_DB_PATH)
     CHAT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2080,7 +2139,7 @@ async def on_app_startup() -> None:
 
         return FileResponse(
             path=str(file_path),
-            media_type="application/pdf",
+            media_type=mimetypes.guess_type(file_path.name)[0] or "application/octet-stream",
             headers={"Content-Disposition": "inline"},
         )
 
@@ -2124,12 +2183,23 @@ async def on_app_startup() -> None:
         )
         return FileResponse(path=str(bundle), media_type="application/zip", filename=bundle.name)
 
-    # Registration endpoint for self-registration
-    class RegisterRequest(BaseModel):
-        username: str
-        email: str
-        password: str
+    @chainlit_fastapi_app.get("/ingest-status")
+    async def ingest_status(current_user=Depends(get_current_user)):
+        """What the folder watcher is doing, for the toast in the browser.
 
+        The watcher is a background task with no Chainlit session, so it cannot push
+        anything to a user. The browser polls this instead. Behind auth like every
+        other route here, because the messages name your documents.
+        """
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        if not DOCUMENT_WATCH:
+            return {"state": "off", "message": "", "revision": 0}
+        from document_watch import get_status
+
+        return get_status()
+
+    # Registration endpoint for self-registration
     @chainlit_fastapi_app.post("/auth/register")
     async def register_user(request: RegisterRequest):
         # Validate input
@@ -2178,11 +2248,26 @@ async def on_app_startup() -> None:
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/all-chats")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/feedback")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/auth/register")
+    _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/ingest-status")
+
+    _patch_cookie_security_openapi_model()
 
     chainlit_fastapi_app.state.native_export_route_added = True
     print("[STARTUP] native export route registered at /export/all-chats")
     print("[STARTUP] feedback export route registered at /export/feedback")
     print("[STARTUP] registration route registered at /auth/register")
+
+    if DOCUMENT_WATCH:
+        from document_watch import watch_documents
+
+        # Held on app state so the task is not garbage collected: asyncio keeps only
+        # a weak reference, so a bare create_task() can be collected mid-flight.
+        chainlit_fastapi_app.state.document_watch_task = asyncio.create_task(
+            watch_documents()
+        )
+        print("[STARTUP] watching the document folders for changes")
+    else:
+        print("[STARTUP] document watching is off (DOCUMENT_WATCH=false)")
 
 
 @cl.on_feedback

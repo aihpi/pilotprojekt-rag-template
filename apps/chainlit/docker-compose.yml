@@ -51,31 +51,42 @@ services:
       CHAINLIT_AUTH_USERNAME: ${CHAINLIT_AUTH_USERNAME:-admin}
       CHAINLIT_AUTH_PASSWORD: ${CHAINLIT_AUTH_PASSWORD:-admin}
       CHAINLIT_INIT_DB: ${CHAINLIT_INIT_DB:-true}
+      # Deliberately NOT ${CHAT_DB_PATH}: .env holds the value for running the app on
+      # the host, which is fine there but points at the bind-mounted ./.chainlit
+      # inside a container. This database is SQLite in WAL mode, which needs a
+      # shared-memory file and real POSIX locking, and Docker Desktop only emulates
+      # both across the host filesystem boundary, so a write interrupted at the wrong
+      # moment corrupts it ("database disk image is malformed"). The chat_db volume
+      # below is a real Linux filesystem. An existing history moves over once on
+      # startup.
+      #
+      # Set DOCKER_CHAT_DB_PATH to override, e.g. on Linux, where a bind mount is an
+      # ordinary filesystem and keeping the file on the host makes it easy to back up.
+      CHAT_DB_PATH: ${DOCKER_CHAT_DB_PATH:-/app/.chatdb/chat_history.sqlite3}
+      # Watch the document folders and index changes automatically. Defaults to on,
+      # so an .env from before this feature needs no editing; set it to false to
+      # turn it off.
+      DOCUMENT_WATCH: ${DOCUMENT_WATCH:-true}
+      DOCUMENT_WATCH_INTERVAL: ${DOCUMENT_WATCH_INTERVAL:-5}
+      DOCUMENT_WATCH_SETTLE: ${DOCUMENT_WATCH_SETTLE:-5}
       # RAG instance config (must match the ingest service).
       RAG_CONFIG: ${RAG_CONFIG:-examples/papers/rag.config.yaml}
       # IMPORTANT: inside Docker network, use service DNS name (not localhost)
       QDRANT_URL: http://qdrant:6333
-      LANGFLOW_BASE_URL: ${LANGFLOW_BASE_URL:-http://langflow:7860}
     volumes:
       # Documents (and generated figures) live under ./data/documents, which is
       # already covered by the `.:/app` mount below.
       - .:/app
       - ./.chainlit:/app/.chainlit
       - ./.files:/app/.files
+      # Docling's PDF models (~500 MB) cache under /root/.cache/docling and
+      # /root/.cache/huggingface. Without this volume every rebuild, and every
+      # `run --rm ingest`, downloads them again.
+      - model_cache:/root/.cache
+      # SQLite must not live on the bind mount above; see CHAT_DB_PATH.
+      - chat_db:/app/.chatdb
     ports:
       - "${APP_PORT:-8000}:8000"
-
-  langflow:
-    profiles: ["langflow"]
-    image: langflowai/langflow:latest
-    container_name: rag-langflow
-    environment:
-      LANGFLOW_HOST: 0.0.0.0
-      LANGFLOW_PORT: 7860
-    ports:
-      - "7860:7860"
-    volumes:
-      - langflow_data:/app/langflow
 
   ingest:
     build:
@@ -104,6 +115,10 @@ services:
       INGEST_MAX_BATCH_CHARS: ${INGEST_MAX_BATCH_CHARS:-20000}
     volumes:
       - .:/app
+      # Same model cache as the chainlit service. This is the container that
+      # actually reads PDFs, and it runs with --rm, so without a volume it
+      # re-downloads Docling's models on every single ingest run.
+      - model_cache:/root/.cache
     command:
       - /bin/sh
       - -lc
@@ -131,31 +146,6 @@ services:
         print(f"Qdrant did not become ready in time: {url}", file=sys.stderr)
         sys.exit(1)
         PY
-        if [ "$$INGEST_RECREATE" != "true" ]; then
-          echo "Checking whether the target collection already exists ...";
-          python - <<'PY'
-        import json
-        import os
-        import sys
-        import urllib.request
-
-        base = (os.environ.get("QDRANT_URL") or "http://qdrant:6333").rstrip("/")
-        from config import load_config
-        collection = os.environ.get("QDRANT_COLLECTION") or load_config().vector_store.collection
-        url = f"{base}/collections"
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-        names = {c.get("name") for c in payload.get("result", {}).get("collections", []) if isinstance(c, dict)}
-        if collection in names:
-            print(f"Collection already exists: {collection}. Skipping ingestion.")
-            sys.exit(0)
-        print(f"Collection not found: {collection}. Ingestion will run.")
-        sys.exit(1)
-        PY
-          if [ "$$?" = "0" ]; then
-            exit 0;
-          fi;
-        fi;
         python -m kb.ingest --config "$$RAG_CONFIG" \
           $$( [ "$$INGEST_RECREATE" = "true" ] && echo "--recreate" );
     restart: "no"
@@ -163,4 +153,5 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
-  langflow_data:
+  model_cache:
+  chat_db:

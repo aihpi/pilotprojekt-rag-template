@@ -73,6 +73,11 @@ PERSONALIZED_FOLLOWUPS_COUNT = _cfg.app.personalized_followups_count
 CHAT_DB_PATH = Path(
     os.getenv("CHAT_DB_PATH", str((BASE_DIR / ".chainlit" / "chat_history.sqlite3").resolve()))
 )
+# Where the chat history used to live. Under Docker, CHAT_DB_PATH now points at a
+# named volume instead, because .chainlit/ is bind-mounted from the host and SQLite
+# in WAL mode is not safe on Docker Desktop's emulated filesystem. Kept so an
+# existing history can be carried over once; see chat_history.migrate_legacy_db.
+LEGACY_CHAT_DB_PATH = (BASE_DIR / ".chainlit" / "chat_history.sqlite3").resolve()
 CHAT_EXPORT_DIR = Path(
     os.getenv("CHAT_EXPORT_DIR", str((BASE_DIR / ".files" / "chat_exports").resolve()))
 )
@@ -80,3 +85,13 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 CHAINLIT_AUTH_USERNAME = os.getenv("CHAINLIT_AUTH_USERNAME", "admin")
 CHAINLIT_AUTH_PASSWORD = os.getenv("CHAINLIT_AUTH_PASSWORD", "admin")
 CHAINLIT_INIT_DB = (os.getenv("CHAINLIT_INIT_DB", "true") or "true").lower() == "true"
+
+# Watch the document folders and index changes automatically. On by default and
+# opt-OUT, so an existing .env written before this feature existed still gets it
+# without being re-copied; only someone who wants it off adds the variable.
+DOCUMENT_WATCH = (os.getenv("DOCUMENT_WATCH", "true") or "true").lower() == "true"
+DOCUMENT_WATCH_INTERVAL = int(os.getenv("DOCUMENT_WATCH_INTERVAL", "5"))
+"""Seconds between double-checks. Changes normally arrive as filesystem events;
+this only bounds how long anything the events miss can go unnoticed."""
+DOCUMENT_WATCH_SETTLE = int(os.getenv("DOCUMENT_WATCH_SETTLE", "5"))
+"""Ignore files modified within this many seconds, so half-copied files wait."""

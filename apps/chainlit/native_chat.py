@@ -122,8 +122,11 @@ async def create_user(
             """
             INSERT INTO "User" (identifier, email, password_hash, metadata)
             VALUES ($1, $2, $3, '{"provider": "local"}')
-            ON CONFLICT (identifier) DO NOTHING
-            ON CONFLICT (email) DO NOTHING
+            -- One untargeted ON CONFLICT, covering both the identifier and the
+            -- email unique constraint. Postgres permits only a single ON CONFLICT
+            -- clause per statement; two of them (one per constraint) is a syntax
+            -- error, which made every registration fail with a 500.
+            ON CONFLICT DO NOTHING
             RETURNING id, identifier, email, metadata, "createdAt"
             """,
             username,

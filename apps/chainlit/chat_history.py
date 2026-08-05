@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,52 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
+
+
+def migrate_legacy_db(db_path: Path, legacy_path: Path) -> None:
+    """Move an older chat history into place, once.
+
+    This database used to live under ``.chainlit/``, which Docker bind-mounts from
+    the host. WAL mode needs a shared-memory file and real POSIX locking, and Docker
+    Desktop only emulates both across the macOS/Windows filesystem boundary, so the
+    file could be corrupted by a write interrupted at the wrong moment. It now lives
+    on a named volume, which is a real Linux filesystem inside the VM.
+
+    Uses SQLite's backup API rather than copying the file. In WAL mode a database is
+    *several* files, and recently committed rows can still be sitting in the ``-wal``
+    companion, so copying only the main file silently loses them. ``backup()``
+    produces one consistent file including whatever is in the WAL.
+
+    A damaged legacy file is deliberately not carried over, since that would defeat
+    the point of moving. It is left untouched so it can still be recovered.
+    """
+    if db_path == legacy_path or db_path.exists() or not legacy_path.exists():
+        return
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # Read/write, not mode=ro: replaying a WAL is a write, and a read-only open
+        # of a database that needs recovery fails.
+        source = sqlite3.connect(str(legacy_path))
+        try:
+            if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise sqlite3.DatabaseError("integrity check did not return ok")
+            target = sqlite3.connect(str(db_path))
+            try:
+                source.backup(target)
+            finally:
+                target.close()
+        finally:
+            source.close()
+    except sqlite3.DatabaseError as exc:
+        db_path.unlink(missing_ok=True)  # never leave a half-written database behind
+        print(
+            f"[chat] the previous chat history at {legacy_path} is damaged ({exc}) and "
+            "was not carried over. Starting a fresh one. To rescue the old messages: "
+            f'sqlite3 "{legacy_path}" ".recover" | sqlite3 "{db_path}"'
+        )
+        return
+    print(f"[chat] moved the existing chat history from {legacy_path} to {db_path}")
 
 
 def init_chat_db(db_path: Path) -> None:

@@ -30,7 +30,7 @@ best-effort basis; there is no guaranteed response time.
   `OAUTH_GITHUB_CLIENT_SECRET` and friends belong in the gitignored `.env`, never
   in a YAML config, a commit or a docs example. Rotate anything that has been
   committed by mistake.
-- **Do not expose Qdrant, Postgres or Langflow.** The bundled `docker-compose.yml`
+- **Do not expose Qdrant or Postgres.** The bundled `docker-compose.yml`
   publishes their ports for convenience on a developer machine.
 - **Mind your corpus.** Everything you ingest becomes retrievable by any user who
   can log in, and chunks are sent to whichever model gateway you configure.

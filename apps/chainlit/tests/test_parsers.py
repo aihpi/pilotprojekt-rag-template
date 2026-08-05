@@ -5,17 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from config.schema import (
-    ChunkingConfig,
     DataSourceConfig,
     FieldMapping,
     RagConfig,
 )
-from kb.chunkers import get_chunker
 from kb.parsers import get_parser
-from kb.parsers.base import Section
 
 
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -287,7 +288,9 @@ def _sections_from_docling_json(
     json_dir: Path, cfg: "ChunkingConfig", include_tables: bool
 ) -> list[Section]:
     sections: list[Section] = []
-    for json_path in sorted(json_dir.glob("*.json")):
+    # Via iter_source_files, not json_dir.glob, so this path honours the
+    # incremental-ingest file gate like every other source.
+    for json_path in iter_source_files(json_dir, "*.json", "*.json"):
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
@@ -413,12 +416,47 @@ def _extract_pages(document: Any) -> list[tuple[int | None, str]]:
     return pages
 
 
-def _build_ocr_options(engine: str, lang: list[str], force_full_page_ocr: bool):
+def _build_ocr_options(
+    engine: str,
+    lang: list[str],
+    force_full_page_ocr: bool,
+    *,
+    enabled: bool = False,
+):
+    """Build Docling's OCR options.
+
+    ``enabled`` mirrors ``pdf_options.ocr``. The options object is built on every
+    run regardless, because ``PdfPipelineOptions`` always wants one and ``do_ocr``
+    is what actually switches OCR on, so the availability check must be gated on
+    ``enabled`` or it would break ordinary ingests that never OCR anything.
+    """
     from docling.datamodel.pipeline_options import OcrMacOptions, TesseractOcrOptions
 
     if engine == "mac":
         return OcrMacOptions(lang=lang, force_full_page_ocr=force_full_page_ocr)
-    return TesseractOcrOptions(lang=lang, force_full_page_ocr=force_full_page_ocr)
+
+    options = TesseractOcrOptions(lang=lang, force_full_page_ocr=force_full_page_ocr)
+    if not enabled:
+        return options
+
+    # Fail here rather than minutes later inside the converter. Docling's own
+    # message is clear but arrives only once it has started up, and it cannot know
+    # that the shipped Docker image deliberately installs no apt packages.
+    command = getattr(options, "tesseract_cmd", None) or "tesseract"
+    if shutil.which(command) is None:
+        raise RuntimeError(
+            f"pdf_options.ocr is true but the '{command}' binary was not found.\n"
+            "  The shipped Docker image ships no OCR engine, to keep it small.\n"
+            "  Most PDFs do not need OCR: they already carry a text layer, and "
+            "ocr: false (the default) reads them fine.\n"
+            "  If your PDFs really are scans, build a derived image:\n"
+            "    FROM <this image>\n"
+            "    RUN apt-get update && apt-get install -y tesseract-ocr "
+            "tesseract-ocr-eng tesseract-ocr-deu && rm -rf /var/lib/apt/lists/*\n"
+            "  On macOS outside Docker, `brew install tesseract` and set "
+            "pdf_options.ocr_engine: mac."
+        )
+    return options
 
 
 def _figure_chunk_text(caption: str, description: str, fig_idx: int, page: int | None) -> str:
@@ -543,7 +581,9 @@ def _sections_from_live_pdf(
         ocr_batch_size=1,
         layout_batch_size=1,
         table_batch_size=1,
-        ocr_options=_build_ocr_options(opts.ocr_engine, opts.ocr_lang, False),
+        ocr_options=_build_ocr_options(
+            opts.ocr_engine, opts.ocr_lang, False, enabled=opts.ocr
+        ),
         **image_opts,
     )
     converter = DocumentConverter(

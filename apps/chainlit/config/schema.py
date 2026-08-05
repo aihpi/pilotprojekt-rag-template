@@ -141,11 +141,21 @@ class PdfOptions(BaseModel):
     docling_json_dir: str | None = None
     """If set, parse pre-exported Docling JSON from this dir (fast path) instead
     of converting PDFs live."""
-    docling_service_url: str | None = None
-    """Optional remote Docling service (else local CPU conversion)."""
     ocr: bool = False
+    """Read text off the page as an image. Only needed for scans: PDFs that
+    already carry a text layer are read correctly with ``ocr: false``, and OCR
+    makes ingestion much slower.
+
+    **The shipped Docker image contains no OCR engine**, deliberately, to keep it
+    small. Turning this on there fails immediately with an explanation. To use it,
+    build a derived image that installs ``tesseract-ocr`` plus the language data
+    you need, or run outside Docker with a ``tesseract`` on your PATH."""
     ocr_engine: Literal["tesseract", "mac"] = "tesseract"
+    """``tesseract`` needs the binary on the PATH. ``mac`` uses the OCR built into
+    macOS and needs nothing installed, but only works outside Docker."""
     ocr_lang: list[str] = Field(default_factory=lambda: ["eng", "deu"])
+    """Language codes passed to the OCR engine. For ``tesseract`` each one needs
+    its own package (e.g. ``tesseract-ocr-deu``)."""
     device: Literal["cpu", "mps", "cuda", "auto"] = "cpu"
     include_tables: bool = True
     """Serialize each table (as a Markdown grid) into the section it appears in,
@@ -244,7 +254,6 @@ class CitationConfig(BaseModel):
     """Optional metadata keys exposed to citation segments (e.g. domain fields)."""
     map_path: str | None = None
     """Optional bibliographic citation map JSON (env ``CITATION_MAP_PATH`` overrides)."""
-    id_pattern: str | None = None
     """Optional regex for domain IDs used as an extra citation-matching signal."""
     source_pdf_fallback: str | None = None
     """Fallback served filename for chunks without a resolvable source file."""
@@ -260,6 +269,9 @@ class SourcesConfig(BaseModel):
     served_extensions: list[str] = Field(
         default_factory=lambda: [".pdf", ".txt", ".md"]
     )
+    """File types the ``/sources/...`` links may serve. A citation pointing at
+    anything else returns 404, so add an extension here before expecting the app to
+    open that kind of file."""
     filename_map: list[FilenameRule] = Field(default_factory=list)
     """Declarative rules for mapping stored names to served files."""
 
@@ -421,13 +433,11 @@ class AppConfig(BaseModel):
 class UiTextConfig(BaseModel):
     """Neutral UI/prompt strings (overridable per language)."""
 
-    role_context_header: str = "## ROLE CONTEXT"
     retry_tool: str = "Call the {tool} tool first before answering."
     forced_final: str = (
         "Answer the question using only the retrieved context above. "
         "If the answer is not in the context, say so."
     )
-    no_context: str = "Not found in the provided context."
 
 
 class RagConfig(BaseModel):

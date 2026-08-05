@@ -41,8 +41,117 @@ can be pointed at a new corpus without touching Python.
   baseline.
 - **Documentation site.** MkDocs Material site (English and German) with a
   configuration reference generated from the schema.
+- **`make check`, a setup test.** Answers the question that costs the most time when
+  something does not work: is it my settings, my connection, or the AI service? It
+  reads your settings, resolves and connects to the service host, then tries the chat,
+  search and image models several times each. Every failure is reported as **numbered
+  steps**, not a stack trace: which file to open, which line to look at, what to check,
+  and to run it again afterwards.
+
+  It also refuses to spend anything before checking the obvious. The placeholder values
+  that `.env.example` ships with (`your-key`, `http://localhost:4000`) are recognised
+  and named as the problem, because copying that file and never editing it is the
+  commonest cause of "nothing works" and produces an error that says nothing about it.
+  The key is shown masked, so a wrong or truncated key is visible without exposing it.
+
+  Trying each model repeatedly is the point. The failure that misleads people is not
+  "it broke" but "it broke sometimes": a connection losing one request in three lets a
+  chat message through while making a document import fail dozens of times. A single
+  attempt cannot tell those apart, so the report says `3 of 5 attempts worked`.
+
+  The host is probed separately, with a plain name lookup and connection attempt,
+  because litellm reports a misspelled address and a mid-request disconnect with the
+  same "Connection error" message. Without that split, a typo in `LITELLM_BASE_URL`
+  gets diagnosed as a VPN problem and sends people looking in the wrong place.
 
 ### Fixed
+
+- **`sources.served_extensions` did nothing.** It shipped set in three configs, was
+  documented in the README and both adding-data pages with a `[.pdf, .txt, .md]`
+  default, and had a test asserting that default, but the route hardcoded `.pdf`. So
+  adding `.md` and expecting a Markdown source to open gave a silent 404, and the
+  README's troubleshooting entry sent people to check a setting that could not be the
+  cause. Both gates now read it, and the response carries the real media type via
+  `mimetypes.guess_type` instead of claiming everything is a PDF. The path checks that
+  matter are unchanged: no separators, membership in the directory listing, and
+  containment under `sources.data_dir` after resolving.
+
+- **A failed import now says what to do, and stops being buried in noise.** litellm
+  prints a five-line "Give Feedback / Get Help" block for every failed call, so a
+  reported failure log was roughly 90% that text with the useful lines lost inside it.
+  That output is now suppressed. When a run does fail, it ends with the error, what it
+  means, numbered steps, and a pointer to `make check`, instead of a forty-line
+  traceback through httpx, openai and litellm whose last line is "Connection error."
+  The advice comes from the same place `make check` uses, so the two cannot disagree.
+
+- **Embeddings are retried, so one dropped connection no longer destroys a whole run.**
+  Figure descriptions already retried and their failures were caught; a failed embedding
+  aborted everything, throwing away work already paid for, including figures. Reported
+  from the field on an unstable network.
+
+- **A stable internet connection is now stated as a requirement.** Reading documents
+  makes hundreds of calls to the AI service, so a connection that drops occasionally
+  fails often, while a single chat message works and hides the cause. Both READMEs and
+  the getting-started pages say so, and `docs/troubleshooting.md` opens with how to
+  tell an unstable connection apart from wrong settings.
+
+- **The chat history could be corrupted, and was.** It is SQLite in WAL mode and lived
+  under `.chainlit/`, which Docker bind-mounts from the host. WAL needs a shared-memory
+  companion file and real POSIX locking, and Docker Desktop only emulates both across
+  the macOS/Windows filesystem boundary, so a write interrupted at the wrong moment left
+  `sqlite3.DatabaseError: database disk image is malformed` on every chat start. Hit
+  during development after a series of container restarts; the file was recoverable with
+  `sqlite3 old ".recover"`.
+
+  Under Docker the database now lives on a named `chat_db` volume, which is a real Linux
+  filesystem inside the VM where WAL behaves correctly. An existing history is carried
+  over once on startup via SQLite's backup API, not a file copy: in WAL mode a database
+  is several files and recently committed rows can still sit in the `-wal`, so copying
+  only the main file loses them. A damaged legacy file is deliberately not carried over
+  and is left in place, with the recovery command printed.
+
+  Running without Docker is unaffected and keeps the old path: a native filesystem
+  handles WAL fine. Linux hosts were never affected either, since a bind mount there is
+  the same kernel filesystem.
+
+- **Self-registration never worked.** `POST /auth/register` was broken three
+  independent ways, each sufficient on its own.
+
+  `app.py` uses `from __future__ import annotations`, so FastAPI receives the
+  handler's annotation as the string `"RegisterRequest"` and resolves it against
+  module globals. The model was declared inside the `on_app_startup` hook, making
+  the name a local. FastAPI did not raise: it downgraded the parameter to a
+  **query** parameter. Every JSON body was ignored (422 with
+  `loc: ["query", "request"]`), a query parameter reached the handler as a `str`
+  and raised (500), and `/openapi.json` returned 500 because the schema could not
+  be built. The model is now defined at module level.
+
+  `/openapi.json` still failed afterwards for an unrelated reason:
+  `chainlit.auth.cookie.OAuth2PasswordBearerWithCookie` subclasses FastAPI's
+  `SecurityBase` but never sets `self.model`, which the schema generator reads.
+  The missing metadata is now supplied, guarded so it goes inert once Chainlit
+  fixes it upstream.
+
+  `create_user` carried two `ON CONFLICT` clauses, one per unique constraint.
+  PostgreSQL allows a single clause per statement, so registration failed with a
+  syntax error even once the body parsed. One untargeted `ON CONFLICT DO NOTHING`
+  covers both constraints.
+
+- **Documents added to the folder were never indexed, and nothing said so.** The
+  `ingest` compose service exited successfully as soon as the target collection
+  existed, so dropping a PDF into `data/documents/` and restarting did nothing at
+  all. See *Changed* below for the new behaviour.
+
+- **Docling's PDF models were re-downloaded on every ingest run.** Roughly 500 MB,
+  each time. They cache under `/root/.cache`, and the ingest container mounted only
+  the project directory and ran with `--rm`. A named `model_cache` volume now keeps
+  them. The README claimed this happened "once per update", which was wrong twice
+  over.
+
+- **`pdf_options.ocr: true` failed late and unhelpfully.** The shipped image
+  installs no apt packages by design, so it has no OCR engine. The run now stops in
+  the first second, naming the package to install and pointing out that PDFs with a
+  text layer need no OCR at all.
 
 - **Oversized figures lost their description silently.** The ingest step sent
   full-resolution PNG to the vision model, so a large figure exceeded the gateway's
@@ -71,6 +180,78 @@ can be pointed at a new corpus without touching Python.
   figure and is charged accordingly.
 
 ### Changed
+
+- **The document folders are watched, so changes need no command.** The app is told by
+  the operating system when a source folder changes, and indexes whatever was added,
+  edited or deleted, without a restart. Measured at 0.3 s from dropping a file in to
+  the run starting. Putting a file into the folder is the whole workflow.
+
+  Two stages, so watching is genuinely free: a poll compares size and modification
+  time and reads no file contents, and only a hint of change starts the real run that
+  hashes and decides. Files modified in the last few seconds are left alone, so a
+  large file still being copied is never read half-written, and one pass at a time is
+  enforced. The work runs in a thread, so parsing a PDF cannot stall open chats.
+
+  Changes arrive as filesystem events (via `watchfiles`, already present through
+  Chainlit), so a document is noticed in about 0.3 s rather than up to 20. A slow
+  timeout tick remains, and is required rather than defensive: the settle rule holds
+  back a file written a moment ago, and no further event follows it. The events are
+  otherwise ignored, because the authoritative comparison runs anyway, so a missed or
+  duplicated event costs one extra 2 ms sweep.
+
+  On by default and **opt-out** via `DOCUMENT_WATCH=false`, so a `.env` copied before
+  this existed gets the feature without being touched. `DOCUMENT_WATCH_INTERVAL` and
+  `DOCUMENT_WATCH_SETTLE` tune it. This only became practical because of the change
+  below; before it, any repeated run re-embedded everything.
+
+- **Ingestion is incremental per file.** A plain `python -m kb.ingest` used to be
+  all-or-nothing; it now reads only what changed. Every file is recorded with a
+  sha256 of its contents, so a new file is ingested, an edited file is ingested
+  again, and an unchanged file is skipped for free. Adding a document is therefore
+  just putting it in the folder and starting the app.
+
+  The record lives in a metadata point in the collection, keyed by file path rather
+  than by the payload's `source_file`, because that key is parser-defined and
+  inconsistent. Filtering happens in `kb/parsers/base.py:iter_source_files`, which
+  every built-in parser already used, so the `ParserFn` extension point keeps its
+  signature and custom parsers keep working.
+
+  **Existing collections are adopted, not rebuilt.** A collection created before
+  this has no record of its files. Treating it as empty would re-embed everything
+  and, with `images.mode: describe`, re-describe every figure, so the first run
+  instead records the current files without ingesting anything and cross-checks them
+  against the collection, warning about any file that has no entries. Nothing to do
+  and nothing charged.
+
+  **A document deleted from the folder loses its entries.** Otherwise the assistant
+  kept answering from, and citing, a file that no longer existed, with a source link
+  that could only 404. Deletions are handled in the same run as additions, so
+  replacing an entire corpus at once both removes the old entries and indexes the
+  new documents.
+
+  Two safeguards, because this makes ingestion destructive. A run limited by
+  `--only` never prunes, since the sources it did not visit are not deletions. And
+  if *no* file at all is found while the collection knows about some, nothing is
+  removed and a warning explains why: an empty documents folder is almost always a
+  mount that did not come up or a wrong `path`, not an intentional wipe. Use
+  `--recreate` to empty a collection on purpose.
+
+  Matching entries to a file relies on the `source_file` payload, so it works for
+  PDF, Markdown and text sources. Entries are kept and reported, rather than
+  silently left behind, in the two cases where they cannot be matched safely: a
+  `json`/`csv` source whose `field_mapping` writes no `source_file`, and a name that
+  another file on disk still uses.
+
+- **Duplicate file names are now reported.** `doc_id`, and therefore each Qdrant
+  point id, is derived from the file name alone, so two documents called `intro.pdf`
+  in different folders of one collection collide and the second silently overwrites
+  the first. That is not new and is not fixed here, because changing the derivation
+  would invalidate every existing point id and force a full re-ingest of every
+  instance. Each run now names the clashing files and says one of them is being lost.
+
+  `--recreate` is unchanged and still the right tool after altering `chunking`,
+  chunk sizes or `images.mode`. `--skip-if-exists` still works but is no longer
+  useful, since it is what suppressed added, edited and deleted files alike.
 
 - **Open-weight models everywhere by default.** All shipped configs, the schema
   defaults, `docker-compose.yml` and the docs now use `gpt-oss-120b` (Apache-2.0),

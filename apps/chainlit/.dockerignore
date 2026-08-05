@@ -9,6 +9,3 @@ __pycache__
 .chainlit/chat_history.sqlite3
 .chainlit/chat_history.sqlite3-shm
 .chainlit/chat_history.sqlite3-wal
-# Untracked leftover from the langflow-routing branch; including it here would
-# trip setuptools auto-discovery during `pip install -e .` (multiple top-level pkgs).
-langflow_components

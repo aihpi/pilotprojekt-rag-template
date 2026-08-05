@@ -148,18 +148,79 @@ einzelnen Satz Dokumente mit einem `chunking:`-Block in dessen Eintrag.
 
 ## 4. Dokumente einlesen
 
+!!! tip "Nur ein Dokument ergänzen oder entfernen?"
+    [Dokumente ändern](managing-documents.de.md) ist die kurze, allgemein
+    verständliche Fassung dieses Schritts. Der Rest dieser Seite dreht sich um
+    Formate und Chunking.
+
 ```bash
 export RAG_CONFIG=my-rag.yaml
 python -m kb.ingest                         # embedden + in die Collection upserten
 python -m kb.ingest --only faq              # nur ein Satz Dokumente
 ```
 
-!!! warning "Erneute Ingestion nach Änderungen"
-    `--skip-if-exists` prüft nur, ob die Collection existiert, nicht ob sich etwas
-    geändert hat. Nachdem du Dokumente oder Einstellungen bearbeitet hast, führe
-    es erneut mit `--recreate` aus (oder nimm eine neue
-    `vector_store.collection`). Ein Wechsel des `embed_model` wird rundheraus
-    abgelehnt, weil sich alte und neue Daten nicht vergleichen lassen.
+Ein normaler Lauf hält die Collection im Gleichstand mit dem Ordner. Zu jeder
+Datei wird ein Fingerabdruck ihres Inhalts gespeichert, deshalb gilt:
+
+- eine **neue** Datei wird eingelesen,
+- eine **geänderte** Datei wird erneut eingelesen, weil sich der Fingerabdruck
+  geändert hat,
+- eine **unveränderte** Datei wird übersprungen und kostet nichts,
+- eine **gelöschte** Datei verliert ihre Einträge und taucht damit nicht mehr in
+  Antworten auf.
+
+Deine Dokumente zu verwalten heißt also einfach, den Ordner zu verwalten: Dateien
+hinzufügen, austauschen oder löschen und denselben Befehl noch einmal ausführen.
+Auch der komplette Austausch aller Dokumente funktioniert in einem Lauf: die alten
+Einträge werden entfernt und die neuen Dateien eingelesen. Die App macht das auch von selbst: sie beobachtet die
+Ordner und führt innerhalb von Sekunden nach einer Änderung dasselbe aus, im
+Normalbetrieb rufst du das also nie manuell auf. Mit `DOCUMENT_WATCH=false`
+schaltest du das ab.
+
+!!! warning "Eine bewusste Ausnahme"
+    Ist der Ordner **völlig leer**, während die Collection Dateien kennt, wird
+    nichts gelöscht. Ein leerer Ordner liegt fast immer daran, dass eine
+    Einbindung nicht hochkam oder `path` falsch ist, und die Collection deswegen
+    stillschweigend zu leeren wäre schlimmer als nichts zu tun. Du bekommst einen
+    entsprechenden Hinweis. Um eine Collection absichtlich zu leeren, nimm
+    `--recreate`.
+
+    Zum Löschen muss klar sein, welche Einträge zu der Datei gehören. Bei PDF-,
+    Markdown- und Textquellen ist das der Fall. Eine `json`- oder `csv`-Quelle,
+    deren `field_mapping` kein `source_file` schreibt, lässt sich nicht zuordnen;
+    diese Einträge bleiben erhalten und werden gemeldet, `--recreate` räumt sie
+    weg.
+
+!!! danger "Jedes Dokument braucht einen eindeutigen Dateinamen"
+    Dokumente werden **allein über den Dateinamen** erkannt, nicht über den Ordner,
+    in dem sie liegen. Zwei Dateien, die beide `intro.pdf` heißen und in
+    verschiedenen Ordnern derselben Collection liegen, sind für die App also
+    dasselbe Dokument: nur eines davon wird durchsuchbar, das andere geht verloren.
+    Auch das Löschen eines der beiden wird abgelehnt, weil sich seine Einträge nicht
+    von denen des anderen unterscheiden lassen.
+
+    Ein Lauf warnt dich jetzt, wenn ein Name doppelt vorkommt. Wenn diese Warnung
+    erscheint, benenne die Dateien eindeutig um und lies sie mit `--recreate` neu
+    ein.
+
+!!! warning "Wann `--recreate` wirklich nötig ist"
+    Fingerabdrücke betreffen nur die Dateien. Änderst du etwas, das sich auf die
+    Zerlegung oder Suche **aller** Dokumente auswirkt, sind die vorhandenen
+    Einträge veraltet und der ganze Bestand muss neu aufgebaut werden:
+
+    ```bash
+    python -m kb.ingest --recreate
+    ```
+
+    Das betrifft eine andere `chunking`-Strategie, andere Chunk-Größen oder den
+    Wechsel von `images.mode: none` auf etwas anderes. Ein Wechsel des
+    `embed_model` wird rundheraus abgelehnt, weil sich alte und neue Vektoren nicht
+    vergleichen lassen; nimm `--recreate` oder eine neue
+    `vector_store.collection`.
+
+    Das alte `--skip-if-exists` gibt es weiterhin, nützt aber nichts mehr: es
+    bricht den Lauf ab, sobald die Collection existiert, und verhindert damit genau,
+    dass hinzugefügte, geänderte und gelöschte Dateien bemerkt werden.
 
 ## 5. Zitate sollen die Quelldatei öffnen
 

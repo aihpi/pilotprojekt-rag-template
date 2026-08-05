@@ -75,6 +75,16 @@ def _clean_text(text: str, max_len: int = 1200) -> str:
     return text[: max_len - 3].rstrip() + "..."
 
 
+# The per-collection metadata points (the embed-model sentinel and the file
+# manifest) are stored with a real vector copied from the first chunk, because
+# Qdrant wants one of the right size. A query similar to that chunk therefore ties
+# with them: they take top result slots and are then dropped for having no text,
+# which silently shortens or empties the result list. Excluding them in Qdrant
+# means they never consume a slot in the first place.
+_EXCLUDE_META = [FieldCondition(key="_meta", match=MatchValue(value=True))]
+_META_FILTER = Filter(must_not=_EXCLUDE_META)
+
+
 async def retrieve(
     query: str,
     top_k: int | None = None,
@@ -120,7 +130,7 @@ async def retrieve(
             must.append(FieldCondition(key=key, match=MatchAny(any=list(value))))
         else:
             must.append(FieldCondition(key=key, match=MatchValue(value=value)))
-    query_filter = Filter(must=must) if must else None
+    query_filter = Filter(must=must, must_not=_EXCLUDE_META) if must else _META_FILTER
 
     response = client.query_points(
         collection_name=target,
@@ -141,6 +151,7 @@ async def retrieve(
             score_threshold=SCORE_THRESHOLD,
             with_payload=True,
             with_vectors=include_vectors,
+            query_filter=_META_FILTER,
         )
         points = list(response.points or [])
 

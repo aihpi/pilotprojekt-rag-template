@@ -1,9 +1,10 @@
-.PHONY: help init-env up logs down ps reingest local-install local-run
+.PHONY: help init-env up check logs down ps reingest local-install local-run
 
 help:
 	@echo "Targets:"
 	@echo "  make init-env      # create .env from .env.example if missing"
 	@echo "  make up            # docker compose up -d --build"
+	@echo "  make check         # test the AI service + search index are reachable"
 	@echo "  make logs          # follow chainlit logs"
 	@echo "  make down          # stop stack"
 	@echo "  make ps            # list compose services"
@@ -16,6 +17,9 @@ init-env:
 
 up: init-env
 	docker compose up -d --build
+
+check: init-env
+	docker compose run --rm --no-deps ingest python -m check_setup
 
 logs:
 	docker compose logs -f chainlit

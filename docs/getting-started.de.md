@@ -3,8 +3,31 @@
 Von null zu einem laufenden Assistenten, der Fragen zu deinen eigenen Dokumenten
 beantwortet. Kopiere die Blöcke der Reihe nach in ein Terminal.
 
-Du brauchst [Docker](https://docs.docker.com/get-docker/) und Zugang zu einem
-KI-Dienst (dessen Adresse und einen Zugangsschlüssel).
+## Was du brauchst
+
+- **[Docker](https://docs.docker.com/get-docker/)**. Unter Windows läuft es über
+  WSL2, das Docker Desktop selbst einrichtet.
+- **Git**, um das Projekt herunterzuladen. Oder den Knopf *Download ZIP* auf
+  GitHub.
+- **Zugang zu einem KI-Dienst**: eine Adresse und einen Zugangsschlüssel.
+- **Eine stabile Internetverbindung.** Das Einlesen von Dokumenten macht hunderte
+  Aufrufe an diesen Dienst, eine Verbindung mit gelegentlichen Abbrüchen scheitert
+  also häufig. Ein VPN oder ein stark genutztes Netz ist die übliche Ursache.
+
+Python, uv, pip, Qdrant oder PostgreSQL brauchst du nicht auf dem Rechner. Das
+steckt alles im Container.
+
+!!! note "Kein Modell ist dabei"
+    Mitgeliefert werden die Chat-Anwendung, die Datenbank und der Suchindex, aber
+    kein KI-Modell. Die App spricht immer mit einem Dienst woanders, dafür sind
+    Adresse und Schlüssel in Schritt 1 da.
+
+    Ein Modellserver auf dem eigenen Rechner geht auch, aber im Container bedeutet
+    `localhost` den Container selbst, nicht deinen Rechner. Nimm deshalb
+    `http://host.docker.internal:11434/v1` statt `http://localhost:11434/v1`
+    (11434 ist der übliche Port für einen lokalen Modellserver). Außerdem musst du
+    die Modellnamen deines Servers in die Einstellungsdatei schreiben, denn die
+    voreingestellten Namen kommen von einem gehosteten Dienst.
 
 ## 1. Zum Laufen bringen
 
@@ -70,9 +93,10 @@ docker compose run --rm ingest python -m kb.ingest --recreate
 Damit wird jedes Dokument gelesen und durchsuchbar gespeichert. Je nach Menge
 dauert das von einer Minute bis deutlich länger.
 
-Denselben Befehl brauchst du immer dann, wenn du Dokumente hinzufügst, entfernst
-oder änderst. Ohne ihn antwortet der Assistent weiter aus dem alten Bestand, ohne
-dass dich etwas warnt.
+Diesen Befehl brauchst du nur für das *erste* Einlesen oder nach Einstellungen, die
+alle Dokumente betreffen. Ein Dokument später hinzuzufügen, zu ändern oder zu löschen
+braucht nichts weiter: Die App beobachtet den Ordner und übernimmt Änderungen
+innerhalb von Sekunden. Siehe [Dokumente ändern](managing-documents.de.md).
 
 !!! warning "Bilder beschreiben kostet Geld"
     Mit `images.mode: describe` (Standard im Beispiel) wird jedes Bild einmal an

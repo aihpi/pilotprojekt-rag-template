@@ -18,6 +18,7 @@ from config import RagConfig, get_config
 from kb.chunkers import get_chunker
 from kb.chunkers.base import Chunk
 from kb.parsers import get_parser
+from kb.parsers.base import FileGate, file_gate
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,15 @@ ProgressCallback = Callable[[int, int], Awaitable[None]]
 # no "text" payload, so retrieval (which drops text-less payloads) never
 # surfaces it as a result.
 _SENTINEL_KEY = "__ingest_meta__"
+
+# Second metadata point: which files this collection was built from, as
+# {path relative to the config dir: sha256}. Keyed by path rather than by the
+# payload's ``source_file`` on purpose — that key is parser-defined and
+# inconsistent (the PDF parser stores "<stem>.pdf", so a docling-JSON source
+# indexes X.pdf for a file named X.json, and the CSV/JSON parsers store whatever
+# the user's field_mapping produces). Hashing paths sidesteps all of it and, as a
+# bonus, an edited document is re-ingested instead of going stale.
+_MANIFEST_KEY = "__ingest_manifest__"
 
 
 def _point_id(doc_id: str) -> str:
@@ -40,10 +50,24 @@ def plan_ingest(
     config: RagConfig | None = None,
     *,
     only: set[str] | None = None,
+    gate: FileGate | None = None,
 ) -> tuple[list[dict[str, Any]], list[Chunk]]:
     """Parse and chunk every (selected) data source. Returns (per-source
-    summary, all chunks). No I/O beyond reading source files."""
+    summary, all chunks). No I/O beyond reading source files.
+
+    With ``gate``, files whose contents are already indexed are not parsed, and
+    the gate collects what it saw. A gate in ``skip_all`` mode enumerates the
+    files without parsing any of them.
+    """
     config = config or get_config()
+    with file_gate(gate):
+        return _plan_ingest(config, only)
+
+
+def _plan_ingest(
+    config: RagConfig,
+    only: set[str] | None,
+) -> tuple[list[dict[str, Any]], list[Chunk]]:
     per_source: list[dict[str, Any]] = []
     all_chunks: list[Chunk] = []
     for src in config.data_sources:
@@ -126,6 +150,65 @@ def _read_sentinel(client, name: str) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001
         return None
     return dict(records[0].payload) if records else None
+
+
+def read_manifest(client, name: str) -> dict[str, str] | None:
+    """Files this collection was built from, or None if it predates the manifest."""
+    try:
+        records = client.retrieve(
+            collection_name=name, ids=[_point_id(_MANIFEST_KEY)], with_payload=True
+        )
+    except Exception:  # noqa: BLE001 — collection may not exist yet
+        return None
+    if not records:
+        return None
+    files = dict(records[0].payload or {}).get("files")
+    return dict(files) if isinstance(files, dict) else None
+
+
+def write_manifest(client, name: str, files: dict[str, str], vector: list[float]) -> None:
+    from qdrant_client.models import PointStruct
+
+    client.upsert(
+        collection_name=name,
+        points=[
+            PointStruct(
+                id=_point_id(_MANIFEST_KEY),
+                vector=vector,
+                payload={"_meta": True, "files": dict(files)},
+            )
+        ],
+    )
+
+
+def indexed_source_files(client, name: str) -> set[str]:
+    """Distinct ``source_file`` payload values in a collection.
+
+    One scroll fetching a single payload field, not one filtered count per file:
+    ``retrieval.payload_indexes`` is empty by default, so every filtered count
+    would scan the whole collection.
+    """
+    found: set[str] = set()
+    offset = None
+    while True:
+        try:
+            points, offset = client.scroll(
+                collection_name=name,
+                limit=1000,
+                offset=offset,
+                with_payload=["source_file"],
+                with_vectors=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ingest] could not list indexed documents: {exc}")
+            return found
+        for point in points:
+            value = (point.payload or {}).get("source_file")
+            if isinstance(value, str):
+                found.add(value)
+        if offset is None:
+            break
+    return found
 
 
 def _write_sentinel(client, name: str, embed_model: str, size: int, vector: list[float]) -> None:
@@ -228,6 +311,173 @@ async def ingest_chunks(
     return len(chunks)
 
 
+def _adopt(client, collection: str, config: RagConfig, only: set[str] | None) -> dict[str, str]:
+    """Record what an existing pre-manifest collection was built from.
+
+    Enumerates and hashes every source file without parsing any of it, so the
+    first run under the new code costs nothing and every later run is
+    incremental. The alternative, treating a manifest-less collection as empty,
+    would silently re-embed (and re-describe every figure in) corpora that are
+    already indexed.
+
+    The assumption is that the collection matches the folder. Rather than trust
+    it, cross-check against the payload: a file with no chunks under either
+    naming convention is reported, because that is a document the user believes
+    is searchable and is not.
+    """
+    gate = FileGate(skip_all=True, root=config.resolve_path("."))
+    plan_ingest(config, only=only, gate=gate)
+
+    indexed = indexed_source_files(client, collection)
+    unmatched = [
+        key
+        for key in sorted(gate.seen)
+        # Two candidate keys cover both conventions without a per-format switch:
+        # text.py stores path.name, pdf.py stores "<stem>.pdf".
+        if not {(name := key.rsplit("/", 1)[-1]), f"{name.rsplit('.', 1)[0]}.pdf"} & indexed
+    ]
+
+    print(
+        f"[ingest] adopting existing collection '{collection}': "
+        f"{len(gate.seen)} file(s) recorded, nothing re-ingested."
+    )
+    if unmatched:
+        print(
+            f"[ingest] WARNING: {len(unmatched)} file(s) have no chunks in "
+            f"'{collection}' and were adopted anyway, so they stay unsearchable. "
+            f"Re-ingest with --recreate to index them:"
+        )
+        for key in unmatched:
+            print(f"[ingest]   - {key}")
+    return dict(gate.seen)
+
+
+def _payload_names_for(gate_key: str) -> list[str]:
+    """Payload ``source_file`` values a manifest key could have produced.
+
+    Two candidates, the same pair the adoption cross-check uses: parsers store
+    either the plain file name (``text.py``) or ``"<stem>.pdf"`` (``pdf.py``, which
+    is why a docling-JSON source indexes ``X.pdf`` for a file named ``X.json``).
+    """
+    name = gate_key.rsplit("/", 1)[-1]
+    return [name, f"{name.rsplit('.', 1)[0]}.pdf"]
+
+
+def _prune_removed(
+    client,
+    collection: str,
+    removed: list[str],
+    keep_names: set[str],
+) -> tuple[int, list[str]]:
+    """Delete the entries of files that are gone from disk.
+
+    Returns (points deleted, keys whose entries could not be safely identified).
+    A key is left alone when it matches nothing (a ``json``/``csv`` source whose
+    ``field_mapping`` writes no ``source_file``) and when its identity is
+    ambiguous: entries are found by file *name*, so a deleted ``a/intro.pdf``
+    cannot be told apart from a surviving ``b/intro.pdf`` and pruning it would
+    take the survivor's entries with it. ``keep_names`` holds the names still on
+    disk, and anything colliding with them is reported instead of deleted.
+    """
+    from qdrant_client.models import (
+        FieldCondition,
+        Filter,
+        FilterSelector,
+        MatchAny,
+    )
+
+    deleted = 0
+    unmatched: list[str] = []
+    for key in removed:
+        names = _payload_names_for(key)
+        if keep_names.intersection(names):
+            print(
+                f"[ingest] not removing entries for {key}: another file still on disk "
+                f"has the same name, and entries are matched by name only."
+            )
+            unmatched.append(key)
+            continue
+        condition = Filter(
+            must=[FieldCondition(key="source_file", match=MatchAny(any=names))]
+        )
+        try:
+            found = client.count(
+                collection_name=collection, count_filter=condition, exact=True
+            ).count
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ingest] could not look up entries for {key}: {exc}")
+            unmatched.append(key)
+            continue
+        if not found:
+            unmatched.append(key)
+            continue
+        client.delete(collection_name=collection, points_selector=FilterSelector(filter=condition))
+        deleted += found
+        print(f"[ingest] removed {found} entr(ies) for deleted document {key}")
+    return deleted, unmatched
+
+
+def _warn_about_duplicate_names(gate: FileGate) -> None:
+    """Report files that share a name, because only one of them survives indexing.
+
+    Parsers derive ``doc_id`` from the file name, and the pipeline derives each
+    Qdrant point id from ``doc_id``, so two files called ``intro.pdf`` in different
+    directories produce identical ids and the second silently overwrites the first.
+    That predates the incremental ingest and is not fixed here (changing the id
+    derivation would invalidate every existing point id and force a full re-ingest),
+    but it is no longer silent.
+    """
+    by_name: dict[str, list[str]] = {}
+    for key in sorted(gate.seen):
+        by_name.setdefault(key.rsplit("/", 1)[-1], []).append(key)
+    clashes = {name: keys for name, keys in by_name.items() if len(keys) > 1}
+    if not clashes:
+        return
+    print(
+        f"[ingest] WARNING: {len(clashes)} file name(s) occur more than once. Documents "
+        "are identified by name, so only one of each set ends up in the collection and "
+        "the others are lost. Rename them to be unique:"
+    )
+    for name, keys in clashes.items():
+        print(f"[ingest]   {name}: {', '.join(keys)}")
+
+
+def _removed_keys(
+    manifest: dict[str, str],
+    gate: FileGate,
+    *,
+    only: set[str] | None,
+) -> list[str]:
+    """Manifest entries whose file is no longer on disk, or [] if unsafe to say.
+
+    Two cases must never be mistaken for deletions:
+
+    - ``--only`` deliberately looks at a subset of the sources, so every file
+      belonging to the other sources is simply not enumerated.
+    - Nothing at all was found while the manifest is not empty. A documents folder
+      that is suddenly empty is far more likely a bind mount that did not come up,
+      or a wrong ``path``, than someone deleting the whole corpus, and acting on it
+      would clear the collection.
+
+    Replacing the whole corpus is *not* one of those cases and does prune: swapping
+    every old document for new ones leaves files on disk, so the old entries are
+    correctly recognised as gone.
+    """
+    if only:
+        return []
+    removed = [key for key in sorted(manifest) if key not in gate.seen]
+    if removed and not gate.seen:
+        print(
+            f"[ingest] WARNING: not one of the {len(manifest)} known file(s) was found, "
+            "and the folder holds nothing else. Refusing to treat that as a deletion, "
+            "because this is usually a mount that did not come up or a wrong 'path'. "
+            "Nothing was removed. If you really do want to empty the collection, use "
+            "--recreate."
+        )
+        return []
+    return removed
+
+
 async def ingest_all(
     config: RagConfig | None = None,
     *,
@@ -235,18 +485,118 @@ async def ingest_all(
     only: set[str] | None = None,
     progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
+    """Ingest every configured source, skipping files that are already indexed.
+
+    Without ``recreate`` this is incremental: a file is parsed only if it is new
+    or its contents changed, and a file deleted from disk has its entries removed.
+    Adding, editing or deleting a document and restarting is therefore enough,
+    which is what the ``ingest`` compose service relies on.
+    """
     config = config or get_config()
-    per_source, all_chunks = plan_ingest(config, only=only)
-    count = await ingest_chunks(
-        all_chunks,
-        collection=config.vector_store.collection,
-        distance=config.vector_store.distance,
-        payload_indexes=config.retrieval.payload_indexes,
-        recreate=recreate,
-        embed_model=config.models.embed_model,
-        progress=progress,
-    )
-    return {"ingested": count, "collection": config.vector_store.collection, "sources": per_source}
+    collection = config.vector_store.collection
+    client = get_client()
+    exists = collection_exists(client, collection)
+
+    manifest: dict[str, str] = {}
+    if not recreate and exists:
+        stored = read_manifest(client, collection)
+        if stored is None:
+            adopted = _adopt(client, collection, config, only)
+            if adopted:
+                _store_manifest(client, collection, adopted)
+            return {
+                "ingested": 0,
+                "collection": collection,
+                "sources": [],
+                "adopted": len(adopted),
+            }
+        manifest = stored
+
+    gate = FileGate(known=manifest, root=config.resolve_path("."))
+    per_source, all_chunks = plan_ingest(config, only=only, gate=gate)
+    _warn_about_duplicate_names(gate)
+
+    # Deletions are handled whether or not there is anything new to ingest, and in
+    # the same run, so replacing a whole corpus in one go both removes the old
+    # entries and indexes the new documents.
+    removed = [] if recreate else _removed_keys(manifest, gate, only=only)
+    pruned = 0
+    if removed and exists:
+        keep_names = {name for key in gate.seen for name in _payload_names_for(key)}
+        pruned, unmatched = _prune_removed(client, collection, removed, keep_names)
+        if unmatched:
+            print(
+                f"[ingest] WARNING: {len(unmatched)} deleted document(s) left entries "
+                "that could not be removed safely, so they stay searchable. Either the "
+                "source writes its own metadata (a json/csv field_mapping without "
+                "source_file), or another file on disk has the same name. Use "
+                "--recreate to clear them:"
+            )
+            for key in unmatched:
+                print(f"[ingest]   - {key}")
+
+    count = 0
+    if all_chunks:
+        parsed = len(gate.seen) - len(gate.skipped)
+        print(f"[ingest] {parsed} file(s) to ingest, {len(gate.skipped)} unchanged and skipped.")
+        count = await ingest_chunks(
+            all_chunks,
+            collection=collection,
+            distance=config.vector_store.distance,
+            payload_indexes=config.retrieval.payload_indexes,
+            recreate=recreate,
+            embed_model=config.models.embed_model,
+            progress=progress,
+        )
+    elif gate.skipped and not removed:
+        print(
+            f"[ingest] nothing to do: all {len(gate.skipped)} file(s) are already "
+            f"indexed in '{collection}' and unchanged."
+        )
+
+    # Merge rather than replace: a run limited by --only must not drop the other
+    # sources' files from the manifest and make them look new next time. Pruned
+    # files are dropped, so a document that comes back later is ingested again.
+    if recreate:
+        merged = dict(gate.seen)
+    else:
+        merged = {**manifest, **gate.seen}
+        for key in removed:
+            merged.pop(key, None)
+
+    if merged or count or pruned:
+        _store_manifest(client, collection, merged)
+
+    return {
+        "ingested": count,
+        "collection": collection,
+        "sources": per_source,
+        "skipped": len(gate.skipped),
+        "removed": len(removed),
+        "pruned": pruned,
+    }
+
+
+def _manifest_vector(client, collection: str) -> list[float] | None:
+    """Reuse the sentinel's vector: the manifest point needs one of the right size."""
+    sentinel = None
+    try:
+        records = client.retrieve(
+            collection_name=collection, ids=[_point_id(_SENTINEL_KEY)], with_vectors=True
+        )
+        sentinel = records[0] if records else None
+    except Exception:  # noqa: BLE001
+        return None
+    vector = getattr(sentinel, "vector", None)
+    return list(vector) if isinstance(vector, list) else None
+
+
+def _store_manifest(client, collection: str, files: dict[str, str]) -> None:
+    vector = _manifest_vector(client, collection)
+    if vector is None:
+        print("[ingest] could not store the file manifest (no sentinel vector to reuse).")
+        return
+    write_manifest(client, collection, files, vector)
 
 
 def drop_collection(name: str) -> None:
