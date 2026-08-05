@@ -269,6 +269,9 @@ class SourcesConfig(BaseModel):
     served_extensions: list[str] = Field(
         default_factory=lambda: [".pdf", ".txt", ".md"]
     )
+    """File types the ``/sources/...`` links may serve. A citation pointing at
+    anything else returns 404, so add an extension here before expecting the app to
+    open that kind of file."""
     filename_map: list[FilenameRule] = Field(default_factory=list)
     """Declarative rules for mapping stored names to served files."""
 

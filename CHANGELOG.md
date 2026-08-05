@@ -66,6 +66,16 @@ can be pointed at a new corpus without touching Python.
 
 ### Fixed
 
+- **`sources.served_extensions` did nothing.** It shipped set in three configs, was
+  documented in the README and both adding-data pages with a `[.pdf, .txt, .md]`
+  default, and had a test asserting that default, but the route hardcoded `.pdf`. So
+  adding `.md` and expecting a Markdown source to open gave a silent 404, and the
+  README's troubleshooting entry sent people to check a setting that could not be the
+  cause. Both gates now read it, and the response carries the real media type via
+  `mimetypes.guess_type` instead of claiming everything is a PDF. The path checks that
+  matter are unchanged: no separators, membership in the directory listing, and
+  containment under `sources.data_dir` after resolving.
+
 - **A failed import now says what to do, and stops being buried in noise.** litellm
   prints a five-line "Give Feedback / Get Help" block for every failed call, so a
   reported failure log was roughly 90% that text with the useful lines lost inside it.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import mimetypes
 import os
 import re
 from datetime import datetime, timezone
@@ -106,6 +107,14 @@ CITATION_HISTORY_SIDEBAR_TITLE = get_config().citation.labels.get(
 )
 
 
+def _served_suffixes() -> set[str]:
+    """Extensions the /sources routes will serve, from ``sources.served_extensions``.
+
+    Normalised, because a config may write ``pdf``, ``.PDF`` or ``.pdf``.
+    """
+    return {f".{e.lstrip('.').lower()}" for e in get_config().sources.served_extensions}
+
+
 def _allowed_source_pdf_names() -> set[str]:
     if not DATA_RAW_DIR.is_dir():
         return set()
@@ -113,7 +122,7 @@ def _allowed_source_pdf_names() -> set[str]:
         return {
             entry.name
             for entry in DATA_RAW_DIR.iterdir()
-            if entry.is_file() and entry.suffix.lower() == ".pdf"
+            if entry.is_file() and entry.suffix.lower() in _served_suffixes()
         }
     except OSError:
         return set()
@@ -134,7 +143,7 @@ def _resolve_source_pdf_path(file_name: str, allowed_names: set[str] | None = No
     except ValueError:
         return None
 
-    if not file_path.is_file() or file_path.suffix.lower() != ".pdf":
+    if not file_path.is_file() or file_path.suffix.lower() not in _served_suffixes():
         return None
     return file_path
 
@@ -1007,7 +1016,7 @@ def _inject_named_source_refs(
 
     entries = []
     for _, alias, file_name, page_start, page_end, section_title, _ in source_rows:
-        file_stem = file_name.lower().removesuffix(".pdf")
+        file_stem = Path(file_name).stem.lower()
         entries.append(
             {
                 "alias": alias,
@@ -2130,7 +2139,7 @@ async def on_app_startup() -> None:
 
         return FileResponse(
             path=str(file_path),
-            media_type="application/pdf",
+            media_type=mimetypes.guess_type(file_path.name)[0] or "application/octet-stream",
             headers={"Content-Disposition": "inline"},
         )
 
