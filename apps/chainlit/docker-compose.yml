@@ -51,12 +51,18 @@ services:
       CHAINLIT_AUTH_USERNAME: ${CHAINLIT_AUTH_USERNAME:-admin}
       CHAINLIT_AUTH_PASSWORD: ${CHAINLIT_AUTH_PASSWORD:-admin}
       CHAINLIT_INIT_DB: ${CHAINLIT_INIT_DB:-true}
-      # The chat history is SQLite in WAL mode, which needs a shared-memory file and
-      # real POSIX locking. Docker Desktop only emulates those across the host
-      # filesystem boundary, so keeping this on the bind-mounted ./.chainlit could
-      # corrupt it ("database disk image is malformed"). The chat_db volume below is
-      # a real Linux filesystem. An existing history is copied over once on startup.
-      CHAT_DB_PATH: /app/.chatdb/chat_history.sqlite3
+      # Deliberately NOT ${CHAT_DB_PATH}: .env holds the value for running the app on
+      # the host, which is fine there but points at the bind-mounted ./.chainlit
+      # inside a container. This database is SQLite in WAL mode, which needs a
+      # shared-memory file and real POSIX locking, and Docker Desktop only emulates
+      # both across the host filesystem boundary, so a write interrupted at the wrong
+      # moment corrupts it ("database disk image is malformed"). The chat_db volume
+      # below is a real Linux filesystem. An existing history moves over once on
+      # startup.
+      #
+      # Set DOCKER_CHAT_DB_PATH to override, e.g. on Linux, where a bind mount is an
+      # ordinary filesystem and keeping the file on the host makes it easy to back up.
+      CHAT_DB_PATH: ${DOCKER_CHAT_DB_PATH:-/app/.chatdb/chat_history.sqlite3}
       # Watch the document folders and index changes automatically. Defaults to on,
       # so an .env from before this feature needs no editing; set it to false to
       # turn it off.
