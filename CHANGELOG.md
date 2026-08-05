@@ -69,6 +69,19 @@ can be pointed at a new corpus without touching Python.
 
 ### Fixed
 
+- **A failed import now says what to do, and stops being buried in noise.** litellm
+  prints a five-line "Give Feedback / Get Help" block for every failed call, so a
+  reported failure log was roughly 90% that text with the useful lines lost inside it.
+  That output is now suppressed. When a run does fail, it ends with the error, what it
+  means, numbered steps, and a pointer to `make check`, instead of a forty-line
+  traceback through httpx, openai and litellm whose last line is "Connection error."
+  The advice comes from the same place `make check` uses, so the two cannot disagree.
+
+- **Embeddings are retried, so one dropped connection no longer destroys a whole run.**
+  Figure descriptions already retried and their failures were caught; a failed embedding
+  aborted everything, throwing away work already paid for, including figures. Reported
+  from the field on an unstable network.
+
 - **A stable internet connection is now stated as a requirement.** Reading documents
   makes hundreds of calls to the AI service, so a connection that drops occasionally
   fails often, while a single chat message works and hides the cause. Both READMEs and

@@ -6,11 +6,23 @@ import litellm
 
 from settings import CHAT_MODEL, EMBED_MODEL, LITELLM_API_KEY, LITELLM_BASE_URL
 
+# litellm prints a five-line "Give Feedback / Get Help ... _turn_on_debug()" block for
+# every single failed call. During an ingest that means hundreds of them, which buries
+# the messages that actually say which document and which figure went wrong. A reported
+# failure log was roughly 90% this text.
+litellm.suppress_debug_info = True
+
 # Figure descriptions run once per figure during a batch ingest, where a transient
 # gateway error (typically a rate limit) used to be swallowed and the figure stored
 # with an empty description forever. Retrying is always the right answer here, so
 # this is a constant rather than a config knob. litellm handles the backoff.
 _DESCRIBE_RETRIES = 3
+
+# Embeddings need this even more than figure descriptions do. A failed description
+# costs one figure and is caught; a failed embedding used to abort the entire ingest,
+# so a single dropped connection threw away all the work, including figures already
+# paid for. Reported from the field on a flaky network.
+_EMBED_RETRIES = 3
 
 
 def _client_args(model: str | None = None) -> dict[str, Any]:
@@ -66,6 +78,7 @@ async def embed(texts: list[str]) -> list[list[float]]:
         model=EMBED_MODEL,
         input=texts,
         encoding_format="float",
+        num_retries=_EMBED_RETRIES,
         **_client_args(EMBED_MODEL),
     )
     data = sorted(response.data, key=lambda item: item["index"])
@@ -151,6 +164,7 @@ def embed_sync(texts: list[str]) -> list[list[float]]:
         model=EMBED_MODEL,
         input=texts,
         encoding_format="float",
+        num_retries=_EMBED_RETRIES,
         **_client_args(EMBED_MODEL),
     )
     data = sorted(response.data, key=lambda item: item["index"])

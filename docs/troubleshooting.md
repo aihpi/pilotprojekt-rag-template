@@ -123,6 +123,15 @@ Source references and follow-up questions are recognised by German wording, so t
 only work with `language: de` in your settings file. Your documents themselves can be
 in any language. This is a known limitation.
 
+## Reading documents stopped with an error
+
+The run now ends with an explanation rather than a wall of text: what the error was,
+what it means, and numbered steps. It also names `make check`, which tests your
+connection and settings on their own.
+
+One thing to know: documents indexed by earlier runs are safe, but whatever was being
+read when it stopped was not saved. Running it again reads those files once more.
+
 ## Nothing here matches
 
 The log is the fastest way to find out more:

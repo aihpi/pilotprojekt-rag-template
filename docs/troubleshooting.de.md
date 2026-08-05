@@ -129,6 +129,16 @@ Quellenangaben und Anschlussfragen werden über deutsche Formulierungen erkannt 
 funktionieren deshalb nur mit `language: de` in der Einstellungsdatei. Deine Dokumente
 selbst können in jeder Sprache sein. Das ist eine bekannte Einschränkung.
 
+## Das Einlesen bricht mit einem Fehler ab
+
+Der Lauf endet jetzt mit einer Erklärung statt mit einer Textwand: was der Fehler war,
+was er bedeutet, und nummerierte Schritte. Genannt wird auch `make check`, das
+Verbindung und Einstellungen für sich prüft.
+
+Eines solltest du wissen: Dokumente aus früheren Läufen bleiben erhalten, aber was beim
+Abbruch gerade gelesen wurde, ist nicht gespeichert. Beim nächsten Lauf werden diese
+Dateien noch einmal gelesen.
+
 ## Hier steht nichts, was passt
 
 Am schnellsten kommst du über das Protokoll weiter:
