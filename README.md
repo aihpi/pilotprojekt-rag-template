@@ -2,114 +2,120 @@
   <img src="00_aisc/img/logo_aisc_bmftr.jpg" alt="AISC / BMFTR">
 </p>
 
-# Modular RAG Template
+# Modulares RAG-Template
 
-**🇩🇪 [Deutsche Version](README.de.md)** · 📖 **[Documentation](https://aihpi.github.io/pilotprojekt-rag-template/)**
+**🇬🇧 [English version](README.en.md)** · 📖 **[Dokumentation](https://aihpi.github.io/pilotprojekt-rag-template/de/)**
 
-A chat assistant that answers questions about **your own documents**, and shows
-you the exact page each answer came from.
+Ein Chat-Assistent, der Fragen zu deinen eigenen Dokumenten beantwortet und dir
+zu jeder Antwort die genaue Seite zeigt, aus der sie stammt.
 
-You give it a folder of PDFs. It reads them, and from then on you can ask
-questions in normal language. Every answer links back to the source, so you can
-check it yourself.
+Du gibst ihm einen Ordner mit PDFs. Er liest sie ein, und danach kannst du in
+normaler Sprache Fragen stellen. Jede Antwort verlinkt auf die Quelle, sodass du
+selbst nachprüfen kannst.
 
-Setting it up means editing **one settings file**. You do not need to write any
-code.
+Zum Einrichten bearbeitest du eine einzige Einstellungsdatei. Programmieren musst
+du nicht.
 
-> **It works straight away.** Three research papers come with the project
-> ([sources & licence](apps/chainlit/data/documents/SOURCES.md)), so you can try
-> a working assistant before you change anything.
+> Drei wissenschaftliche Paper liegen dem Projekt bei
+> ([Quellen & Lizenz](apps/chainlit/data/documents/SOURCES.md)). Du kannst also
+> einen funktionierenden Assistenten ausprobieren, bevor du irgendetwas änderst.
 
 <details>
-<summary><b>Which tools this is built on</b></summary>
+<summary><b>Worauf das Ganze aufbaut</b></summary>
 
-[Chainlit](https://chainlit.io) for the chat window, [LiteLLM](https://litellm.ai)
-to talk to the AI models, [Qdrant](https://qdrant.tech) to store the searchable
-text, and [Docling](https://github.com/DS4SD/docling) to read PDFs.
+[Chainlit](https://chainlit.io) für das Chat-Fenster, [LiteLLM](https://litellm.ai)
+für die Verbindung zu den KI-Modellen, [Qdrant](https://qdrant.tech) als Speicher
+für den durchsuchbaren Text und [Docling](https://github.com/DS4SD/docling) zum
+Lesen der PDFs.
 </details>
 
 ---
 
-## What you need
+## Was du brauchst
 
-Only three things on your machine:
+Drei Dinge musst du installieren, dazu brauchst du eine Netzverbindung:
 
 | | |
 |---|---|
-| **[Docker](https://docs.docker.com/get-docker/)** | Runs everything. On Windows it uses WSL2, which Docker Desktop sets up for you. |
-| **Git** | To download the project. If you would rather not install it, use the green *Code* button on GitHub and pick *Download ZIP*. |
-| **A text editor** | To fill in one settings file. Any editor works. |
-| **A stable internet connection** | With access to an AI service. Reading documents makes hundreds of calls, so a connection that drops occasionally will fail often. A VPN or a busy shared network is the usual cause of trouble. |
+| **[Docker](https://docs.docker.com/get-docker/)** | Führt alles aus. Unter Windows läuft es über WSL2, das Docker Desktop selbst einrichtet. |
+| **Git** | Um das Projekt herunterzuladen. Wer das nicht installieren möchte, nimmt auf GitHub den grünen *Code*-Knopf und *Download ZIP*. |
+| **Einen Texteditor** | Um eine Einstellungsdatei auszufüllen. Jeder Editor genügt. |
+| **Eine stabile Internetverbindung** | Mit Zugang zu einem KI-Dienst. Das Einlesen von Dokumenten macht hunderte Aufrufe, eine Verbindung mit gelegentlichen Abbrüchen scheitert also häufig. Ein VPN oder ein stark genutztes Netz ist die übliche Fehlerquelle. |
 
-**You do not need** Python, uv, pip, Node, Qdrant or PostgreSQL. Those are all
-inside the container.
+Nicht nötig sind Python, uv, pip, Node, Qdrant oder PostgreSQL. Das steckt alles
+im Container.
 
-**One thing is not included: the AI model.** The project ships the chat app, the
-database and the search index, but no model. You point it at an existing service
-by putting an address and a key into the `.env` file. That can be a service your
-organisation provides, or a model server running on your own machine.
+**Eines ist nicht dabei: das KI-Modell.** Mitgeliefert werden die Chat-Anwendung,
+die Datenbank und der Suchindex, aber kein Modell. Du verweist auf einen
+bestehenden Dienst, indem du Adresse und Schlüssel in die Datei `.env` einträgst.
+Das kann ein Dienst deiner Einrichtung sein oder ein Modellserver auf deinem
+eigenen Rechner.
 
-To check that the service is reachable before you read any documents in:
+Um zu prüfen, ob der Dienst erreichbar ist, bevor du Dokumente einliest:
 
 ```bash
 cd apps/chainlit && make check
 ```
 
-It tries each model a few times and tells you whether a problem is your settings,
-your connection, or the service.
+Der Befehl probiert jedes Modell mehrmals und sagt dir, ob ein Problem an deinen
+Einstellungen, an deiner Verbindung oder am Dienst liegt. Zu jedem Ergebnis
+stehen die Schritte dabei, die du der Reihe nach prüfen kannst.
 
-## Quickstart
+## Schnellstart
 
-Copy these lines into a terminal, one block at a time:
+Kopiere diese Zeilen blockweise in ein Terminal:
 
 ```bash
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
 cd pilotprojekt-rag-template/apps/chainlit
 
-cp .env.example .env            # put your gateway URL + API key in .env
-docker compose up -d --build    # starts everything
+cp .env.example .env            # Gateway-URL + API-Key in .env eintragen
+docker compose up -d --build    # startet alles
 ```
 
-The second command copies a template for your settings. Open the new `.env` file
-and fill in the address and key for your AI service. The last command starts the
-assistant, which takes a few minutes the first time.
+Der zweite Befehl legt eine Vorlage für deine Einstellungen an. Öffne die neue
+Datei `.env` und trage dort Adresse und Zugangsschlüssel deines KI-Dienstes ein.
+Der letzte Befehl startet den Assistenten. Beim ersten Mal dauert das ein paar
+Minuten.
 
-Then open <http://localhost:8000> and log in with `admin` / `admin`. Change that
-password before anyone else can reach the app.
+Danach <http://localhost:8000> öffnen und mit `admin` / `admin` anmelden. Ändere
+dieses Passwort, bevor andere auf die App zugreifen können.
 
-The assistant starts out with the three example papers already loaded, and all
-features switched on. Its settings are in
+Die drei Beispiel-Paper sind von Anfang an geladen, alle Funktionen sind aktiv.
+Die zugehörigen Einstellungen stehen in
 [`examples/papers/rag.config.yaml`](apps/chainlit/examples/papers/rag.config.yaml),
-which is a good file to look at first.
+in diese Datei lohnt sich der erste Blick.
 
 <details>
-<summary><b>Without Docker</b></summary>
+<summary><b>Ohne Docker</b></summary>
 
 ```bash
 cd apps/chainlit
-uv sync                                   # use uv, not pip (see Updating below)
-docker run -p 6333:6333 qdrant/qdrant     # storage for the searchable text
+uv sync                                   # uv nutzen, nicht pip (siehe „Aktualisieren“)
+docker run -p 6333:6333 qdrant/qdrant     # Speicher für den durchsuchbaren Text
 
 export RAG_CONFIG=examples/papers/rag.config.yaml
-uv run python -m kb.ingest                # read the documents in
+uv run python -m kb.ingest                # Dokumente einlesen
 uv run chainlit run app.py                # http://localhost:8000
 ```
 </details>
 
-> **Which AI models to use.** The example uses freely available models
-> (`gpt-oss-120b`, `octen-embedding-8b`, and `gemma-4-31b` for reading images).
-> Nothing here ties you to a paid provider.
+> Welche KI-Modelle du nutzt: das Beispiel verwendet frei verfügbare Modelle
+> (`gpt-oss-120b`, `octen-embedding-8b` und `gemma-4-31b` zum Lesen von Bildern).
+> Nichts davon bindet dich an einen kostenpflichtigen Anbieter.
 >
-> Model names differ from service to service, so the names above may not work
-> with yours. Ask your service which models it offers, then write those names
-> into the settings file. The file lists more open alternatives in a comment
-> (Qwen3, Llama 3.x, Mistral, BGE-M3, multilingual-E5).
+> Die Modellnamen unterscheiden sich je nach Dienst, die obigen funktionieren bei
+> dir also womöglich nicht. Frag deinen Dienst, welche Modelle er anbietet, und
+> trage diese Namen in die Einstellungsdatei ein. In der Datei stehen als
+> Kommentar weitere offene Alternativen (Qwen3, Llama 3.x, Mistral, BGE-M3,
+> multilingual-E5).
 
-## Updating to a newer version
+## Auf eine neuere Version aktualisieren
 
-Already have it running and want the latest changes? Three lines.
+Läuft die App schon und du möchtest die neuesten Änderungen, sind es drei
+Befehle.
 
-**With Docker (the usual way):**
+Mit Docker, der übliche Weg:
 
 ```bash
 git pull
@@ -117,11 +123,11 @@ cd apps/chainlit
 docker compose up -d --build
 ```
 
-The `--build` at the end matters. Without it, Docker starts your **old** app again and
-you will not see any of the changes, and no error warns you. Rebuilding takes about
-half a minute. (`make up` does the same thing.)
+Das `--build` am Ende ist wichtig. Ohne `--build` startet Docker wieder deine alte
+App und du siehst keine der Änderungen, ohne dass eine Fehlermeldung dich warnt. Der
+Neubau dauert etwa eine halbe Minute. (`make up` macht dasselbe.)
 
-**Without Docker:**
+Ohne Docker:
 
 ```bash
 git pull
@@ -129,162 +135,168 @@ cd apps/chainlit
 uv sync
 ```
 
-Use `uv sync`, not `pip install -e .`. Pip picks different versions of some packages,
-and the app can fail to start.
+Bitte `uv sync` benutzen und nicht `pip install -e .`. Pip installiert bei einigen
+Paketen andere Versionen, und die App startet dann möglicherweise nicht.
 
-Then open <http://localhost:8000> and ask a question. Click one of the sources under the
-answer and the PDF should open on the right. That is the quickest way to see it worked.
+Danach <http://localhost:8000> öffnen und eine Frage stellen. Klick auf eine der Quellen
+unter der Antwort, dann sollte sich das PDF rechts öffnen. So siehst du am schnellsten, dass
+alles funktioniert hat.
 
-### Good to know
+### Gut zu wissen
 
-- **Nothing you added gets deleted.** Your documents, indexed data and chat history all
-  survive an update, so you normally do not need to ingest again. Files you add, change
-  or delete in the documents folder are picked up by themselves, within seconds.
-- **One exception.** If an earlier ingest reported failed figure descriptions, read your
-  documents in once more so those figures get described. Only worth doing if you saw
-  those errors: [Figures & images](docs/images.md).
-- **The very first document import is slow.** The app downloads the models it uses to read
-  PDFs (roughly 500 MB). They are kept afterwards, so this happens once, not once per
-  update.
-- **Old versions take up disk space.** Free it up with `docker image prune`.
-- **Something acting up?** Stop everything and start fresh:
-  `docker compose down && docker compose up -d --build`
+- Deine Dokumente, die indexierten Daten und der Chat-Verlauf bleiben beim
+  Aktualisieren erhalten. Neu einlesen musst du normalerweise nicht. Dateien, die du
+  im Dokumentenordner ergänzt, änderst oder löschst, übernimmt die App innerhalb von
+  Sekunden von selbst.
+- Eine Ausnahme: hat ein früherer Ingest fehlgeschlagene Abbildungs-Beschreibungen
+  gemeldet, lies deine Dokumente einmal neu ein, damit diese Abbildungen beschrieben
+  werden. Nur dann lohnt es sich, siehe [Abbildungen](docs/images.de.md).
+- Das allererste Einlesen dauert länger, weil die App die Modelle zum Lesen von PDFs
+  herunterlädt (etwa 500 MB). Sie bleiben danach gespeichert, das passiert also einmal
+  und nicht bei jedem Update.
+- Alte Versionen belegen Speicherplatz, freigeben lässt er sich mit
+  `docker image prune`.
+- Zickt etwas, hilft meistens alles stoppen und neu starten:
+  `docker compose down && docker compose up -d --build`. Bleibt der Fehler, steht er
+  vermutlich in der [Fehlerbehebung](docs/troubleshooting.de.md).
 
-## Use your own documents
+## Eigene Dokumente verwenden
 
-First make your own copy of the settings file, so the examples stay intact:
+Lege zuerst eine eigene Kopie der Einstellungsdatei an, damit die Beispiele
+unangetastet bleiben:
 
 ```bash
 cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
 ```
 
-1. Put your PDFs into `apps/chainlit/data/documents/`. They stay on your machine.
-   Only the example papers belong to the project, and you can delete them.
-2. Open `my-rag.yaml` and give `vector_store.collection` a new name. This keeps
-   your documents separate from the examples.
-3. Let the app read your documents:
+1. Lege deine PDFs in `apps/chainlit/data/documents/`. Sie bleiben auf deinem
+   Rechner. Nur die Beispiel-Paper gehören zum Projekt und dürfen weg.
+2. Öffne `my-rag.yaml` und gib `vector_store.collection` einen neuen Namen. So
+   bleiben deine Dokumente von den Beispielen getrennt.
+3. Lass die App deine Dokumente einlesen:
    `RAG_CONFIG=my-rag.yaml docker compose up -d`
 
-It also handles Markdown, JSON and CSV files. See
-[Adding your data](docs/adding-data.md).
+Markdown-, JSON- und CSV-Dateien gehen ebenfalls. Siehe
+[Daten hinzufügen](docs/adding-data.de.md).
 
-**Changing your documents later needs no commands at all.** The app watches the
-folder: add a file and it is read within seconds, correct a file and it is read
-again, delete a file and it stops appearing in answers. Everything else is left
-untouched, so you do not pay for it twice, and nothing has to be restarted. Switch it
-off with `DOCUMENT_WATCH=false` if you would rather trigger it yourself.
-→ [Changing your documents](docs/managing-documents.md)
+Später Dokumente ändern braucht gar keine Befehle, denn die App beobachtet den
+Ordner. Legst du eine Datei dazu, ist sie in Sekunden eingelesen. Korrigierst du
+eine, wird sie erneut gelesen, und löschst du eine, taucht sie nicht mehr in
+Antworten auf. Alles andere bleibt unberührt, du zahlst also nicht zweimal für
+dieselbe Datei, und neu starten musst du nichts. Wer das lieber selbst anstößt,
+schaltet es mit `DOCUMENT_WATCH=false` ab.
+→ [Dokumente ändern](docs/managing-documents.de.md)
 
-## What you configure
+## Was du konfigurierst
 
-Everything lives in one settings file. These are its sections:
+Alles steht in einer Einstellungsdatei. Das sind ihre Abschnitte:
 
-| Section | What it controls |
+| Abschnitt | Wofür |
 |---|---|
-| `models` | which AI models to use, and which ones users can pick in the app |
-| `vector_store` | where the searchable text is stored |
-| `data_sources[]` | where your documents are and what type they are |
-| `chunking` | how documents get cut into pieces before they are searched |
-| `retrieval` | how many pieces to look up for each question |
-| `tools` | what the assistant is allowed to do besides searching → [more](docs/tools.md) |
-| `images` | what happens with pictures and charts in your PDFs → [more](docs/images.md) |
-| `citation` | how a source reference looks under an answer |
-| `prompt` | the instructions the assistant follows, and the example questions → [more](docs/prompts.md) |
-| `app` | appearance and behaviour of the chat window |
+| `models` | welche KI-Modelle genutzt werden und welche Nutzer auswählen dürfen |
+| `vector_store` | wo der durchsuchbare Text gespeichert wird |
+| `data_sources[]` | wo deine Dokumente liegen und welcher Art sie sind |
+| `chunking` | wie Dokumente vor der Suche in Stücke geteilt werden |
+| `retrieval` | wie viele Textstücke pro Frage nachgeschlagen werden |
+| `tools` | was der Assistent außer Suchen darf → [mehr](docs/tools.de.md) |
+| `images` | was mit Bildern und Diagrammen in den PDFs passiert → [mehr](docs/images.de.md) |
+| `citation` | wie eine Quellenangabe unter einer Antwort aussieht |
+| `prompt` | die Anweisungen für den Assistenten und die Beispielfragen → [mehr](docs/prompts.de.md) |
+| `app` | Aussehen und Verhalten des Chat-Fensters |
 
-Every single option is listed in [Configuration](docs/configuration.md).
+Jede einzelne Option steht in der [Konfiguration](docs/configuration.de.md).
 
-## Features
+## Funktionen
 
-- **The assistant decides how to look things up.** Besides plain search it can
-  list all documents, read a whole document (needed for summaries), fetch more
-  text around a hit, or double-check a claim. You choose which of these it may
-  use. → [docs](docs/tools.md)
-- **Pictures and charts are included, not skipped.** They are described in words,
-  so they can be found by a search, and a relevant figure is shown right above
-  the paragraph that discusses it. → [docs](docs/images.md)
-- **Tables are kept.** They stay part of the text instead of being thrown away.
-- **Every claim has a source.** Click it and the original PDF opens at the right
-  page.
-- **The assistant can write its own instructions.** If you do not write them
-  yourself, it creates them from your documents when it starts.
-  → [docs](docs/prompts.md)
-- **Users can switch models and edit instructions** in the settings panel, and
-  their choice is remembered.
-- **Chat history, thumbs up/down and exports**, with GitHub or local login.
+- Der Assistent entscheidet selbst, wie er nachschlägt. Neben der reinen Suche
+  kann er alle Dokumente auflisten, ein ganzes Dokument lesen (nötig für
+  Zusammenfassungen), mehr Text rund um einen Treffer holen oder eine Aussage
+  gegenprüfen. Du legst fest, was davon erlaubt ist. → [Doku](docs/tools.de.md)
+- Bilder und Diagramme fallen nicht unter den Tisch. Sie werden in Worten
+  beschrieben und damit auffindbar, und eine passende Abbildung erscheint direkt
+  über dem Absatz, der sie behandelt. → [Doku](docs/images.de.md)
+- Tabellen bleiben erhalten statt verworfen zu werden.
+- Jede Aussage hat eine Quelle. Ein Klick öffnet das Original-PDF auf der
+  richtigen Seite.
+- Gibst du dem Assistenten seine Anweisungen nicht vor, schreibt er sie beim
+  Start selbst aus deinen Dokumenten. → [Doku](docs/prompts.de.md)
+- Nutzer können Modelle wechseln und Anweisungen bearbeiten, die Auswahl wird
+  gespeichert.
+- Chat-Verlauf, Daumen hoch/runter und Export, mit GitHub- oder lokalem Login.
 
-## How it fits together
+## Wie alles zusammenspielt
 
-Your documents are read, cut into pieces and stored so they can be searched. When
-someone asks a question, the matching pieces are looked up and handed to the AI
-model, which writes an answer with sources.
+Deine Dokumente werden gelesen, in Stücke geteilt und durchsuchbar gespeichert.
+Kommt eine Frage, werden die passenden Stücke herausgesucht und dem KI-Modell
+gegeben, das daraus eine Antwort mit Quellen schreibt.
 
 ```
                         rag.config.yaml
                                │
-  documents ──► kb/parsers ──► kb/chunkers ──► embeddings ──► Qdrant
+  Dokumente ──► kb/parsers ──► kb/chunkers ──► Embeddings ──► Qdrant
   (pdf/md/json/csv/custom)                                      │
                                                                 ▼
-  Chainlit UI ◄── citations ◄── answer ◄── LLM + tools ◄── retrieval
+  Chainlit-UI ◄── Zitate ◄── Antwort ◄── LLM + Tools ◄── Retrieval
 ```
 
-Each step is one small folder you can extend with a single new file: document
-types in `kb/parsers/`, ways of cutting text in `kb/chunkers/`, and abilities in
-`tools/`. → [Extending](docs/extending.md)
+Jeder Schritt ist ein kleiner Ordner, den du mit einer einzigen neuen Datei
+erweiterst: Dateiformate in `kb/parsers/`, Arten des Textteilens in
+`kb/chunkers/` und Fähigkeiten in `tools/`.
+→ [Erweitern](docs/extending.de.md)
 
-## Documentation
+## Dokumentation
 
-| Page | |
+| Seite | |
 |---|---|
-| [Getting started](docs/getting-started.md) | install, ingest, run |
-| [Changing your documents](docs/managing-documents.md) | add, correct, remove, rebuild |
-| [Troubleshooting](docs/troubleshooting.md) | common errors and what to do |
-| [Example corpus](docs/example-corpus.md) | what ships and how to swap it |
-| [Adding your data](docs/adding-data.md) | formats, chunking, citations |
-| [Agentic tools](docs/tools.md) | the five tools, writing your own |
-| [Figures & images](docs/images.md) | `images.mode`, inline placement |
-| [System prompts](docs/prompts.md) | generation, editing, model picker |
-| [Configuration](docs/configuration.md) | full schema reference |
-| [Field-mapping DSL](docs/field-mapping.md) | JSON/CSV → chunks |
-| [Extending](docs/extending.md) | custom parsers, chunkers, tools |
+| [Erste Schritte](docs/getting-started.de.md) | Installation, Ingest, Start |
+| [Dokumente ändern](docs/managing-documents.de.md) | ergänzen, korrigieren, entfernen, neu aufbauen |
+| [Fehlerbehebung](docs/troubleshooting.de.md) | häufige Fehler und was zu tun ist |
+| [Beispielkorpus](docs/example-corpus.de.md) | was mitgeliefert wird und wie man es tauscht |
+| [Daten hinzufügen](docs/adding-data.de.md) | Formate, Chunking, Zitate |
+| [Agentische Tools](docs/tools.de.md) | die fünf Tools, eigene schreiben |
+| [Abbildungen](docs/images.de.md) | `images.mode`, Inline-Platzierung |
+| [System-Prompts](docs/prompts.de.md) | Generierung, Bearbeitung, Modell-Selektor |
+| [Konfiguration](docs/configuration.de.md) | vollständige Schema-Referenz |
+| [Field-Mapping-DSL](docs/field-mapping.de.md) | JSON/CSV → Chunks |
+| [Erweitern](docs/extending.de.md) | eigene Parser, Chunker, Tools |
 
-Published in English and German at
-**<https://aihpi.github.io/pilotprojekt-rag-template/>**, or locally via
+Veröffentlicht auf Deutsch und Englisch unter
+**<https://aihpi.github.io/pilotprojekt-rag-template/>**, lokal via
 `uv run --only-group docs mkdocs serve`.
 
-## Limitations
+## Einschränkungen
 
-- **This is a prototype.** It has not been security-checked, so look it over
-  before using it with sensitive data or real users.
-- **Sources and follow-up questions only work in German.** The app looks for
-  German wording (`Quelle N: … (S.x)`, `Anschlussfragen:`), so set `language: de`
-  for those two features. Your documents themselves can be in any language.
-- **Describing pictures costs money.** With `images.mode: describe`, every figure
-  is sent to an AI model once while your documents are being read in.
-- **Changing the model that indexes your text means reading everything in again**
-  (`--recreate`).
+- Das hier ist ein Prototyp und wurde nicht auf Sicherheit geprüft. Sieh ihn dir
+  an, bevor du ihn mit sensiblen Daten oder echten Nutzern einsetzt.
+- Quellen und Anschlussfragen funktionieren nur auf Deutsch. Die App sucht nach
+  deutschen Formulierungen (`Quelle N: … (S.x)`, `Anschlussfragen:`), dafür also
+  `language: de` setzen. Die Dokumente selbst dürfen jede Sprache haben.
+- Bilder beschreiben kostet Geld: mit `images.mode: describe` wird jede Abbildung
+  beim Einlesen einmal an ein KI-Modell geschickt.
+- Wechselst du das Modell, das deinen Text durchsuchbar macht, müssen alle
+  Dokumente neu eingelesen werden (`--recreate`).
 
-## Contributing
+## Mitwirken
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Earlier project stages (the IT-Grundschutz
-assistant, research notebooks and evaluation scripts) remain on the
-`backup/pre-template-cleanup` branch.
+Siehe [CONTRIBUTING.md](CONTRIBUTING.md). Frühere Projektstände (der
+IT-Grundschutz-Assistent, Forschungs-Notebooks und Evaluations-Skripte) liegen im
+Branch `backup/pre-template-cleanup`.
 
-## References
+## Referenzen
 
 - [AI Service Centre Berlin Brandenburg (KI-Servicezentrum)](https://hpi.de/ki-servicezentrum/)
 - [fghgsd.de](https://fghgsd.de)
 
-## Licence
+## Lizenz
 
-Code under the [MIT licence](LICENSE). The example papers are CC BY 4.0, see
-[SOURCES.md](apps/chainlit/data/documents/SOURCES.md).
+Der Code steht unter der [MIT-Lizenz](LICENSE). Die Beispiel-Paper sind CC BY 4.0,
+siehe [SOURCES.md](apps/chainlit/data/documents/SOURCES.md).
 
 ---
 
-## Acknowledgement
+## Danksagung
 <img src="00_aisc/img/logo_bmftr_de.png" alt="BMFTR" style="width:170px;"/>
 
-The [AI Service Centre Berlin Brandenburg](http://hpi.de/kisz) is funded by the
-[German Federal Ministry of Research, Technology and Space](https://www.bmbf.de/)
-under grant number 01IS22092.
+Das [AI Service Centre Berlin Brandenburg](http://hpi.de/kisz) wird vom
+[Bundesministerium für Forschung, Technologie und Raumfahrt](https://www.bmbf.de/)
+unter dem Förderkennzeichen 01IS22092 gefördert.

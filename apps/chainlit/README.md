@@ -13,9 +13,9 @@ Which setup is active is decided by `RAG_CONFIG`. A fresh clone uses
 features on). `config/default.yaml` is the plain baseline, and `my-rag.yaml` is
 the slot reserved for your own setup, which git ignores.
 
-**This file is the short operations guide**, for starting, stopping and
-troubleshooting. Everything else (setting things up, adding data, tools, figures,
-prompts, the full list of settings) is in the
+This file is the short operations guide: starting, stopping, and what to do when
+something breaks. Everything else (setting things up, adding data, tools,
+figures, prompts, the full list of settings) is in the
 [project docs](../../docs/index.md).
 
 ## Quickstart (Docker Compose)
@@ -36,6 +36,12 @@ one-off job that reads your documents in before the chat window comes up.
 
 Inside Docker these talk to each other by name, not through `localhost`, which is
 why Compose sets `QDRANT_URL=http://qdrant:6333` for you.
+
+To check that your AI service is reachable before you read any documents in:
+
+```bash
+make check                # tests settings, host and each model five times
+```
 
 Day-to-day:
 
@@ -58,8 +64,8 @@ uv run chainlit run app.py -w            # add --port 8001 if 8000 is taken
 
 ## Environment
 
-`.env` is only for **passwords, addresses and which setup to load**. Everything
-about a particular setup (models, collection, chunking, prompt, citations, tools,
+`.env` is only for passwords, addresses and which setup to load. Everything about
+a particular setup (models, collection, chunking, prompt, citations, tools,
 images) belongs in the settings file instead. `.env.example` lists everything
 with comments; the important ones are:
 
@@ -70,6 +76,8 @@ with comments; the important ones are:
   (chat history in the sidebar plus login; change the `admin/admin` default)
 - `INGEST_RECREATE`, `INGEST_BATCH_SIZE`, `INGEST_MAX_BATCH_CHARS`,
   `INGEST_DOCLING_JSON_DIR`: control the automatic reading-in step
+- `DOCUMENT_WATCH`, `DOCUMENT_WATCH_INTERVAL`: the folder watcher, on by default.
+  Set `DOCUMENT_WATCH=false` to read documents in only when you ask.
 
 Anything under "optional overrides" in `.env.example` (`CHAT_MODEL`, `TOP_K`, …)
 beats the settings file. Handy occasionally, but easy to forget you set it, so
@@ -85,11 +93,20 @@ uv run python -m kb.ingest --skip-if-exists   # no-op if the collection exists
 uv run python -m kb.ingest --config examples/minimal/rag.config.yaml
 ```
 
-> `--skip-if-exists` only checks whether the collection is there, not whether
-> anything changed. After editing your documents or your settings, use
-> `--recreate` (or a new `vector_store.collection`). Switching the model that
-> makes text searchable is refused outright, because old and new data cannot be
-> compared.
+A normal run is incremental. New files get read, edited files get read again,
+files you deleted lose their entries, and everything else is skipped without
+being touched, so you do not pay twice for the same document. The app also
+watches the folder and does this by itself within seconds. See
+[Changing your documents](../../docs/managing-documents.md).
+
+> Two things still need `--recreate`: switching the model that makes text
+> searchable (refused outright otherwise, because old and new data cannot be
+> compared) and changing how documents are cut into chunks. A run limited by
+> `--only` never deletes anything.
+>
+> `--skip-if-exists` is the exception to all of the above. It checks whether the
+> collection is there and nothing else, which is what makes it useful as a
+> startup guard.
 
 Reading PDFs is slow. You can do it once up front with Docling's own command
 (`docling --to json --output <dir> <pdf-dir>`) and then point
@@ -100,16 +117,16 @@ Reading PDFs is slow. You can do it once up front with Docling's own command
 
 There are two separate histories, which is confusing until you know:
 
-- **The sidebar history** is the real one, stored in Postgres via `DATABASE_URL`,
+- The sidebar history is the real one. It lives in Postgres via `DATABASE_URL`
   and needs login.
-- **A local file** used by the slash commands, at
-  `.chainlit/chat_history.sqlite3`, with exports written to `.files/chat_exports`
-  (both changeable via `CHAT_DB_PATH` / `CHAT_EXPORT_DIR`).
+- A local file at `.chainlit/chat_history.sqlite3` backs the slash commands, with
+  exports written to `.files/chat_exports`. Both paths move via `CHAT_DB_PATH`
+  and `CHAT_EXPORT_DIR`.
 
 In the chat window: `/history`, `/history <session_id>`, `/export`,
 `/export <session_id>`, `/export all`.
 
-For a bulk download there is an **Export all chats** button in the left sidebar.
+For a bulk download there is an "Export all chats" button in the left sidebar.
 Admins can also download all collected thumbs up/down ratings. See
 [Feedback export](../../docs/feedback-export.md).
 
@@ -121,16 +138,27 @@ RAG_CONFIG=config/default.yaml uv run pytest tests/ -q
 
 ## Troubleshooting
 
-- **`Connection refused` to Qdrant.** It is not running, or `QDRANT_URL` is
-  wrong. Inside Docker it must be `http://qdrant:6333`, not `localhost`.
-- **Embedding 400 / context window exceeded.** Too much text at once. Lower
+Longer version, in plain language, in
+[Troubleshooting](../../docs/troubleshooting.md). The short list:
+
+- `Connection error` on every model, or an ingest that dies partway: run
+  `make check`. It tells you whether the problem is your settings, your network
+  or the service itself, and prints the steps to take for each.
+- `Connection refused` to Qdrant: it is not running, or `QDRANT_URL` is wrong.
+  Inside Docker it has to be `http://qdrant:6333`, never `localhost`.
+- Embedding 400, or a context-window error: too much text in one request. Lower
   `INGEST_MAX_BATCH_CHARS` and/or `INGEST_BATCH_SIZE`.
-- **Large payload 400 from Qdrant.** Lower the batch size (256 → 128).
-- **Port 8000 already in use.** Something else has it. Run
+- Large payload 400 from Qdrant: lower the batch size (256 → 128).
+- Port 8000 already in use: something else has it. Run
   `chainlit run app.py -w --port 8001`.
-- **Citations point at the wrong text.** Your documents and the stored data are
-  out of step. Read everything in again with `--recreate`.
-- **`401 Unauthorized` / `404 Source not found` on `/sources/...`.** Log in
+- Citations point at the wrong text: your documents and the stored data are out
+  of step. Read everything in again with `--recreate`.
+- `401 Unauthorized` or `404 Source not found` under `/sources/...`: log in
   again. If that does not help, the file is not inside the folder named in
-  `sources.data_dir`, or its file type is not listed in
+  `sources.data_dir`, or its file type is missing from
   `sources.served_extensions`.
+- `database disk image is malformed` at chat start: the local chat file broke.
+  Under Docker it now lives on a named volume, where this does not happen, and
+  Compose pins the path itself, so your `.env` cannot move it back by accident.
+  Point `DOCKER_CHAT_DB_PATH` somewhere else only if you know the target handles
+  SQLite locking.
