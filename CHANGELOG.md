@@ -41,9 +41,6 @@ can be pointed at a new corpus without touching Python.
   baseline.
 - **Documentation site.** MkDocs Material site (English and German) with a
   configuration reference generated from the schema.
-
-### Added
-
 - **`make check`, a setup test.** Answers the question that costs the most time when
   something does not work: is it my settings, my connection, or the AI service? It
   reads your settings, resolves and connects to the service host, then tries the chat,
@@ -174,9 +171,10 @@ can be pointed at a new corpus without touching Python.
 
 ### Changed
 
-- **The document folders are watched, so changes need no command.** The app polls its
-  source folders and indexes whatever was added, edited or deleted, within seconds
-  and without a restart. Putting a file into the folder is the whole workflow.
+- **The document folders are watched, so changes need no command.** The app is told by
+  the operating system when a source folder changes, and indexes whatever was added,
+  edited or deleted, without a restart. Measured at 0.3 s from dropping a file in to
+  the run starting. Putting a file into the folder is the whole workflow.
 
   Two stages, so watching is genuinely free: a poll compares size and modification
   time and reads no file contents, and only a hint of change starts the real run that
@@ -184,9 +182,12 @@ can be pointed at a new corpus without touching Python.
   large file still being copied is never read half-written, and one pass at a time is
   enforced. The work runs in a thread, so parsing a PDF cannot stall open chats.
 
-  Polling rather than filesystem events: event delivery from a host bind mount into a
-  container is unreliable, and a watcher that silently stops noticing is worse than
-  one that looks every few seconds.
+  Changes arrive as filesystem events (via `watchfiles`, already present through
+  Chainlit), so a document is noticed in about 0.3 s rather than up to 20. A slow
+  timeout tick remains, and is required rather than defensive: the settle rule holds
+  back a file written a moment ago, and no further event follows it. The events are
+  otherwise ignored, because the authoritative comparison runs anyway, so a missed or
+  duplicated event costs one extra 2 ms sweep.
 
   On by default and **opt-out** via `DOCUMENT_WATCH=false`, so a `.env` copied before
   this existed gets the feature without being touched. `DOCUMENT_WATCH_INTERVAL` and

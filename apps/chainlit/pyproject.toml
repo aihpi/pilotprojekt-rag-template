@@ -21,6 +21,9 @@ dependencies = [
     "torchvision<1",
     # Stands in for rapidocr's opencv-python (see the override in [tool.uv] below).
     "opencv-python-headless>=4.5.1.48",
+    # Filesystem events for the document watcher. Already present via chainlit,
+    # declared here because document_watch.py imports it directly.
+    "watchfiles>=1.0",
 ]
 
 [dependency-groups]

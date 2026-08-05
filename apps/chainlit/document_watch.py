@@ -4,14 +4,16 @@ Dropping a file into the documents folder should be enough. Nothing else has to
 be run, which is only practical because ingestion became incremental: a pass that
 finds nothing new costs a handful of stat calls and one small read from Qdrant.
 
-Polling, not filesystem events. Event delivery from a host bind mount into a
-container is unreliable on Docker Desktop, and a watcher that silently stops
-noticing changes is worse than one that looks every few seconds.
+Filesystem events, via watchfiles. I first assumed events would not cross a Docker
+Desktop bind mount and built this on polling; testing an inotify watch inside the
+container against writes from the host disproved that. Detection went from up to 20
+seconds to about 0.3.
 
-Two stages, deliberately. The cheap stage compares size and modification time, so
-the common case (nothing changed) reads no file contents at all. Only when that
-hints at a change does the real, authoritative run start, which hashes contents
-and decides what actually needs work.
+Two stages, deliberately. The events only say "something happened" and are otherwise
+ignored; the authoritative comparison is a size and modification time sweep, which
+reads no file contents, and only a real difference starts a run that hashes and
+decides. So a missed, duplicated or coalesced event costs at most one extra 2 ms
+sweep, and there is no event bookkeeping to get wrong.
 """
 
 from __future__ import annotations
@@ -224,14 +226,51 @@ async def run_pass(previous: dict[str, str] | None) -> dict[str, str]:
     return _settled(await asyncio.to_thread(_snapshot), time.time_ns())
 
 
+def _watch_dirs() -> list[str]:
+    """The directories the configured sources read from."""
+    config = get_config()
+    dirs = []
+    for src in config.data_sources:
+        path = config.resolve_path(src.path)
+        path = path if path.is_dir() else path.parent
+        if path.is_dir():
+            dirs.append(str(path))
+    # ponytail: a source using pdf_options.docling_json_dir points somewhere else and
+    # is not watched; the timeout tick below still picks it up. Add it here if anyone
+    # actually uses that option with live updates.
+    return sorted(set(dirs))
+
+
 async def watch_documents() -> None:
-    """Poll the document folders forever, indexing whatever changed."""
+    """Index whatever changes in the document folders.
+
+    The events are deliberately ignored: any of them, or a timeout tick, just runs
+    ``run_pass``, which does the authoritative size+mtime comparison anyway. So a
+    missed, duplicated or coalesced event costs at most one extra 2 ms sweep, and
+    there is no event-handling logic to get wrong.
+
+    The timeout tick is not belt-and-braces, it is required. ``_settled`` holds back
+    files younger than DOCUMENT_WATCH_SETTLE, so a file written now fires its event
+    now, gets held back as too fresh, and no further event follows. The tick collects
+    it. It also covers anything the events miss.
+    """
+    from watchfiles import awatch
+
+    dirs = _watch_dirs()
+    if not dirs:
+        print("[watch] no document folders to watch")
+        return
+    print(f"[watch] watching {', '.join(dirs)}")
+
     previous: dict[str, str] | None = None
-    while True:
+    async for _ in awatch(
+        *dirs,
+        rust_timeout=DOCUMENT_WATCH_INTERVAL * 1000,
+        yield_on_timeout=True,
+    ):
         try:
             previous = await run_pass(previous)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — a watcher must not die on one error
             print(f"[watch] pass failed, will retry: {type(exc).__name__}: {exc}")
-        await asyncio.sleep(DOCUMENT_WATCH_INTERVAL)

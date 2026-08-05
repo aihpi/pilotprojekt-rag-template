@@ -90,7 +90,8 @@ CHAINLIT_INIT_DB = (os.getenv("CHAINLIT_INIT_DB", "true") or "true").lower() == 
 # opt-OUT, so an existing .env written before this feature existed still gets it
 # without being re-copied; only someone who wants it off adds the variable.
 DOCUMENT_WATCH = (os.getenv("DOCUMENT_WATCH", "true") or "true").lower() == "true"
-DOCUMENT_WATCH_INTERVAL = int(os.getenv("DOCUMENT_WATCH_INTERVAL", "15"))
-"""Seconds between checks. Each check is a stat per source file, so this is cheap."""
+DOCUMENT_WATCH_INTERVAL = int(os.getenv("DOCUMENT_WATCH_INTERVAL", "5"))
+"""Seconds between double-checks. Changes normally arrive as filesystem events;
+this only bounds how long anything the events miss can go unnoticed."""
 DOCUMENT_WATCH_SETTLE = int(os.getenv("DOCUMENT_WATCH_SETTLE", "5"))
 """Ignore files modified within this many seconds, so half-copied files wait."""

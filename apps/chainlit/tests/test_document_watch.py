@@ -1,13 +1,13 @@
 """The folder watcher: cheap detection, settle delay, and one pass at a time.
 
 The watcher exists so that putting a file into the documents folder is enough. It
-polls rather than using filesystem events, because event delivery from a host bind
-mount into a container is unreliable and a watcher that silently stops noticing is
-worse than one that looks every few seconds.
+reacts to filesystem events, with a slow timeout tick as the backstop, since the
+settle rule holds back a file that was written a moment ago and no further event
+follows it.
 
-Detection is deliberately two-stage. The cheap stage compares size and modification
-time and reads no file contents, which is what makes polling every few seconds
-sensible at all: hashing the whole corpus on a timer would be pure waste.
+Detection is deliberately two-stage. Events are only a trigger; what decides is a
+size and modification time sweep that reads no file contents, and only a real
+difference leads to hashing.
 """
 
 from __future__ import annotations
@@ -212,31 +212,37 @@ def test_the_baseline_is_re_read_after_indexing(passes):
 # --------------------------------------------------------------------------- #
 # The loop around it
 # --------------------------------------------------------------------------- #
-def test_a_failing_pass_does_not_kill_the_loop(monkeypatch):
-    """A watcher that dies on one error stops noticing changes, silently.
-
-    Ends the loop by raising CancelledError from the sleep, which watch_documents
-    re-raises, so the number of passes is exact rather than time dependent.
-    """
+def test_a_failing_pass_does_not_kill_the_loop(tmp_path, monkeypatch):
+    """A watcher that dies on one error stops noticing changes, silently."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
     attempts: list[int] = []
 
-    async def flaky(_previous):
+    async def flaky(previous):
         attempts.append(1)
         if len(attempts) == 1:
             raise RuntimeError("qdrant briefly unreachable")
         return {}
 
-    async def stop_after_three(_seconds):
-        if len(attempts) >= 3:
-            raise asyncio.CancelledError
-
     monkeypatch.setattr(document_watch, "run_pass", flaky)
-    monkeypatch.setattr(document_watch.asyncio, "sleep", stop_after_three)
+    monkeypatch.setattr(document_watch, "_watch_dirs", lambda: [str(docs)])
+    monkeypatch.setattr(document_watch, "DOCUMENT_WATCH_INTERVAL", 30)
 
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(document_watch.watch_documents())
+    async def main():
+        task = asyncio.create_task(document_watch.watch_documents())
+        await asyncio.sleep(0.5)
+        for i in range(3):
+            (docs / f"f{i}.pdf").write_bytes(b"%PDF")
+            await asyncio.sleep(0.4)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
-    assert len(attempts) == 3, "the loop must keep polling after an error"
+    asyncio.run(main())
+
+    assert len(attempts) >= 2, "the loop must keep reacting after an error"
 
 
 # --------------------------------------------------------------------------- #
@@ -371,3 +377,48 @@ def test_a_bulk_import_does_not_produce_an_endless_list(passes):
     assert len(listed) == document_watch._MAX_LISTED_FILES + 1
     assert listed[-1]["action"] == "more"
     assert "more" in listed[-1]["name"]
+
+
+# --------------------------------------------------------------------------- #
+# The loop reacts to filesystem events
+# --------------------------------------------------------------------------- #
+def test_creating_a_file_wakes_the_loop(tmp_path, monkeypatch):
+    """Polling took up to DOCUMENT_WATCH_INTERVAL to notice anything. With events the
+    pass must run well before the timeout tick could have fired."""
+    import time
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    passes: list[float] = []
+
+    async def fake_pass(previous):
+        passes.append(time.monotonic())
+        return {}
+
+    monkeypatch.setattr(document_watch, "run_pass", fake_pass)
+    monkeypatch.setattr(document_watch, "_watch_dirs", lambda: [str(docs)])
+    monkeypatch.setattr(document_watch, "DOCUMENT_WATCH_INTERVAL", 30)  # tick far away
+
+    async def main():
+        task = asyncio.create_task(document_watch.watch_documents())
+        await asyncio.sleep(0.5)          # let the watcher start
+        (docs / "new.pdf").write_bytes(b"%PDF-1.4")
+        for _ in range(40):               # wait up to 4s for a pass
+            if passes:
+                break
+            await asyncio.sleep(0.1)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(main())
+
+    assert passes, "a created file must wake the watcher without waiting for the tick"
+
+
+def test_no_folders_means_no_watcher(monkeypatch, capsys):
+    monkeypatch.setattr(document_watch, "_watch_dirs", lambda: [])
+    asyncio.run(document_watch.watch_documents())
+    assert "no document folders" in capsys.readouterr().out
