@@ -13,6 +13,21 @@ can be pointed at a new corpus without touching Python.
 
 ### Added
 
+- **Figure descriptions are cached on disk, so re-reading documents does not pay
+  for them again.** With `images.mode: describe` every picture costs a vision
+  call, and three ordinary things used to repeat that cost for the whole corpus:
+  `--recreate`, a chunking change (the ingest manifest records only
+  path-to-hash, so a settings change is invisible to it), and an import that
+  died partway. Descriptions now live under
+  `$XDG_CACHE_HOME/rag-template/figure-descriptions` (in Docker that is the
+  existing `model_cache` volume, so no compose change and it survives a
+  rebuild). The key covers the encoded image, the prompt and the model, so
+  editing `describe_prompt`, `vision_model` or `describe_image_max_px` still
+  asks for fresh descriptions. Only successful descriptions are cached: an empty
+  one means the call failed, and caching that would make the figure permanently
+  undescribed. Delete the directory to force fresh ones. `make check`'s vision
+  probe deliberately bypasses the cache, since its whole job is to measure the
+  connection repeatedly.
 - **YAML-driven configuration.** One file per instance (selected by `RAG_CONFIG`)
   describes data sources, chunking, models, vector store, retrieval, citations,
   prompt, tools, figures and profiles. Typed and validated by pydantic models in

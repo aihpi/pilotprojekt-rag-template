@@ -478,7 +478,7 @@ def _figure_sections(
     Persists each figure PNG (for UI thumbnails + ``attach`` pixels) and, in
     ``describe``/``attach``, writes a VLM description as the chunk text."""
     from kb.figure_store import figure_dir, persist_figure, pil_to_data_uri
-    from llm import describe_image_sync
+    from llm import describe_image_cached
 
     images = config.images
     pictures = getattr(document, "pictures", None) or []
@@ -511,7 +511,7 @@ def _figure_sections(
             print(f"[ingest] could not save figure {fig_idx} of {pdf_name}: {exc}")
             continue
         try:
-            description = describe_image_sync(
+            description = describe_image_cached(
                 pil_to_data_uri(pil, max_px=images.describe_image_max_px),
                 images.describe_prompt,
                 images.vision_model,

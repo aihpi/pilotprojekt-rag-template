@@ -55,6 +55,23 @@ Einlesen.** Das Beantworten von Fragen kostet in `describe` nichts extra.
     sich nur das Verhalten beim Antworten. Die nötigen Flags stehen unter
     [Daten hinzufügen](adding-data.md).
 
+Dokumente neu einzulesen heißt nicht, die Bilder neu zu beschreiben. Jede
+Beschreibung bleibt auf der Festplatte und wird wiederverwendet. Ein Neuaufbau,
+eine Änderung an der Aufteilung in Textstücke oder ein Einlesen, das auf halbem
+Weg abgebrochen ist, kosten für schon beschriebene Bilder also nichts.
+
+Wiederverwendet wird nur, solange Bild, Prompt und Bildmodell unverändert sind.
+Änderst du `describe_prompt`, `vision_model` oder `describe_image_max_px`, werden
+korrekterweise neue Beschreibungen angefragt. Wenn du sie trotzdem neu erzeugen
+willst, lösche die gespeicherten Beschreibungen:
+
+```bash
+# mit Docker
+docker compose exec chainlit rm -rf /root/.cache/rag-template/figure-descriptions
+# ohne Docker
+rm -rf ~/.cache/rag-template/figure-descriptions
+```
+
 ## Abbildungen in der Antwort anzeigen
 
 Zwei getrennte Schalter entscheiden, was Leute tatsächlich sehen:

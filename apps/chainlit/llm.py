@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import os
+from pathlib import Path
 from typing import Any
 
 import litellm
@@ -150,6 +153,86 @@ def describe_image_sync(image_data_uri: str, prompt: str, model: str) -> str:
         **_client_args(model),
     )
     return (response.choices[0].message.content or "").strip()
+
+
+# --------------------------------------------------------------------------- #
+# Figure descriptions, cached on disk
+# --------------------------------------------------------------------------- #
+# Keyed on the exact bytes sent plus the prompt and model, so a changed figure,
+# prompt, describe_image_max_px or vision_model all miss correctly. Why it exists:
+# docs/images.md, "Cost, and when you must re-ingest".
+#
+# Deliberately a SEPARATE entry point rather than caching inside
+# describe_image_sync: check_setup.py's vision probe calls that one with a fixed
+# tiny PNG and a fixed prompt, five times, to measure the connection. Through a
+# cache, every run after the first would be an instant hit and `make check` would
+# stop testing anything. Do not merge these two.
+_DESCRIBE_CACHE_WARNED = False
+
+
+def _describe_cache_dir() -> Path:
+    """``$XDG_CACHE_HOME`` (else ``~/.cache``) / rag-template / figure-descriptions.
+
+    In Docker ``HOME`` is ``/root`` and ``/root/.cache`` is the ``model_cache``
+    volume that already holds Docling's models, so this survives a rebuild with no
+    compose change. Locally it lands in the usual user cache.
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    return Path(base) / "rag-template" / "figure-descriptions"
+
+
+def _describe_cache_warn(exc: Exception) -> None:
+    """Complain once, not once per figure: a read-only cache would otherwise print
+    a line for every picture in the corpus."""
+    global _DESCRIBE_CACHE_WARNED
+    if not _DESCRIBE_CACHE_WARNED:
+        _DESCRIBE_CACHE_WARNED = True
+        print(
+            f"[ingest] figure-description cache unavailable ({type(exc).__name__}: {exc}); "
+            "descriptions will be requested from the model instead."
+        )
+
+
+def describe_image_cached(image_data_uri: str, prompt: str, model: str) -> str:
+    """:func:`describe_image_sync`, but reusing an earlier identical description.
+
+    A cache miss, an unreadable entry or an unwritable directory all fall through
+    to the live call, so the worst case is the previous behaviour.
+    """
+    key = hashlib.sha256("\0".join((image_data_uri, prompt, model)).encode()).hexdigest()
+    path = _describe_cache_dir() / f"{key}.txt"
+    try:
+        # An empty file counts as a miss, not as an empty description. Nothing here
+        # writes one, but a zero-byte file from a full disk or a botched copy would
+        # otherwise be served forever as "this figure has no description".
+        if cached := path.read_text("utf-8"):
+            return cached
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as exc:
+        # ValueError catches UnicodeDecodeError, which is NOT an OSError. Without it
+        # a single corrupt entry aborts the whole import instead of being re-fetched.
+        _describe_cache_warn(exc)
+
+    description = describe_image_sync(image_data_uri, prompt, model)
+
+    # Only a SUCCESSFUL description is cached, same rule as _MODEL_LIST_CACHE above.
+    # An empty string means the call failed; the parser counts it in `failed` and
+    # tells the user to re-ingest. Caching that would make the failure permanent.
+    if description:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # Temp file plus os.replace: an import killed mid-write must not leave a
+            # truncated description behind that later reads as a valid hit. The random
+            # suffix is not decoration — os.getpid() is useless here, because every
+            # container gets PID 1, so two concurrent ingests sharing the cache volume
+            # would interleave writes into one temp path and replace a torn file in.
+            tmp = path.with_name(f"{key}.{os.urandom(6).hex()}.tmp")
+            tmp.write_text(description, "utf-8")
+            os.replace(tmp, path)
+        except (OSError, ValueError) as exc:
+            _describe_cache_warn(exc)
+    return description
 
 
 def embed_sync(texts: list[str]) -> list[list[float]]:

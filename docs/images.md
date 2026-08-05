@@ -52,6 +52,23 @@ reading documents in.** Answering questions costs nothing extra in `describe`.
     descriptions are already stored, only the behaviour when answering changes.
     The flags for reading in again are in [Adding your data](adding-data.md).
 
+Reading documents in again does not mean describing the pictures again. Each
+description is kept on disk and reused, so a rebuild, a change to how documents
+are cut into chunks, or an import that failed halfway all cost nothing for
+pictures that were already described.
+
+A description is reused only when the picture, the prompt and the image model are
+all unchanged, so editing `describe_prompt`, switching `vision_model` or changing
+`describe_image_max_px` correctly asks for fresh descriptions. If you want fresh
+ones anyway, delete the stored descriptions:
+
+```bash
+# Docker
+docker compose exec chainlit rm -rf /root/.cache/rag-template/figure-descriptions
+# without Docker
+rm -rf ~/.cache/rag-template/figure-descriptions
+```
+
 ## Showing figures in the answer
 
 Two separate switches decide what people actually see:

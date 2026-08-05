@@ -92,8 +92,9 @@ def figures(monkeypatch, tmp_path):
                 raise description
             return description
 
-        monkeypatch.setattr(pdf_parser, "describe_image_sync", fake_describe, raising=False)
-        monkeypatch.setattr("llm.describe_image_sync", fake_describe, raising=False)
+        # _figure_sections imports describe_image_cached at call time, so this is
+        # the one name that has to be replaced.
+        monkeypatch.setattr("llm.describe_image_cached", fake_describe, raising=False)
         monkeypatch.setattr(figure_store, "figure_dir", lambda _cfg: tmp_path)
         from config import load_config
 
