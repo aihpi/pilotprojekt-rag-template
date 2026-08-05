@@ -40,6 +40,7 @@ Nur drei Dinge auf dem Rechner:
 | **[Docker](https://docs.docker.com/get-docker/)** | Führt alles aus. Unter Windows läuft es über WSL2, das Docker Desktop selbst einrichtet. |
 | **Git** | Um das Projekt herunterzuladen. Wer das nicht installieren möchte, nimmt auf GitHub den grünen *Code*-Knopf und *Download ZIP*. |
 | **Einen Texteditor** | Um eine Einstellungsdatei auszufüllen. Jeder Editor genügt. |
+| **Eine stabile Internetverbindung** | Mit Zugang zu einem KI-Dienst. Das Einlesen von Dokumenten macht hunderte Aufrufe, eine Verbindung mit gelegentlichen Abbrüchen scheitert also häufig. Ein VPN oder ein stark genutztes Netz ist die übliche Fehlerquelle. |
 
 **Nicht nötig sind** Python, uv, pip, Node, Qdrant oder PostgreSQL. Das steckt
 alles im Container.
@@ -49,6 +50,15 @@ die Datenbank und der Suchindex, aber kein Modell. Du verweist auf einen
 bestehenden Dienst, indem du Adresse und Schlüssel in die Datei `.env` einträgst.
 Das kann ein Dienst deiner Einrichtung sein oder ein Modellserver auf deinem
 eigenen Rechner.
+
+Um zu prüfen, ob der Dienst erreichbar ist, bevor du Dokumente einliest:
+
+```bash
+cd apps/chainlit && make check
+```
+
+Der Befehl probiert jedes Modell mehrmals und sagt dir, ob ein Problem an deinen
+Einstellungen, an deiner Verbindung oder am Dienst liegt.
 
 ## Schnellstart
 

@@ -2,26 +2,58 @@
 
 Fehler, die wirklich vorgekommen sind, mit Ursache und Lösung.
 
+## Hier anfangen
+
+Die meisten Probleme haben eine von drei Ursachen: deine Einstellungen, deine
+Verbindung oder den KI-Dienst. Das hier sagt dir, welche davon, aus `apps/chainlit`:
+
+```bash
+make check
+```
+
+Der Befehl probiert jedes Modell mehrmals und meldet das Ergebnis. Alles außer
+durchgehend grün ist unten erklärt.
+
+## Manche Aufrufe gehen, andere nicht
+
+Die Prüfung meldet etwa `only 3 of 5 attempts worked`, oder beim Einlesen erscheinen
+viele `Connection error`-Meldungen, während einzelne Abbildungen durchkommen.
+
+Dieses Muster heißt: an deinen Einstellungen liegt es nicht. Eine falsche Adresse
+oder ein falscher Schlüssel scheitern immer, nicht manchmal. Die Verbindung zwischen
+dir und dem Dienst verliert Anfragen.
+
+Beim Einlesen fällt das besonders auf, weil dabei hunderte Aufrufe stattfinden: Eine
+Verbindung, die jede dritte Anfrage verliert, scheitert dutzende Male, während eine
+einzelne Chat-Nachricht problemlos klappt und das Problem verdeckt.
+
+Was du der Reihe nach probieren kannst:
+
+1. **VPN ausschalten**, falls du eines nutzt. Das ist die häufigste Ursache.
+2. **Ein anderes Netz nehmen.** Ein stark genutztes Netz in einem vollen Raum macht
+   genau das.
+3. **Warten und erneut versuchen.** Auch der Dienst selbst kann überlastet sein.
+4. **Erst ohne Bilder einlesen**, mit `images.mode: none`. Das entfernt die meisten
+   Aufrufe, du kannst also prüfen, ob alles andere funktioniert, bevor du für
+   Bildbeschreibungen zahlst.
+
 ## „database disk image is malformed"
 
-Die Datei mit dem Chat-Verlauf ist beschädigt. Deine Dokumente und der Suchindex
-liegen getrennt davon und sind nicht betroffen, es geht also nichts von dem verloren,
-was du eingelesen hast.
+Die Datei mit deinem **Chat-Verlauf** ist beschädigt. Sonst ist nichts betroffen:
+Deine Dokumente und alles, was der Assistent daraus gelernt hat, liegen getrennt
+davon.
 
-**Warum.** Der Chat-Verlauf ist eine SQLite-Datei. Sie lag früher im Ordner
-`.chainlit`, der zwischen deinem Rechner und dem Container geteilt wird. SQLite
-braucht genaue Dateisperren, um konsistent zu bleiben, und Docker Desktop kann diese
-über die Grenze zwischen macOS oder Windows und dem Linux-Container nur nachahmen.
-Ein Schreibvorgang, der im falschen Moment unterbrochen wird, etwa durch einen
-Neustart der App, kann die Datei dann zerstören.
+**Warum das passiert ist.** Diese Datei lag früher in einem Ordner, den dein Rechner
+und die App gemeinsam nutzen. Das ist praktisch, aber diese Art von Datei verträgt es
+nicht: Wird die App genau im falschen Moment gestoppt, während sie schreibt, kann die
+Datei zerbrechen. Mehrere Neustarts hintereinander machen es wahrscheinlicher.
 
-**Betroffen ist Docker Desktop unter macOS und Windows.** Unter Linux, und unter
-Windows wenn das Projekt im WSL2-Dateisystem liegt, ist der Ordner ein normales
-Linux-Dateisystem und das Problem tritt nicht auf.
+**Wen es betrifft.** Nur Mac und Windows. Unter Linux verhält sich der gemeinsame
+Ordner anders, dort kann das nicht auftreten.
 
-**Für neue Installationen bereits behoben.** Die Datenbank liegt jetzt in einem
-Docker-Volume, also einem echten Linux-Dateisystem, und ein vorhandener Verlauf wird
-beim ersten Start automatisch dorthin übernommen. Du solltest das nicht wieder sehen.
+**Schon behoben.** Die Datei liegt jetzt an einem Ort, den die App für sich allein
+hat, und dein vorhandener Verlauf wurde automatisch übernommen. Du solltest das nicht
+wieder sehen.
 
 **Wenn du es jetzt siehst**, rette die alten Nachrichten so, aus `apps/chainlit`:
 
@@ -56,16 +88,17 @@ Siehe [Dokumente ändern](managing-documents.de.md).
 
 ## „the 'tesseract' binary was not found"
 
-Du hast `ocr: true` eingeschaltet. Das mitgelieferte Docker-Abbild enthält bewusst
-kein Programm zur Texterkennung, damit es klein bleibt.
+Du hast `ocr: true` eingeschaltet. Damit wird Text aus Seiten gelesen, die
+eigentlich Bilder sind. Das Programm dafür ist absichtlich nicht mitgeliefert, damit
+der Download klein bleibt.
 
-Die meisten PDFs brauchen das nicht: sie enthalten schon echten Text, und der
-Standard `ocr: false` liest sie korrekt. Nur echte Scans, bei denen die Seite ein Foto
-ist, brauchen OCR.
+Die meisten PDFs brauchen das nicht. Ein normales PDF enthält schon echten Text, den
+du markieren und kopieren kannst, und die Standardeinstellung liest solche Dateien
+korrekt. Nötig ist es nur bei Scans, bei denen jemand eine Papierseite fotografiert
+oder eingescannt hat.
 
-Wenn deine Dateien wirklich Scans sind, baue ein eigenes Abbild auf diesem auf und
-installiere `tesseract-ocr` samt den benötigten Sprachen. Die Fehlermeldung nennt die
-genauen Zeilen.
+Sind deine Dokumente wirklich Scans, nennt die Fehlermeldung die genauen drei Zeilen,
+mit denen das Programm nachinstalliert wird.
 
 ## Die App erreicht kein Modell auf meinem eigenen Rechner
 

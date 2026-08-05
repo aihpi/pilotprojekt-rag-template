@@ -39,6 +39,7 @@ Only three things on your machine:
 | **[Docker](https://docs.docker.com/get-docker/)** | Runs everything. On Windows it uses WSL2, which Docker Desktop sets up for you. |
 | **Git** | To download the project. If you would rather not install it, use the green *Code* button on GitHub and pick *Download ZIP*. |
 | **A text editor** | To fill in one settings file. Any editor works. |
+| **A stable internet connection** | With access to an AI service. Reading documents makes hundreds of calls, so a connection that drops occasionally will fail often. A VPN or a busy shared network is the usual cause of trouble. |
 
 **You do not need** Python, uv, pip, Node, Qdrant or PostgreSQL. Those are all
 inside the container.
@@ -47,6 +48,15 @@ inside the container.
 database and the search index, but no model. You point it at an existing service
 by putting an address and a key into the `.env` file. That can be a service your
 organisation provides, or a model server running on your own machine.
+
+To check that the service is reachable before you read any documents in:
+
+```bash
+cd apps/chainlit && make check
+```
+
+It tries each model a few times and tells you whether a problem is your settings,
+your connection, or the service.
 
 ## Quickstart
 

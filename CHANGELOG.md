@@ -42,7 +42,31 @@ can be pointed at a new corpus without touching Python.
 - **Documentation site.** MkDocs Material site (English and German) with a
   configuration reference generated from the schema.
 
+### Added
+
+- **`make check`, a setup test.** Answers the question that costs the most time when
+  something does not work: is it my settings, my connection, or the AI service? It
+  reads your settings, resolves and connects to the service host, then tries the chat,
+  search and image models several times each, and reports every result with what to do
+  about it.
+
+  Trying each model repeatedly is the point. The failure that misleads people is not
+  "it broke" but "it broke sometimes": a connection losing one request in three lets a
+  chat message through while making a document import fail dozens of times. A single
+  attempt cannot tell those apart, so the report says `3 of 5 attempts worked`.
+
+  The host is probed separately, with a plain name lookup and connection attempt,
+  because litellm reports a misspelled address and a mid-request disconnect with the
+  same "Connection error" message. Without that split, a typo in `LITELLM_BASE_URL`
+  gets diagnosed as a VPN problem and sends people looking in the wrong place.
+
 ### Fixed
+
+- **A stable internet connection is now stated as a requirement.** Reading documents
+  makes hundreds of calls to the AI service, so a connection that drops occasionally
+  fails often, while a single chat message works and hides the cause. Both READMEs and
+  the getting-started pages say so, and `docs/troubleshooting.md` opens with how to
+  tell an unstable connection apart from wrong settings.
 
 - **The chat history could be corrupted, and was.** It is SQLite in WAL mode and lived
   under `.chainlit/`, which Docker bind-mounts from the host. WAL needs a shared-memory

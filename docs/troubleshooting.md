@@ -2,25 +2,54 @@
 
 Errors that have actually happened, with what causes them and what to do.
 
+## Start here
+
+Most problems are one of three things: your settings, your connection, or the AI
+service. This tells you which, from `apps/chainlit`:
+
+```bash
+make check
+```
+
+It tries every model a few times and reports each one. Anything other than all
+green is explained below.
+
+## Some calls work and others fail
+
+The check reports something like `only 3 of 5 attempts worked`, or reading documents
+produces many `Connection error` messages while a few figures succeed.
+
+That pattern means your settings are fine. A wrong address or key fails every time,
+not sometimes. The connection between you and the service is dropping requests.
+
+Reading documents is where this hurts, because it makes hundreds of calls: a
+connection that loses one request in three will fail dozens of times, while a single
+chat message may work fine and hide the problem.
+
+What to try, in order:
+
+1. **Turn the VPN off**, if you use one. It is the most common cause.
+2. **Use a different network.** A busy shared network in a full room does this.
+3. **Wait and retry.** The service itself may be overloaded.
+4. **Read documents in without pictures first**, by setting `images.mode: none`. That
+   removes most of the calls, so you can confirm everything else works before paying
+   for figure descriptions.
+
 ## "database disk image is malformed"
 
-The chat history file is damaged. Your documents and the search index are separate
-and are not affected, so nothing you indexed is lost.
+The file holding your **chat history** got damaged. Nothing else is affected: your
+documents and everything the assistant learned from them are stored separately.
 
-**Why.** The chat history is a SQLite file. It used to live in the `.chainlit`
-folder, which is shared between your computer and the container. SQLite needs
-precise file locking to stay consistent, and Docker Desktop only imitates that
-across the boundary between macOS or Windows and the Linux container. A write
-interrupted at the wrong moment, for example by restarting the app, can then leave
-the file broken.
+**Why it happened.** That file used to be kept in a folder shared between your
+computer and the app. Sharing a folder like that is convenient, but this kind of file
+does not tolerate it: if the app is stopped at exactly the wrong moment while it is
+writing, the file can break. Restarting the app repeatedly makes it more likely.
 
-**This affects Docker Desktop on macOS and Windows.** On Linux, and on Windows when
-the project sits inside the WSL2 filesystem, the folder is a normal Linux filesystem
-and the problem does not arise.
+**Who it affects.** Only Mac and Windows. On Linux the shared folder behaves
+differently and the problem cannot happen.
 
-**Already fixed for new installs.** The database now lives in a Docker volume, which
-is a proper Linux filesystem, and an existing history is moved there automatically
-the first time you start the app. You should not see this again.
+**Already fixed.** The file has been moved somewhere the app has to itself, and your
+existing history was carried over automatically. You should not see this again.
 
 **If you are seeing it now**, rescue the old messages like this, from
 `apps/chainlit`:
@@ -32,8 +61,8 @@ sqlite3 .chainlit/chat_history.broken ".recover" | sqlite3 .chainlit/chat_histor
 docker compose up -d
 ```
 
-The third line rebuilds a healthy file from whatever is still readable. Keep the
-`.broken` file until you have checked your history looks right.
+The third line builds a healthy file out of everything that is still readable. Keep
+the `.broken` file until you have checked that your history looks right.
 
 ## A new PDF does not show up
 
@@ -55,15 +84,15 @@ See [Changing your documents](managing-documents.md).
 
 ## "the 'tesseract' binary was not found"
 
-You switched on `ocr: true`. The supplied Docker image contains no text recognition
-program, deliberately, to keep it small.
+You switched on `ocr: true`, which reads text out of pages that are really pictures.
+The program that does that is not included, on purpose, to keep the download small.
 
-Most PDFs do not need it: they already carry real text, and the default `ocr: false`
-reads them correctly. Only actual scans, where the page is a photograph, need OCR.
+Most PDFs do not need it. A normal PDF already contains real text you can select and
+copy, and the default setting reads those correctly. You only need this for scans,
+where somebody photographed or scanned a paper page.
 
-If yours really are scans, build your own image on top of this one and install
-`tesseract-ocr` plus the languages you need. The error message spells out the exact
-lines.
+If your documents really are scans, the error message prints the exact three lines to
+add so the program gets installed.
 
 ## The app cannot reach a model running on my own computer
 
