@@ -47,8 +47,15 @@ can be pointed at a new corpus without touching Python.
 - **`make check`, a setup test.** Answers the question that costs the most time when
   something does not work: is it my settings, my connection, or the AI service? It
   reads your settings, resolves and connects to the service host, then tries the chat,
-  search and image models several times each, and reports every result with what to do
-  about it.
+  search and image models several times each. Every failure is reported as **numbered
+  steps**, not a stack trace: which file to open, which line to look at, what to check,
+  and to run it again afterwards.
+
+  It also refuses to spend anything before checking the obvious. The placeholder values
+  that `.env.example` ships with (`your-key`, `http://localhost:4000`) are recognised
+  and named as the problem, because copying that file and never editing it is the
+  commonest cause of "nothing works" and produces an error that says nothing about it.
+  The key is shown masked, so a wrong or truncated key is visible without exposing it.
 
   Trying each model repeatedly is the point. The failure that misleads people is not
   "it broke" but "it broke sometimes": a connection losing one request in three lets a

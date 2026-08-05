@@ -1,14 +1,15 @@
-"""Check that everything this app needs is actually reachable.
+"""Check that everything this app needs is reachable, and say what to fix.
 
-Run this when something does not work and you want to know *where* the problem is,
-rather than reading a wall of tracebacks. It answers one question: is it my setup, my
-connection, or the AI service?
+Run this when something does not work. It answers the question that otherwise costs
+the most time: is the problem my settings, my connection, or the AI service? Every
+failure comes with numbered steps rather than a stack trace.
 
-    python -m check_setup          # or: make check
+    make check                     # or: python -m check_setup
 
-Each model is tried several times, because the interesting failure is not "it broke"
-but "it broke sometimes". A shaky connection or a busy service shows up as a partial
-score, which no single attempt would reveal.
+Each model is tried several times on purpose. The failure that misleads people is not
+"it broke" but "it broke sometimes": a connection that loses one request in three lets
+a single chat message through while making a document import fail dozens of times. One
+attempt cannot tell those apart.
 """
 
 from __future__ import annotations
@@ -23,9 +24,16 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
-# How many times to try each model. Enough to tell "unstable" from "broken", without
-# spending real money: every probe is a handful of tokens.
+# Enough attempts to tell "unstable" from "broken". Every probe is a few tokens.
 ATTEMPTS = 5
+
+ENV_FILE = "apps/chainlit/.env"
+
+# The values .env.example ships with. Someone who copied that file and never edited it
+# is the most common cause of "nothing works", and it is worth naming plainly instead
+# of letting them read a connection error.
+PLACEHOLDER_KEYS = {"your-key", "sk-your-key", "changeme", "change-me", "todo", "xxx"}
+PLACEHOLDER_URL = "http://localhost:4000"
 
 
 @dataclass
@@ -36,7 +44,8 @@ class Result:
     passed: int = 0
     seconds: list[float] = field(default_factory=list)
     error: str = ""
-    hint: str = ""
+    cause: str = ""
+    steps: list[str] = field(default_factory=list)
     skipped: str = ""
 
     @property
@@ -56,32 +65,68 @@ class Result:
                 f"  [WARN] {self.name}: only {self.passed} of {self.attempts} attempts "
                 f"worked, {self.median:.1f}s"
             )
-        return f"  [FAIL] {self.name}: {self.error}"
+        return f"  [FAIL] {self.name}"
 
 
-def _short(exc: Exception, limit: int = 140) -> str:
+def _short(exc: Exception | str, limit: int = 110) -> str:
     text = " ".join(str(exc).split())
     return text[:limit] + ("..." if len(text) > limit else "")
 
 
-def _classify(exc: Exception, *, host_reachable: bool = True) -> str:
-    """Turn a library exception into something worth acting on."""
+def _mask(secret: str) -> str:
+    """Show enough of the key to recognise it, never enough to use it."""
+    if not secret:
+        return "(not set)"
+    if len(secret) <= 8:
+        return "*" * len(secret) + f" ({len(secret)} characters)"
+    return f"{secret[:4]}...{secret[-2:]} ({len(secret)} characters)"
+
+
+# --------------------------------------------------------------------------- #
+# Turning an error into steps
+# --------------------------------------------------------------------------- #
+_KEY_STEPS = [
+    f"Open {ENV_FILE}",
+    "Find the line starting LITELLM_API_KEY= and make sure a real key follows it",
+    "Remove any quotes or spaces around the key",
+    "Ask whoever gave you the key whether it is still valid",
+    "Run 'make check' again",
+]
+
+_URL_STEPS = [
+    f"Open {ENV_FILE}",
+    "Find the line starting LITELLM_BASE_URL= and check the address for typos",
+    "It has to start with https:// or http://, and include the port if there is one",
+    "If the service runs on your own computer, write host.docker.internal instead of "
+    "localhost, because localhost inside the app means the app itself",
+    "Run 'make check' again",
+]
+
+_CONNECTION_STEPS = [
+    "Turn off any VPN and try again. This is the most common cause",
+    "Try a different network. A busy shared network does this",
+    "Wait a few minutes: the service itself may be overloaded",
+    "Before reading documents in, set images.mode: none. That removes most of the "
+    "calls, so you can confirm the rest works without paying for pictures",
+]
+
+
+def _classify(exc: Exception, *, host_reachable: bool = True) -> tuple[str, list[str]]:
+    """Return (what it means, what to do) for an error from a model call."""
     text = str(exc).lower()
+
     if "disconnected" in text or "connection error" in text or "timed out" in text:
-        # litellm reports a DNS failure and a mid-request disconnect with the same
-        # "Connection error", so the message alone cannot tell them apart. The
-        # separate host probe can, and blaming the wrong thing sends people hunting
-        # for a VPN problem when they have a typo in an address.
+        # litellm reports a misspelled address and a mid-request disconnect with the
+        # same "Connection error", so the message alone cannot tell them apart. The
+        # separate host check can. Getting this wrong sends people hunting for a VPN
+        # problem when what they have is a typo.
         if not host_reachable:
-            return (
-                "The address could not be reached at all. Check LITELLM_BASE_URL in "
-                ".env, including http:// or https:// and the port."
-            )
+            return "The AI service could not be reached at all.", _URL_STEPS
         return (
-            "The service can be found, but it stopped answering part way through. "
-            "That is usually the network in between, or a very busy service. Try "
-            "turning off any VPN, or use a different connection."
+            "The service was found, but it stopped answering part way through.",
+            _CONNECTION_STEPS,
         )
+
     if (
         "401" in text
         or "unauthorized" in text
@@ -89,78 +134,64 @@ def _classify(exc: Exception, *, host_reachable: bool = True) -> str:
         or "authentication" in text
         or "token" in text
     ):
-        return "The key was rejected. Check LITELLM_API_KEY in .env."
+        return "The access key was rejected.", _KEY_STEPS
+
     if "403" in text or "forbidden" in text:
         return (
-            "Access refused. The key may lack permission for this model, or the model "
-            "name may need to be written differently for your service."
+            "The service refused access to this model.",
+            [
+                "Check that your key is allowed to use this particular model",
+                "Ask the service which models your key may use",
+                "Some services want the model name written differently, for example "
+                "with or without a prefix such as 'openai/'",
+                "Put a name it accepts into your settings file, then run 'make check' again",
+            ],
         )
+
     if "404" in text or "not found" in text or "does not exist" in text:
         return (
-            "The service does not know this model name. Ask it which models it offers "
-            "and put one of those in your settings file."
+            "The service does not know this model name.",
+            [
+                "Ask the service which models it offers",
+                "Open your settings file, the one named by RAG_CONFIG",
+                "Put one of those names into models.chat_model, models.embed_model or "
+                "images.vision_model, whichever failed above",
+                "Run 'make check' again",
+            ],
         )
+
     if "429" in text or "rate limit" in text:
-        return "The service is rate limiting you. Wait a moment and try again."
-    if "getaddrinfo" in text or "name or service not known" in text or "dns" in text:
-        return "The address could not be resolved. Check LITELLM_BASE_URL in .env."
+        return (
+            "The service is rate limiting you: too many requests too quickly.",
+            [
+                "Wait a few minutes and try again",
+                "While reading documents this usually still finishes, because failed "
+                "calls are tried again automatically",
+            ],
+        )
+
     if "413" in text or "too large" in text:
-        return "The request was rejected as too large."
-    return "See the message above."
-
-
-def check_service_host(base_url: str) -> Result:
-    """Can we even find and open a connection to the AI service?
-
-    Deliberately separate from the model probes. It distinguishes "the address is
-    wrong" from "the connection is unstable", which the library's own error message
-    cannot: both surface as "Connection error".
-    """
-    import socket
-    from urllib.parse import urlparse
-
-    result = Result(name="Reaching the AI service")
-    if not base_url:
-        result.error = "LITELLM_BASE_URL is not set"
-        result.hint = "Put the address of your AI service into apps/chainlit/.env."
-        return result
-
-    parsed = urlparse(base_url)
-    host = parsed.hostname
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    if not host:
-        result.error = f"cannot read a host out of {base_url!r}"
-        result.hint = "LITELLM_BASE_URL should look like https://example.org/ or http://host:4000."
-        return result
-
-    result.attempts = 1
-    start = time.time()
-    try:
-        socket.getaddrinfo(host, port)
-    except OSError as exc:
-        result.error = f"the name {host} could not be looked up ({_short(exc, 60)})"
-        result.hint = (
-            "Either the address is wrong or there is no working internet connection. "
-            "Check LITELLM_BASE_URL in .env, then check that you are online."
+        return (
+            "The service rejected the request for being too large.",
+            [
+                "For pictures, lower images.describe_image_max_px in your settings file",
+                "Report this if it keeps happening: the app is supposed to shrink "
+                "pictures before sending them",
+            ],
         )
-        return result
-    try:
-        with socket.create_connection((host, port), timeout=8):
-            pass
-    except OSError as exc:
-        result.error = f"{host}:{port} did not accept a connection ({_short(exc, 60)})"
-        result.hint = (
-            "The name resolves but nothing answers on that port. A firewall, proxy or "
-            "VPN is the usual reason, or the service is down."
-        )
-        return result
-    result.passed = 1
-    result.ok = True
-    result.seconds.append(time.time() - start)
-    result.name = f"Reaching the AI service ({host}:{port})"
-    return result
+
+    return (
+        "The service returned an error this check does not recognise.",
+        [
+            "Read the error line above: it usually names the problem",
+            "See docs/troubleshooting.md",
+        ],
+    )
 
 
+# --------------------------------------------------------------------------- #
+# Probes
+# --------------------------------------------------------------------------- #
 def _probe(name: str, call, attempts: int = ATTEMPTS, *, host_reachable: bool = True) -> Result:
     result = Result(name=name)
     for _ in range(attempts):
@@ -171,11 +202,141 @@ def _probe(name: str, call, attempts: int = ATTEMPTS, *, host_reachable: bool = 
         except Exception as exc:  # noqa: BLE001 — this tool reports, it does not raise
             if not result.error:
                 result.error = _short(exc)
-                result.hint = _classify(exc, host_reachable=host_reachable)
+                result.cause, result.steps = _classify(exc, host_reachable=host_reachable)
             continue
         result.passed += 1
         result.seconds.append(time.time() - start)
     result.ok = result.passed == result.attempts and result.attempts > 0
+    if 0 < result.passed < result.attempts:
+        # Some attempts worked, so the settings must be right: only the connection is
+        # left to blame. Say that, rather than repeating whatever the first error was.
+        result.cause = (
+            f"Only {result.passed} of {result.attempts} attempts worked. Wrong settings "
+            "fail every time, not sometimes, so this is the connection."
+        )
+        result.steps = _CONNECTION_STEPS
+    return result
+
+
+def check_settings(base_url: str, api_key: str) -> list[Result]:
+    """Catch the obvious before spending anything over the network."""
+    results: list[Result] = []
+
+    url = Result(name="An address for the AI service is set", attempts=1)
+    if not base_url:
+        url.error = "LITELLM_BASE_URL is empty"
+        url.cause = "Without an address the app cannot reach any AI service."
+        url.steps = _URL_STEPS
+    elif base_url.strip().rstrip("/") == PLACEHOLDER_URL:
+        url.error = f"LITELLM_BASE_URL is still the example value {PLACEHOLDER_URL}"
+        url.cause = (
+            "That is the value the example file ships with, so it was probably never "
+            "changed to your own service."
+        )
+        url.steps = [
+            f"Open {ENV_FILE}",
+            "Replace LITELLM_BASE_URL with the address of the AI service you were given",
+            "If you genuinely do run a service at that address yourself, ignore this",
+            "Run 'make check' again",
+        ]
+    else:
+        url.ok = True
+        url.passed = 1
+    results.append(url)
+
+    key = Result(name="An access key is set", attempts=1)
+    if not api_key:
+        key.error = "LITELLM_API_KEY is empty"
+        key.cause = "Without a key the service will refuse every request."
+        key.steps = _KEY_STEPS
+    elif api_key.strip().lower() in PLACEHOLDER_KEYS:
+        key.error = f"LITELLM_API_KEY is still the example value '{api_key}'"
+        key.cause = (
+            "That is the placeholder from the example file, not a real key, so the "
+            "service will refuse every request."
+        )
+        key.steps = _KEY_STEPS
+    else:
+        key.ok = True
+        key.passed = 1
+    results.append(key)
+    return results
+
+
+def check_service_host(base_url: str) -> Result:
+    """Can the service be found, and does it accept a connection?
+
+    Deliberately separate from the model probes: it tells "the address is wrong" apart
+    from "the connection is unstable", which the library's own message cannot, because
+    both arrive as "Connection error".
+    """
+    import socket
+    from urllib.parse import urlparse
+
+    result = Result(name="Reaching the AI service")
+    if not base_url:
+        result.error = "no address set"
+        result.cause = "Without an address the app cannot reach any AI service."
+        result.steps = _URL_STEPS
+        return result
+
+    parsed = urlparse(base_url)
+    host = parsed.hostname
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if not host:
+        result.error = f"cannot read a host out of {base_url!r}"
+        result.cause = "The address is not in a usable form."
+        result.steps = _URL_STEPS
+        return result
+
+    result.attempts = 1
+    start = time.time()
+    try:
+        socket.getaddrinfo(host, port)
+    except OSError as exc:
+        result.error = f"the name {host} could not be looked up ({_short(exc, 50)})"
+        result.cause = f"The name {host} does not exist, or you are not online."
+        result.steps = [
+            "Check that you have a working internet connection",
+            f"Open {ENV_FILE} and check LITELLM_BASE_URL for typos",
+            "Run 'make check' again",
+        ]
+        return result
+    try:
+        with socket.create_connection((host, port), timeout=8):
+            pass
+    except OSError as exc:
+        result.error = f"{host}:{port} did not accept a connection ({_short(exc, 50)})"
+        result.cause = f"The name {host} exists, but nothing answered on port {port}."
+        result.steps = [
+            "Turn off any VPN and try again",
+            "A firewall may be blocking it: ask whoever runs your network",
+            f"Check that the port in LITELLM_BASE_URL is right (this tried {port})",
+            "The service itself may be down: ask whoever runs it",
+        ]
+        return result
+
+    result.passed = 1
+    result.ok = True
+    result.seconds.append(time.time() - start)
+    result.name = f"Reaching the AI service ({host}:{port})"
+    return result
+
+
+def check_qdrant(url: str) -> Result:
+    def call() -> None:
+        with urllib.request.urlopen(f"{url.rstrip('/')}/collections", timeout=10) as response:
+            json.loads(response.read().decode("utf-8"))
+
+    result = _probe(f"Search index at {url}", call, attempts=2)
+    if not result.passed:
+        result.cause = "The search index is not reachable, so nothing can be looked up."
+        result.steps = [
+            "Start everything with 'docker compose up -d'",
+            "Check what is running with 'docker compose ps'",
+            "Inside the app, localhost means the app itself, so this address has to be "
+            "the service name http://qdrant:6333",
+        ]
     return result
 
 
@@ -189,20 +350,9 @@ def _tiny_png_data_uri() -> str:
     return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-def check_qdrant(url: str) -> Result:
-    def call() -> None:
-        with urllib.request.urlopen(f"{url.rstrip('/')}/collections", timeout=10) as response:
-            json.loads(response.read().decode("utf-8"))
-
-    result = _probe(f"Search index at {url}", call, attempts=2)
-    if not result.passed:
-        result.hint = (
-            "Not reachable. With Docker, start everything with 'docker compose up -d'. "
-            "Note that inside a container 'localhost' means the container itself."
-        )
-    return result
-
-
+# --------------------------------------------------------------------------- #
+# Running everything
+# --------------------------------------------------------------------------- #
 def run(*, skip_vision: bool = False) -> list[Result]:
     from config import get_config
     from settings import LITELLM_API_KEY, LITELLM_BASE_URL, QDRANT_URL
@@ -213,25 +363,36 @@ def run(*, skip_vision: bool = False) -> list[Result]:
     print("What this app is set up to use")
     print(f"  settings file : {os.environ.get('RAG_CONFIG', '(default)')}")
     print(f"  AI service    : {LITELLM_BASE_URL or '(not set)'}")
-    print(f"  access key    : {'set' if LITELLM_API_KEY else 'NOT SET'}")
+    print(f"  access key    : {_mask(LITELLM_API_KEY or '')}")
     print(f"  chat model    : {config.models.chat_model}")
     print(f"  search model  : {config.models.embed_model}")
     print(f"  image model   : {config.images.vision_model} (images.mode: {config.images.mode})")
     print(f"  search index  : {QDRANT_URL}")
     print()
 
-    if not LITELLM_BASE_URL or not LITELLM_API_KEY:
-        print("Nothing can work without both an address and a key for the AI service.")
-        print("Put LITELLM_BASE_URL and LITELLM_API_KEY into apps/chainlit/.env.")
-        print()
+    print("Checking your settings")
+    settings_results = check_settings(LITELLM_BASE_URL or "", LITELLM_API_KEY or "")
+    results.extend(settings_results)
+    for result in settings_results:
+        print(result.line())
 
-    host = check_service_host(LITELLM_BASE_URL)
-    results.append(host)
+    if any(not r.ok for r in settings_results):
+        # No point spending calls, or confusing anyone with a second error, when the
+        # settings themselves are plainly not filled in.
+        print()
+        print("Stopping here. Those have to be right before anything else can work.")
+        print()
+        return results
+
+    print()
     print(f"Trying each one {ATTEMPTS} times, to see whether it works every time")
+    host = check_service_host(LITELLM_BASE_URL or "")
+    print(host.line())
 
     import llm
 
-    results.append(
+    probes: list[Result] = [host]
+    probes.append(
         _probe(
             f"Search model ({config.models.embed_model})",
             lambda: llm.embed_sync(["probe"]),
@@ -250,62 +411,65 @@ def run(*, skip_vision: bool = False) -> list[Result]:
             **llm._client_args(config.models.chat_model),
         )
 
-    results.append(
+    probes.append(
         _probe(f"Chat model ({config.models.chat_model})", chat_call, host_reachable=host.ok)
     )
 
-    vision_result = Result(name=f"Image model ({config.images.vision_model})")
+    vision = Result(name=f"Image model ({config.images.vision_model})")
     if skip_vision:
-        vision_result.skipped = "not checked (--skip-vision)"
+        vision.skipped = "not checked (--skip-vision)"
     elif config.images.mode == "none":
-        vision_result.skipped = "not needed, images.mode is 'none'"
+        vision.skipped = "not needed, images.mode is 'none'"
     else:
         uri = _tiny_png_data_uri()
-        vision_result = _probe(
-            vision_result.name,
-            lambda: llm.describe_image_sync(uri, "Name the shape in one word.", config.images.vision_model),
+        vision = _probe(
+            vision.name,
+            lambda: llm.describe_image_sync(
+                uri, "Name the shape in one word.", config.images.vision_model
+            ),
             host_reachable=host.ok,
         )
-    results.append(vision_result)
+    probes.append(vision)
+    probes.append(check_qdrant(QDRANT_URL))
 
-    results.append(check_qdrant(QDRANT_URL))
-
-    for result in results:
+    for result in probes[1:]:
         print(result.line())
+    results.extend(probes)
     print()
     return results
 
 
 def summarise(results: list[Result]) -> int:
-    """Print a verdict and return the exit code."""
+    """Print what to do about each problem. Returns the exit code."""
     checked = [r for r in results if not r.skipped]
-    broken = [r for r in checked if r.passed == 0]
-    flaky = [r for r in checked if 0 < r.passed < r.attempts]
+    problems = [r for r in checked if r.passed < r.attempts or not r.attempts]
 
-    if not broken and not flaky:
+    if not problems:
         print("All good. Everything the app needs is reachable and answered every time.")
         print("If something still does not work, see docs/troubleshooting.md.")
         return 0
 
-    if flaky and not broken:
-        print("Everything answered, but not every time. That points at your connection")
-        print("rather than your settings, because wrong settings fail every time, not")
-        print("sometimes. You need a stable internet connection to the AI service; a VPN")
-        print("or a busy shared network is the usual reason. This matters most when")
-        print("reading documents, which makes hundreds of calls, so an occasional")
-        print("failure there turns into many failures.")
-    for result in broken + flaky:
+    noun = "thing needs" if len(problems) == 1 else "things need"
+    print(f"{len(problems)} {noun} attention.")
+    for result in problems:
         print()
         print(f"  {result.name}")
         if result.error:
             print(f"    the error : {result.error}")
-        if result.hint:
-            print(f"    what to do: {result.hint}")
+        if result.cause:
+            print(f"    meaning   : {result.cause}")
+        for index, step in enumerate(result.steps, start=1):
+            label = "    do this  : " if index == 1 else " " * len("    do this  : ")
+            print(f"{label}{index}. {step}")
+    print()
+    print("More explanations: docs/troubleshooting.md")
     return 1
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Check that the AI service and search index are reachable.")
+    parser = argparse.ArgumentParser(
+        description="Check the AI service and search index are reachable, and say what to fix."
+    )
     parser.add_argument(
         "--skip-vision",
         action="store_true",
