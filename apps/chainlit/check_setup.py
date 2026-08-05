@@ -19,6 +19,7 @@ import base64
 import io
 import json
 import os
+import statistics
 import time
 import urllib.error
 import urllib.request
@@ -50,10 +51,7 @@ class Result:
 
     @property
     def median(self) -> float:
-        if not self.seconds:
-            return 0.0
-        ordered = sorted(self.seconds)
-        return ordered[len(ordered) // 2]
+        return statistics.median(self.seconds) if self.seconds else 0.0
 
     def line(self) -> str:
         if self.skipped:

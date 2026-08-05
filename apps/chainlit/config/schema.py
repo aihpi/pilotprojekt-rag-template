@@ -141,8 +141,6 @@ class PdfOptions(BaseModel):
     docling_json_dir: str | None = None
     """If set, parse pre-exported Docling JSON from this dir (fast path) instead
     of converting PDFs live."""
-    docling_service_url: str | None = None
-    """Optional remote Docling service (else local CPU conversion)."""
     ocr: bool = False
     """Read text off the page as an image. Only needed for scans: PDFs that
     already carry a text layer are read correctly with ``ocr: false``, and OCR
@@ -256,7 +254,6 @@ class CitationConfig(BaseModel):
     """Optional metadata keys exposed to citation segments (e.g. domain fields)."""
     map_path: str | None = None
     """Optional bibliographic citation map JSON (env ``CITATION_MAP_PATH`` overrides)."""
-    id_pattern: str | None = None
     """Optional regex for domain IDs used as an extra citation-matching signal."""
     source_pdf_fallback: str | None = None
     """Fallback served filename for chunks without a resolvable source file."""
@@ -433,13 +430,11 @@ class AppConfig(BaseModel):
 class UiTextConfig(BaseModel):
     """Neutral UI/prompt strings (overridable per language)."""
 
-    role_context_header: str = "## ROLE CONTEXT"
     retry_tool: str = "Call the {tool} tool first before answering."
     forced_final: str = (
         "Answer the question using only the retrieved context above. "
         "If the answer is not in the context, say so."
     )
-    no_context: str = "Not found in the provided context."
 
 
 class RagConfig(BaseModel):

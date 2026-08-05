@@ -67,13 +67,12 @@ services:
       # so an .env from before this feature needs no editing; set it to false to
       # turn it off.
       DOCUMENT_WATCH: ${DOCUMENT_WATCH:-true}
-      DOCUMENT_WATCH_INTERVAL: ${DOCUMENT_WATCH_INTERVAL:-15}
+      DOCUMENT_WATCH_INTERVAL: ${DOCUMENT_WATCH_INTERVAL:-5}
       DOCUMENT_WATCH_SETTLE: ${DOCUMENT_WATCH_SETTLE:-5}
       # RAG instance config (must match the ingest service).
       RAG_CONFIG: ${RAG_CONFIG:-examples/papers/rag.config.yaml}
       # IMPORTANT: inside Docker network, use service DNS name (not localhost)
       QDRANT_URL: http://qdrant:6333
-      LANGFLOW_BASE_URL: ${LANGFLOW_BASE_URL:-http://langflow:7860}
     volumes:
       # Documents (and generated figures) live under ./data/documents, which is
       # already covered by the `.:/app` mount below.
@@ -88,18 +87,6 @@ services:
       - chat_db:/app/.chatdb
     ports:
       - "${APP_PORT:-8000}:8000"
-
-  langflow:
-    profiles: ["langflow"]
-    image: langflowai/langflow:latest
-    container_name: rag-langflow
-    environment:
-      LANGFLOW_HOST: 0.0.0.0
-      LANGFLOW_PORT: 7860
-    ports:
-      - "7860:7860"
-    volumes:
-      - langflow_data:/app/langflow
 
   ingest:
     build:
@@ -168,4 +155,3 @@ volumes:
   qdrant_data:
   model_cache:
   chat_db:
-  langflow_data:

@@ -22,7 +22,7 @@ import pytest  # noqa: E402
 
 import document_watch  # noqa: E402
 from config.schema import ChunkingConfig, DataSourceConfig, RagConfig  # noqa: E402
-from kb.parsers.base import FileGate, file_gate, iter_source_files  # noqa: E402
+from kb.parsers.base import FileGate  # noqa: E402
 
 
 def _config_at(dir_path, **kw) -> RagConfig:

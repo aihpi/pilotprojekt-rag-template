@@ -32,8 +32,7 @@ Then open <http://localhost:8000>.
 
 Four things start together: the chat window on port 8000, the search storage
 (`qdrant`) on 6333, the database for chat history (`postgres`) on 5432, and a
-one-off job that reads your documents in before the chat window comes up. There
-is also an optional `langflow` on 7860.
+one-off job that reads your documents in before the chat window comes up.
 
 Inside Docker these talk to each other by name, not through `localhost`, which is
 why Compose sets `QDRANT_URL=http://qdrant:6333` for you.
@@ -71,8 +70,6 @@ with comments; the important ones are:
   (chat history in the sidebar plus login; change the `admin/admin` default)
 - `INGEST_RECREATE`, `INGEST_BATCH_SIZE`, `INGEST_MAX_BATCH_CHARS`,
   `INGEST_DOCLING_JSON_DIR`: control the automatic reading-in step
-- `LANGFLOW_ENABLED`, `LANGFLOW_BASE_URL`, `LANGFLOW_FLOW_ID`,
-  `LANGFLOW_API_KEY`: adds `langflow_agent` as an extra ability
 
 Anything under "optional overrides" in `.env.example` (`CHAT_MODEL`, `TOP_K`, …)
 beats the settings file. Handy occasionally, but easy to forget you set it, so

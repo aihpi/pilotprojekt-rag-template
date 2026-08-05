@@ -51,7 +51,7 @@ from native_chat import (
     upsert_feedback,
 )
 from config import get_config
-from rag_tool import build_context, extract_page, extract_source_file, format_citations, retrieve
+from rag_tool import build_context, extract_page, extract_source_file, retrieve
 from figure_markers import (
     build_figure_candidates,
     figure_display_name,
