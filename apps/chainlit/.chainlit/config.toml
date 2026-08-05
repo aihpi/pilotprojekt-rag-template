@@ -60,7 +60,11 @@ reaction_on_message_received = false
 
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
-    enabled = true
+    # Off on purpose: nothing reads `message.elements` in app.py, so an attached
+    # file was accepted by the UI and then silently ignored. Do not flip this back
+    # on until on_message actually does something with the upload. The accept list
+    # and limits below are kept for whenever that happens.
+    enabled = false
     # Define accepted file types using MIME types
     # Examples:
     # 1. For specific file types:

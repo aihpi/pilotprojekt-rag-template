@@ -6,19 +6,18 @@
 
 **🇩🇪 [Deutsche Version](README.md)** · 📖 **[Documentation](https://aihpi.github.io/pilotprojekt-rag-template/)**
 
-A chat assistant that answers questions about **your own documents**, and shows
-you the exact page each answer came from.
+A chat assistant that answers questions about your own documents, and shows you
+the exact page each answer came from.
 
 You give it a folder of PDFs. It reads them, and from then on you can ask
 questions in normal language. Every answer links back to the source, so you can
 check it yourself.
 
-Setting it up means editing **one settings file**. You do not need to write any
-code.
+Setting it up means editing one settings file. You do not need to write any code.
 
-> **It works straight away.** Three research papers come with the project
-> ([sources & licence](apps/chainlit/data/documents/SOURCES.md)), so you can try
-> a working assistant before you change anything.
+> Three research papers come with the project
+> ([sources & licence](apps/chainlit/data/documents/SOURCES.md)), so you can try a
+> working assistant before you change anything.
 
 <details>
 <summary><b>Which tools this is built on</b></summary>
@@ -32,7 +31,7 @@ text, and [Docling](https://github.com/DS4SD/docling) to read PDFs.
 
 ## What you need
 
-Only three things on your machine:
+Three things to install, plus a network connection:
 
 | | |
 |---|---|
@@ -41,8 +40,8 @@ Only three things on your machine:
 | **A text editor** | To fill in one settings file. Any editor works. |
 | **A stable internet connection** | With access to an AI service. Reading documents makes hundreds of calls, so a connection that drops occasionally will fail often. A VPN or a busy shared network is the usual cause of trouble. |
 
-**You do not need** Python, uv, pip, Node, Qdrant or PostgreSQL. Those are all
-inside the container.
+You do not need Python, uv, pip, Node, Qdrant or PostgreSQL. Those are all inside
+the container.
 
 **One thing is not included: the AI model.** The project ships the chat app, the
 database and the search index, but no model. You point it at an existing service
@@ -56,7 +55,8 @@ cd apps/chainlit && make check
 ```
 
 It tries each model a few times and tells you whether a problem is your settings,
-your connection, or the service.
+your connection, or the service. Every result comes with the steps to check, in
+order.
 
 ## Quickstart
 
@@ -96,7 +96,7 @@ uv run chainlit run app.py                # http://localhost:8000
 ```
 </details>
 
-> **Which AI models to use.** The example uses freely available models
+> Which AI models to use: the example uses freely available models
 > (`gpt-oss-120b`, `octen-embedding-8b`, and `gemma-4-31b` for reading images).
 > Nothing here ties you to a paid provider.
 >
@@ -107,9 +107,9 @@ uv run chainlit run app.py                # http://localhost:8000
 
 ## Updating to a newer version
 
-Already have it running and want the latest changes? Three lines.
+If it is already running and you want the latest changes, it is three commands.
 
-**With Docker (the usual way):**
+With Docker, the usual way:
 
 ```bash
 git pull
@@ -117,11 +117,11 @@ cd apps/chainlit
 docker compose up -d --build
 ```
 
-The `--build` at the end matters. Without it, Docker starts your **old** app again and
+The `--build` at the end matters. Without it, Docker starts your old app again and
 you will not see any of the changes, and no error warns you. Rebuilding takes about
 half a minute. (`make up` does the same thing.)
 
-**Without Docker:**
+Without Docker:
 
 ```bash
 git pull
@@ -137,18 +137,19 @@ answer and the PDF should open on the right. That is the quickest way to see it 
 
 ### Good to know
 
-- **Nothing you added gets deleted.** Your documents, indexed data and chat history all
-  survive an update, so you normally do not need to ingest again. Files you add, change
-  or delete in the documents folder are picked up by themselves, within seconds.
-- **One exception.** If an earlier ingest reported failed figure descriptions, read your
-  documents in once more so those figures get described. Only worth doing if you saw
-  those errors: [Figures & images](docs/images.md).
-- **The very first document import is slow.** The app downloads the models it uses to read
-  PDFs (roughly 500 MB). They are kept afterwards, so this happens once, not once per
-  update.
-- **Old versions take up disk space.** Free it up with `docker image prune`.
-- **Something acting up?** Stop everything and start fresh:
-  `docker compose down && docker compose up -d --build`
+- Your documents, indexed data and chat history all survive an update, so you
+  normally do not need to ingest again. Files you add, change or delete in the
+  documents folder are picked up by themselves, within seconds.
+- One exception: if an earlier ingest reported failed figure descriptions, read
+  your documents in once more so those figures get described. Only worth doing if
+  you saw those errors, see [Figures & images](docs/images.md).
+- The very first document import is slow, because the app downloads the models it
+  uses to read PDFs (roughly 500 MB). They are kept afterwards, so this happens
+  once, not once per update.
+- Old versions take up disk space, which `docker image prune` frees again.
+- If something is acting up, stopping everything and starting fresh usually helps:
+  `docker compose down && docker compose up -d --build`. If the error persists, it
+  is probably in [Troubleshooting](docs/troubleshooting.md).
 
 ## Use your own documents
 
@@ -168,11 +169,12 @@ cp apps/chainlit/examples/papers/rag.config.yaml apps/chainlit/my-rag.yaml
 It also handles Markdown, JSON and CSV files. See
 [Adding your data](docs/adding-data.md).
 
-**Changing your documents later needs no commands at all.** The app watches the
-folder: add a file and it is read within seconds, correct a file and it is read
-again, delete a file and it stops appearing in answers. Everything else is left
-untouched, so you do not pay for it twice, and nothing has to be restarted. Switch it
-off with `DOCUMENT_WATCH=false` if you would rather trigger it yourself.
+Changing your documents later needs no commands at all, because the app watches
+the folder. Add a file and it is read within seconds. Correct one and it is read
+again, and delete one and it stops appearing in answers. Everything else is left
+untouched, so you never pay twice for the same document, and nothing has to be
+restarted. If you would rather trigger it yourself, switch it off with
+`DOCUMENT_WATCH=false`.
 → [Changing your documents](docs/managing-documents.md)
 
 ## What you configure
@@ -196,22 +198,20 @@ Every single option is listed in [Configuration](docs/configuration.md).
 
 ## Features
 
-- **The assistant decides how to look things up.** Besides plain search it can
-  list all documents, read a whole document (needed for summaries), fetch more
-  text around a hit, or double-check a claim. You choose which of these it may
-  use. → [docs](docs/tools.md)
-- **Pictures and charts are included, not skipped.** They are described in words,
-  so they can be found by a search, and a relevant figure is shown right above
-  the paragraph that discusses it. → [docs](docs/images.md)
-- **Tables are kept.** They stay part of the text instead of being thrown away.
-- **Every claim has a source.** Click it and the original PDF opens at the right
-  page.
-- **The assistant can write its own instructions.** If you do not write them
-  yourself, it creates them from your documents when it starts.
-  → [docs](docs/prompts.md)
-- **Users can switch models and edit instructions** in the settings panel, and
-  their choice is remembered.
-- **Chat history, thumbs up/down and exports**, with GitHub or local login.
+- The assistant decides how to look things up. Besides plain search it can list
+  all documents, read a whole document (needed for summaries), fetch more text
+  around a hit, or double-check a claim. You choose which of these it may use.
+  → [docs](docs/tools.md)
+- Pictures and charts are included rather than skipped. They are described in
+  words, so they can be found by a search, and a relevant figure is shown right
+  above the paragraph that discusses it. → [docs](docs/images.md)
+- Tables stay part of the text instead of being thrown away.
+- Every claim has a source. Click it and the original PDF opens at the right page.
+- If you do not write the assistant's instructions yourself, it writes them from
+  your documents when it starts. → [docs](docs/prompts.md)
+- Users can switch models and edit instructions in the settings panel, and their
+  choice is remembered.
+- Chat history, thumbs up/down and exports, with GitHub or local login.
 
 ## How it fits together
 
@@ -254,15 +254,15 @@ Published in English and German at
 
 ## Limitations
 
-- **This is a prototype.** It has not been security-checked, so look it over
-  before using it with sensitive data or real users.
-- **Sources and follow-up questions only work in German.** The app looks for
-  German wording (`Quelle N: … (S.x)`, `Anschlussfragen:`), so set `language: de`
-  for those two features. Your documents themselves can be in any language.
-- **Describing pictures costs money.** With `images.mode: describe`, every figure
-  is sent to an AI model once while your documents are being read in.
-- **Changing the model that indexes your text means reading everything in again**
-  (`--recreate`).
+- This is a prototype and has not been security-checked, so look it over before
+  using it with sensitive data or real users.
+- Sources and follow-up questions only work in German. The app looks for German
+  wording (`Quelle N: … (S.x)`, `Anschlussfragen:`), so set `language: de` for
+  those two features. Your documents themselves can be in any language.
+- Describing pictures costs money: with `images.mode: describe`, every figure is
+  sent to an AI model once while your documents are being read in.
+- If you change the model that indexes your text, every document has to be read
+  in again (`--recreate`).
 
 ## Contributing
 
