@@ -56,21 +56,40 @@ Einlesen.** Das Beantworten von Fragen kostet in `describe` nichts extra.
     [Daten hinzufügen](adding-data.md).
 
 Dokumente neu einzulesen heißt nicht, die Bilder neu zu beschreiben. Jede
-Beschreibung bleibt auf der Festplatte und wird wiederverwendet. Ein Neuaufbau,
-eine Änderung an der Aufteilung in Textstücke oder ein Einlesen, das auf halbem
-Weg abgebrochen ist, kosten für schon beschriebene Bilder also nichts.
+Beschreibung wird in eine Datei neben deinen Dokumenten geschrieben und
+wiederverwendet. Ein Neuaufbau, eine Änderung an der Aufteilung in Textstücke oder
+ein Einlesen, das auf halbem Weg abgebrochen ist, kosten für schon beschriebene
+Bilder also nichts.
 
-Wiederverwendet wird nur, solange Bild, Prompt und Bildmodell unverändert sind.
-Änderst du `describe_prompt`, `vision_model` oder `describe_image_max_px`, werden
-korrekterweise neue Beschreibungen angefragt. Wenn du sie trotzdem neu erzeugen
-willst, lösche die gespeicherten Beschreibungen:
+Es sind einfache Markdown-Dateien, eine pro Bild, nach Dokument gruppiert. Du
+kannst also nachlesen, was das Modell geschrieben hat:
 
-```bash
-# mit Docker
-docker compose exec chainlit rm -rf /root/.cache/rag-template/figure-descriptions
-# ohne Docker
-rm -rf ~/.cache/rag-template/figure-descriptions
 ```
+data/documents/
+├── Kage_2018_SciReports.pdf
+├── figures/
+│   └── Kage_2018_SciReports__fig0.png
+└── descriptions/
+    └── Kage_2018_SciReports/
+        ├── fig0.md
+        └── fig1.md
+```
+
+Jede Datei beginnt mit einem kurzen Kopf, einem Fingerabdruck von Bild, Prompt und
+Bildmodell, darunter steht die Beschreibung selbst. Wiederverwendet wird nur,
+solange dieser Fingerabdruck passt. Änderst du `describe_prompt`, `vision_model`
+oder `describe_image_max_px`, werden korrekterweise neue Beschreibungen angefragt.
+
+Du darfst eine Beschreibung von Hand korrigieren, und weil der Kopf über das
+Behalten entscheidet, bleibt dein Text erhalten. Beim Assistenten kommt er aber
+nicht sofort an: Das automatische Update reagiert nur auf Änderungen an den
+Dokumenten selbst. Eine handgeschriebene Beschreibung wird deshalb erst beim
+nächsten **vollständigen Neuaufbau** übernommen.
+
+Willst du für ein Dokument neue Beschreibungen erzwingen, lösche seinen Ordner
+unter `descriptions/` und lies die Dokumente mit `--recreate` neu ein. `--recreate`
+ist nötig, weil ein unverändertes PDF sonst übersprungen wird, siehe
+[Dokumente ändern](managing-documents.de.md).
 
 ## Abbildungen in der Antwort anzeigen
 

@@ -47,6 +47,34 @@ Das ist wichtiger, als es klingt. Ohne diesen Schritt würde der Assistent weite
 einem gelöschten Dokument antworten, und der Quellenverweis unter der Antwort würde
 ins Leere führen.
 
+### Was absichtlich liegen bleibt
+
+Das PDF zu löschen beendet seine Nutzung, löscht aber **nicht** die Bilder, die
+daraus ausgeschnitten wurden, und auch nicht die Beschreibungen dazu. Die bleiben
+in `figures/` und `descriptions/` liegen.
+
+Das ist Absicht. Bilder beschreiben kostet Geld. Weil sie liegen bleiben, kannst du
+ein Dokument herausnehmen und die Antworten ohne es vergleichen, es später wieder
+hineinlegen oder eine zweite Collection auf dieselben Dokumente richten, ohne
+erneut dafür zu zahlen.
+
+Es heißt aber auch, dass die Bilder nach dem Löschen des Dokuments weiter auf der
+Festplatte liegen und von jedem geöffnet werden können, der sich anmelden kann.
+**Soll ein Dokument vollständig weg sein, lösche alle drei Teile:**
+
+```bash
+cd apps/chainlit/data/documents
+rm Kage_2018_SciReports.pdf              # das Dokument
+rm -rf descriptions/Kage_2018_SciReports # was die KI über seine Bilder geschrieben hat
+rm figures/Kage_2018_SciReports__fig*    # die Bilder selbst
+```
+
+Nur die Beschreibungen zu löschen ist für sich genommen nützlich, wenn du sie neu
+schreiben lassen willst, etwa nach einer Änderung am Prompt oder am Bildmodell. Sie
+kommen beim nächsten **vollständigen Neuaufbau** zurück, nicht beim nächsten
+automatischen Update, denn ein inhaltlich unverändertes Dokument wird übersprungen.
+Siehe [Wann ein vollständiger Neuaufbau nötig ist](#wann-ein-vollstandiger-neuaufbau-notig-ist).
+
 ## Alles auf einmal austauschen
 
 Du kannst auch den kompletten Dokumentenbestand in einem Zug tauschen: alte Dateien
@@ -111,6 +139,10 @@ alles in Ordnung.
 
     Ein Lauf warnt dich, wenn ein Name doppelt vorkommt. Benenne die Dateien dann
     eindeutig um und lies alles noch einmal ein (siehe unten).
+
+    Doppelte Namen führen außerdem dazu, dass sich die Bildbeschreibungen gegenseitig
+    überschreiben und beide Dokumente ihre Bilder bei jedem Durchlauf neu beschreiben
+    lassen. Das Umbenennen behebt auch das.
 
 !!! warning "Ein leerer Ordner wird als Versehen behandelt"
     Ist der Ordner völlig leer, wird **nichts gelöscht**. Das ist Absicht: ein leerer

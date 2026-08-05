@@ -92,9 +92,10 @@ def figures(monkeypatch, tmp_path):
                 raise description
             return description
 
-        # _figure_sections imports describe_image_cached at call time, so this is
-        # the one name that has to be replaced.
-        monkeypatch.setattr("llm.describe_image_cached", fake_describe, raising=False)
+        # _figure_sections imports describe_figure at call time, so this is the one
+        # name that has to be replaced. Stubbing it also keeps these tests off the
+        # description files, which test_describe_cache.py covers.
+        monkeypatch.setattr("kb.figure_store.describe_figure", fake_describe, raising=False)
         monkeypatch.setattr(figure_store, "figure_dir", lambda _cfg: tmp_path)
         from config import load_config
 

@@ -477,14 +477,20 @@ def _figure_sections(
     Requires the document to have been converted with ``generate_picture_images``.
     Persists each figure PNG (for UI thumbnails + ``attach`` pixels) and, in
     ``describe``/``attach``, writes a VLM description as the chunk text."""
-    from kb.figure_store import figure_dir, persist_figure, pil_to_data_uri
-    from llm import describe_image_cached
+    from kb.figure_store import (
+        describe_figure,
+        description_dir,
+        figure_dir,
+        persist_figure,
+        pil_to_data_uri,
+    )
 
     images = config.images
     pictures = getattr(document, "pictures", None) or []
     if not pictures:
         return []
     dest = figure_dir(config)
+    descriptions_root = description_dir(config)
     pdf_name = f"{stem}.pdf"
     out: list[Section] = []
     failed = 0
@@ -511,10 +517,13 @@ def _figure_sections(
             print(f"[ingest] could not save figure {fig_idx} of {pdf_name}: {exc}")
             continue
         try:
-            description = describe_image_cached(
+            description = describe_figure(
                 pil_to_data_uri(pil, max_px=images.describe_image_max_px),
                 images.describe_prompt,
                 images.vision_model,
+                descriptions=descriptions_root,
+                stem=stem,
+                fig_idx=fig_idx,
             )
         except Exception as exc:  # noqa: BLE001
             print(f"[ingest] figure description failed for {pdf_name} fig{fig_idx}: {exc}")

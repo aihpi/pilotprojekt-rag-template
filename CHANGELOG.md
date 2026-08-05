@@ -13,21 +13,36 @@ can be pointed at a new corpus without touching Python.
 
 ### Added
 
-- **Figure descriptions are cached on disk, so re-reading documents does not pay
-  for them again.** With `images.mode: describe` every picture costs a vision
-  call, and three ordinary things used to repeat that cost for the whole corpus:
-  `--recreate`, a chunking change (the ingest manifest records only
-  path-to-hash, so a settings change is invisible to it), and an import that
-  died partway. Descriptions now live under
-  `$XDG_CACHE_HOME/rag-template/figure-descriptions` (in Docker that is the
-  existing `model_cache` volume, so no compose change and it survives a
-  rebuild). The key covers the encoded image, the prompt and the model, so
-  editing `describe_prompt`, `vision_model` or `describe_image_max_px` still
-  asks for fresh descriptions. Only successful descriptions are cached: an empty
-  one means the call failed, and caching that would make the figure permanently
-  undescribed. Delete the directory to force fresh ones. `make check`'s vision
-  probe deliberately bypasses the cache, since its whole job is to measure the
-  connection repeatedly.
+- **Figure descriptions are kept as readable Markdown next to your documents, so
+  re-reading them does not pay for the vision calls again.** With
+  `images.mode: describe` every picture costs a call, and three ordinary things
+  used to repeat that cost for the whole corpus: `--recreate`, a chunking change
+  (the ingest manifest records only path-to-hash, so a settings change is
+  invisible to it), and an import that died partway. Each description is now
+  `data/documents/descriptions/<document>/fig<n>.md`, a per-document folder
+  beside `figures/`, with a short header fingerprinting the picture, prompt and
+  model it came from. A stored description is reused only while that fingerprint
+  still matches, so editing `describe_prompt`, `vision_model` or
+  `describe_image_max_px` asks for fresh ones. You can correct a description by
+  hand and it survives, though it reaches the assistant only on the next
+  `--recreate`. Empty descriptions are never stored, so a failed call is
+  retried on the next run rather than leaving the figure permanently
+  undescribed.
+
+  Removing a document deliberately leaves its descriptions and figures in place,
+  so you can drop a document to compare answers, add it back, or point a second
+  collection at the same corpus without paying again. The flip side: those files
+  stay on disk and the pictures stay reachable to logged-in users until you
+  delete them. [Changing your documents](https://aihpi.github.io/pilotprojekt-rag-template/managing-documents/)
+  spells out how to remove a document completely.
+
+  Supersedes the short-lived global cache under
+  `$XDG_CACHE_HOME/rag-template/figure-descriptions`, which was keyed only by
+  image content and so was shared across corpora, outlived the document it
+  described, and lived where nobody would look for their own data. That
+  directory is now unused and safe to delete; its descriptions are written again
+  on the next rebuild. `make check`'s vision probe still calls the model
+  directly, since its whole job is to measure the connection repeatedly.
 - **YAML-driven configuration.** One file per instance (selected by `RAG_CONFIG`)
   describes data sources, chunking, models, vector store, retrieval, citations,
   prompt, tools, figures and profiles. Typed and validated by pydantic models in

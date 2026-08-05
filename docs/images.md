@@ -53,21 +53,39 @@ reading documents in.** Answering questions costs nothing extra in `describe`.
     The flags for reading in again are in [Adding your data](adding-data.md).
 
 Reading documents in again does not mean describing the pictures again. Each
-description is kept on disk and reused, so a rebuild, a change to how documents
-are cut into chunks, or an import that failed halfway all cost nothing for
-pictures that were already described.
+description is written to a file next to your documents and reused, so a rebuild,
+a change to how documents are cut into chunks, or an import that failed halfway
+all cost nothing for pictures that were already described.
 
-A description is reused only when the picture, the prompt and the image model are
-all unchanged, so editing `describe_prompt`, switching `vision_model` or changing
-`describe_image_max_px` correctly asks for fresh descriptions. If you want fresh
-ones anyway, delete the stored descriptions:
+They are plain Markdown, one file per picture, grouped by document, so you can
+read what the model wrote:
 
-```bash
-# Docker
-docker compose exec chainlit rm -rf /root/.cache/rag-template/figure-descriptions
-# without Docker
-rm -rf ~/.cache/rag-template/figure-descriptions
 ```
+data/documents/
+├── Kage_2018_SciReports.pdf
+├── figures/
+│   └── Kage_2018_SciReports__fig0.png
+└── descriptions/
+    └── Kage_2018_SciReports/
+        ├── fig0.md
+        └── fig1.md
+```
+
+Each file starts with a short header, a fingerprint of the picture, the prompt and
+the image model, followed by the description itself. A stored description is
+reused only while that fingerprint still matches, so editing `describe_prompt`,
+switching `vision_model` or changing `describe_image_max_px` correctly asks for
+fresh ones.
+
+You can correct a description by hand, and the header is what decides whether it
+is kept, so your text survives. It does not reach the assistant straight away
+though: the automatic update only reacts to changes in the documents themselves,
+so a hand-edited description is picked up on the next **full rebuild**.
+
+To force fresh descriptions for one document, delete its folder under
+`descriptions/` and read your documents in again with `--recreate`. `--recreate` is
+needed because an unchanged PDF is otherwise skipped, see
+[Changing your documents](managing-documents.md).
 
 ## Showing figures in the answer
 

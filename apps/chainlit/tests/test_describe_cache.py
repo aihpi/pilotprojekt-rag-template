@@ -1,29 +1,21 @@
-"""The on-disk cache for figure descriptions.
+"""Figure descriptions stored as per-paper markdown beside the figures.
 
-A description costs a vision call, so an import that runs twice must not pay
-twice. These tests pin the parts that are easy to get wrong: that a failed
-description is never cached (which would make the failure permanent), that the
-key really covers the image, prompt and model, and that a broken cache degrades
-to the old behaviour instead of raising.
-
-``XDG_CACHE_HOME`` is redirected at ``tmp_path`` in every test, so none of them
-touch the real cache directory.
+A description costs a vision call, so re-reading a corpus must not pay twice.
+These pin the parts that are easy to get wrong: that a failed description is
+never stored (which would make the figure permanently undescribed), that the key
+really covers image, prompt and model, and that a mangled file degrades to a
+fresh call instead of raising.
 """
 
 from __future__ import annotations
 
-import llm
+import kb.figure_store as figure_store
 import pytest
 
 
 @pytest.fixture
-def cache(monkeypatch, tmp_path):
-    """Redirect the cache at tmp_path and count the live calls behind it."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    # Module-level "warn once" flag: without this reset, a test that trips the
-    # warning would silence it for every test that runs after it.
-    monkeypatch.setattr(llm, "_DESCRIBE_CACHE_WARNED", False, raising=False)
-
+def figures(monkeypatch, tmp_path):
+    """A figure dir under tmp_path, with the live vision call counted."""
     calls: list[tuple[str, str, str]] = []
     result = {"text": "a bar chart"}
 
@@ -31,142 +23,129 @@ def cache(monkeypatch, tmp_path):
         calls.append((uri, prompt, model))
         return result["text"]
 
-    monkeypatch.setattr(llm, "describe_image_sync", fake_sync)
-    return calls, result, llm._describe_cache_dir()
+    monkeypatch.setattr("llm.describe_image_sync", fake_sync)
+    monkeypatch.setattr(figure_store, "_DESCRIBE_STORE_WARNED", False)
+    return calls, result, tmp_path / "descriptions"
 
 
-def test_an_identical_second_call_does_not_reach_the_model(cache):
-    calls, _result, _dir = cache
-    first = llm.describe_image_cached("data:image/jpeg;base64,AAA", "describe", "gemma")
-    second = llm.describe_image_cached("data:image/jpeg;base64,AAA", "describe", "gemma")
-    assert first == second == "a bar chart"
+def describe(root, uri="data:image/jpeg;base64,AAA", prompt="describe", model="gemma", idx=0):
+    return figure_store.describe_figure(
+        uri, prompt, model, descriptions=root, stem="Paper_2024", fig_idx=idx
+    )
+
+
+def test_an_identical_second_call_reads_the_markdown(figures):
+    calls, _result, root = figures
+    assert describe(root) == "a bar chart"
+    assert describe(root) == "a bar chart"
     assert len(calls) == 1, "the second call should have been served from disk"
 
 
-def test_a_failed_description_is_not_cached(cache):
-    """An empty result means the call failed. Caching it would make the figure
-    permanently undescribed, and the advice to re-ingest would stop working."""
-    calls, result, cache_dir = cache
-    result["text"] = ""
-    assert llm.describe_image_cached("data:image/jpeg;base64,AAA", "p", "m") == ""
-    assert list(cache_dir.glob("*.txt")) == []
-
-    # A later run that succeeds gets through and is then cached: the second of
-    # these two is a hit, so the failure cost one retry, not one per run forever.
-    result["text"] = "recovered"
-    assert llm.describe_image_cached("data:image/jpeg;base64,AAA", "p", "m") == "recovered"
-    assert llm.describe_image_cached("data:image/jpeg;base64,AAA", "p", "m") == "recovered"
-    assert len(calls) == 2
+def test_it_lands_in_a_per_paper_folder_as_readable_prose(figures):
+    _calls, _result, root = figures
+    describe(root, idx=3)
+    path = root / "Paper_2024" / "fig3.md"
+    assert path.is_file()
+    text = path.read_text("utf-8")
+    assert text.endswith("a bar chart\n"), "the description must be the readable body"
+    assert text.startswith("---\nkey: "), "front matter carries the staleness key"
+    assert list(path.parent.glob("*.tmp")) == [], "temp files must not be left behind"
 
 
 @pytest.mark.parametrize(
-    "uri,prompt,model",
+    "kwargs",
     [
-        ("data:image/jpeg;base64,BBB", "describe", "gemma"),  # figure changed
-        ("data:image/jpeg;base64,AAA", "describe it fully", "gemma"),  # prompt changed
-        ("data:image/jpeg;base64,AAA", "describe", "qwen-vl"),  # model changed
+        {"uri": "data:image/jpeg;base64,BBB"},  # figure changed
+        {"prompt": "describe it fully"},  # prompt changed
+        {"model": "qwen-vl"},  # model changed
     ],
 )
-def test_changing_any_input_misses_the_cache(cache, uri, prompt, model):
+def test_changing_any_input_regenerates(figures, kwargs):
     """describe_image_max_px is covered too: it changes the encoded bytes, so it
     changes the URI and therefore the key."""
-    calls, _result, _dir = cache
-    llm.describe_image_cached("data:image/jpeg;base64,AAA", "describe", "gemma")
-    llm.describe_image_cached(uri, prompt, model)
+    calls, _result, root = figures
+    describe(root)
+    describe(root, **kwargs)
     assert len(calls) == 2
 
 
-def test_an_unreadable_entry_falls_back_to_the_model(cache, capsys):
-    """Worst case is the old behaviour, never a crash. The entry is replaced with a
-    directory, which fails the read for any user, unlike chmod under root."""
-    calls, _result, cache_dir = cache
-    llm.describe_image_cached("data:image/jpeg;base64,AAA", "describe", "gemma")
-    entry = next(iter(cache_dir.glob("*.txt")))
-    entry.unlink()
-    entry.mkdir()
+def test_a_failed_description_is_not_stored(figures):
+    """An empty result means the call failed. Storing it would leave the figure
+    permanently undescribed and break the advice to re-ingest."""
+    calls, result, root = figures
+    result["text"] = ""
+    assert describe(root) == ""
+    assert not (root / "Paper_2024").exists()
 
-    assert llm.describe_image_cached("data:image/jpeg;base64,AAA", "describe", "gemma") == (
-        "a bar chart"
-    )
+    result["text"] = "recovered"
+    assert describe(root) == "recovered"
+    assert describe(root) == "recovered"
+    assert len(calls) == 2, "the retry is stored, so the third call is a hit"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "no front matter at all",
+        "---\nkey: abc\n",  # truncated: no closing delimiter
+        "---\nnot: [valid\n---\nbody",  # unreadable header
+        "---\nkey: abc\n---\n",  # header does not match
+        b"\xff\xfe torn write",  # not even UTF-8
+    ],
+)
+def test_a_mangled_file_is_re_described_instead_of_raising(figures, content):
+    calls, _result, root = figures
+    describe(root)
+    path = root / "Paper_2024" / "fig0.md"
+    path.write_bytes(content) if isinstance(content, bytes) else path.write_text(content, "utf-8")
+
+    assert describe(root) == "a bar chart"
     assert len(calls) == 2
-    assert "cache unavailable" in capsys.readouterr().out
 
 
-def test_an_unwritable_cache_returns_descriptions_and_complains_once(cache, monkeypatch, capsys):
-    """Every call still gets its description, and a corpus with hundreds of pictures
-    does not print hundreds of identical complaints."""
-    calls, _result, _dir = cache
+def test_a_matching_header_with_an_empty_body_is_re_described(figures):
+    """Separate from the mangled cases above, which all fail on the key and so never
+    reach the body check. Here the key matches, so only the empty-body guard stands
+    between the reader and "this figure has no description" forever."""
+    calls, _result, root = figures
+    describe(root)
+    path = root / "Paper_2024" / "fig0.md"
+    header = path.read_text("utf-8").split("---\n")[1]
+    path.write_text(f"---\n{header}---\n   \n", "utf-8")  # real key, blank body
+
+    assert describe(root) == "a bar chart"
+    assert len(calls) == 2
+
+
+def test_an_unwritable_store_still_returns_descriptions_and_warns_once(figures, monkeypatch, capsys):
+    """Silence here would be expensive: every figure gets re-described on every run,
+    at full vision-call cost, with nothing in the log to explain it."""
+    calls, _result, root = figures
 
     def refuse(*_a, **_kw):
         raise PermissionError("read-only file system")
 
     monkeypatch.setattr("pathlib.Path.mkdir", refuse)
-    for i in range(5):
-        assert llm.describe_image_cached(f"data:image/jpeg;base64,{i}", "p", "m") == "a bar chart"
-    assert len(calls) == 5
-    assert capsys.readouterr().out.count("cache unavailable") == 1
-
-
-def test_a_corrupt_entry_is_re_fetched_instead_of_crashing_the_import(cache, capsys):
-    """A torn write leaves bytes that are not UTF-8. read_text then raises
-    UnicodeDecodeError, which is a ValueError and NOT an OSError, so catching only
-    OSError let one bad entry abort an entire import."""
-    calls, _result, cache_dir = cache
-    llm.describe_image_cached("data:image/jpeg;base64,AAA", "describe", "gemma")
-    entry = next(iter(cache_dir.glob("*.txt")))
-    entry.write_bytes(b"\xff\xfe torn write")
-
-    assert llm.describe_image_cached("data:image/jpeg;base64,AAA", "describe", "gemma") == (
-        "a bar chart"
-    )
-    assert len(calls) == 2
-    assert "cache unavailable" in capsys.readouterr().out
-
-
-def test_concurrent_writers_do_not_share_a_temp_path(cache, monkeypatch):
-    """os.getpid() cannot separate them: every container runs as PID 1, so two
-    ingests on one cache volume would interleave into the same temp file."""
-    seen: list[str] = []
-    real = type(cache[2]).write_text
-
-    def spy(self, data, *a, **kw):
-        if self.suffix == ".tmp":
-            seen.append(self.name)
-        return real(self, data, *a, **kw)
-
-    monkeypatch.setattr("pathlib.Path.write_text", spy)
     for i in range(4):
-        llm.describe_image_cached(f"data:image/jpeg;base64,{i}", "p", "m")
-    assert len(seen) == len(set(seen)) == 4, f"temp names collided: {seen}"
+        assert describe(root, uri=f"data:image/jpeg;base64,{i}") == "a bar chart"
+    assert len(calls) == 4
+    assert capsys.readouterr().out.count("cannot store figure descriptions") == 1
 
 
-def test_a_zero_byte_entry_is_treated_as_a_miss(cache):
-    """Nothing writes one, but a full disk or a botched copy could leave one. Serving
-    it would mean "this figure has no description" forever."""
-    calls, _result, cache_dir = cache
-    llm.describe_image_cached("data:image/jpeg;base64,AAA", "describe", "gemma")
-    entry = next(iter(cache_dir.glob("*.txt")))
-    entry.write_text("")
-
-    assert llm.describe_image_cached("data:image/jpeg;base64,AAA", "describe", "gemma") == (
-        "a bar chart"
-    )
-    assert len(calls) == 2
+def test_a_crash_between_write_and_rename_leaves_no_temp_file(figures, monkeypatch):
+    """The docstring sells this function on surviving an import that died partway,
+    so its own litter must not accumulate in a folder users are told to browse."""
+    _calls, _result, root = figures
+    monkeypatch.setattr("os.replace", lambda *_a: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        describe(root)
+    assert list((root / "Paper_2024").glob("*.tmp")) == []
 
 
-def test_non_ascii_descriptions_round_trip(cache):
+def test_non_ascii_descriptions_round_trip(figures):
     """Descriptions are German in the shipped config, so the encoding matters."""
-    calls, result, _dir = cache
-    result["text"] = "Ein Säulendiagramm über Größenverhältnisse — 30 °C"
-    first = llm.describe_image_cached("data:image/jpeg;base64,AAA", "p", "m")
-    second = llm.describe_image_cached("data:image/jpeg;base64,AAA", "p", "m")
-    assert first == second == "Ein Säulendiagramm über Größenverhältnisse — 30 °C"
+    calls, result, root = figures
+    result["text"] = "Ein Säulendiagramm über Größenverhältnisse, 30 °C"
+    assert describe(root) == result["text"]
+    assert describe(root) == "Ein Säulendiagramm über Größenverhältnisse, 30 °C"
     assert len(calls) == 1
-
-
-def test_the_cache_lands_under_xdg_cache_home(cache, tmp_path):
-    _calls, _result, cache_dir = cache
-    llm.describe_image_cached("data:image/jpeg;base64,AAA", "p", "m")
-    assert cache_dir == tmp_path / "rag-template" / "figure-descriptions"
-    assert len(list(cache_dir.glob("*.txt"))) == 1
-    assert list(cache_dir.glob("*.tmp")) == [], "temp files must not be left behind"

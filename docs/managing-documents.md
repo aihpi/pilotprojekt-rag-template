@@ -47,6 +47,33 @@ This matters more than it sounds. Without it, the assistant would keep answering
 from a document you deleted, and the source link under the answer would lead
 nowhere.
 
+### What stays behind, on purpose
+
+Deleting the PDF stops it being used, but it does **not** delete the pictures that
+were extracted from it, or the descriptions written for those pictures. They stay
+in `figures/` and `descriptions/`.
+
+That is deliberate. Describing pictures costs money, so leaving them means you can
+take a document out to compare answers without it, put it back later, or point a
+second collection at the same documents, without paying for any of that again.
+
+It also means the pictures are still on disk after you delete the document, and
+anyone who can log in can still open them. **If you need a document gone
+completely, delete all three:**
+
+```bash
+cd apps/chainlit/data/documents
+rm Kage_2018_SciReports.pdf              # the document
+rm -rf descriptions/Kage_2018_SciReports # what the AI wrote about its pictures
+rm figures/Kage_2018_SciReports__fig*    # the pictures themselves
+```
+
+Deleting only the descriptions is useful on its own if you want them written
+fresh, after changing the prompt or the image model for example. They come back on
+the next **full rebuild**, not on the next automatic update, because a document
+whose content has not changed is skipped. See
+[When you need a full rebuild](#when-you-need-a-full-rebuild).
+
 ## Replacing everything at once
 
 You can also swap your whole set of documents in one go: delete the old files and
@@ -108,6 +135,10 @@ click the source under the answer. If the right PDF opens, you are done.
 
     A run warns you when it spots a repeated name. Rename the files so each one is
     unique, then read everything in again (see below).
+
+    Repeated names also make picture descriptions overwrite each other, so both
+    documents have their pictures described again on every run. Renaming fixes that
+    too.
 
 !!! warning "An empty folder is treated as a mistake"
     If the folder turns out to be completely empty, **nothing is deleted**. That is
