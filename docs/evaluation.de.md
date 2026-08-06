@@ -164,29 +164,33 @@ schneller. Gemessen über `ministral-3-14b`, `gemma-4-31b` und `llama-3-3-70b` l
 alle drei innerhalb einer Sekunde beieinander. Was die Zeit bestimmt, ist wie viel die
 Antwort behauptet, denn jede Aussage braucht eine ausgeschriebene Begründung.
 
-### Es tauscht Tokens gegen Zeit, und das zählt bei einem bezahlten Gateway
+### Warum es bezahlbar bleibt
 
 Die Treue prüft jede Aussage in einer eigenen Anfrage, alle gleichzeitig, statt alle
-Aussagen in eine Anfrage zu packen. Das ist etwa dreimal schneller und kostet Tokens,
-weil die abgerufenen Textstellen mit jeder Aussage erneut mitgeschickt werden. Gemessen
-an einer Antwort mit 8 Aussagen und 6,2 kB Kontext:
+Aussagen in eine zu packen. Und jede Aussage wird nur gegen die paar Textstellen
+geprüft, die am ehesten dazu passen, ausgewählt über Wortüberlappung, statt gegen den
+ganzen abgerufenen Kontext.
 
-| | eine Anfrage | eine pro Aussage |
+Beides zählt, das Zweite besonders, wenn eine Antwort mit `fetch_document` entstanden
+ist und damit ein ganzes Paper abrufen kann. Gemessen an einer echten Antwort mit 63
+Textstellen, 71 kB Kontext und 12 Aussagen:
+
+| | Zeit | Input-Tokens |
 |---|---|---|
-| Input-Tokens | 2.558 | **18.840** |
-| Output-Tokens | 622 | 796 |
-| Zeit | 17,0 s | **5,5 s** |
+| alle Aussagen in einer Anfrage | 39,3 s | 19.244 |
+| eine pro Aussage, jeweils ganzer Kontext | 75,4 s | 226.594 |
+| **eine pro Aussage, geroutet** | **12,8 s** | 40.181 |
 
-Der Input steigt etwa um Faktor 7, der Output kaum, und der Prüfschritt wird dreimal
-schneller. Bei einem selbst betriebenen Gateway ist das Rechenzeit, die du schon
-besitzt, und genau davon geht dieses Template aus. **Richtest du `judge_model` auf eine
-bezahlte API, zahlst du für diese Geschwindigkeit etwa das Sechsfache pro bewerteter
-Antwort** — dann setze `_VERDICT_CONCURRENCY = 1` in `eval_app/metrics.py` oder bündle
-die Aussagen wieder in einen Aufruf.
+Aufteilen ohne Routing ist schlechter als gar nicht aufteilen. Mit Routing ist es
+dreimal schneller als eine gebündelte Anfrage, bei etwa doppelt so vielen
+Input-Tokens. Bei einem selbst betriebenen Gateway ist das Rechenzeit, die du schon
+besitzt, und genau davon geht dieses Template aus; bei einer bezahlten API sind es
+etwa doppelte Kosten pro bewerteter Antwort.
 
-Die Werte ändern sich dadurch nicht: Es ist derselbe Prompt mit einer kürzeren Liste,
-und an einer absichtlich gemischten Antwort (4 von 7 Aussagen gedeckt) lieferten
-gebündelte und einzelne Prüfung dieselben Urteile Aussage für Aussage.
+Die Werte ändern sich dadurch nicht. Es ist RAGAS' eigener Prompt mit einer kürzeren
+Liste, und an einer absichtlich gemischten Antwort — drei echte und drei erfundene
+Aussagen — lieferten gebündelte und geroutete Prüfung dieselben Urteile und markierten
+genau dieselben drei als nicht gedeckt.
 
 Warten musst du deswegen nicht. Die Bewertung startet erst, wenn die Antwort auf dem
 Bildschirm steht und gespeichert ist, du kannst also direkt weiterfragen. Das

@@ -220,3 +220,43 @@ def test_failure_categories_group_per_config(db):
 )
 def test_the_gateway_url_gets_exactly_one_v1(given, expected):
     assert metrics.openai_base_url(given) == expected
+
+
+# --------------------------------------------------------------------------- #
+# Routing claims to the chunks worth checking them against
+# --------------------------------------------------------------------------- #
+
+
+def test_a_small_context_is_not_routed_at_all():
+    """With no more chunks than the budget there is nothing to choose between."""
+    routed = metrics.route_contexts(["claim a", "claim b"], ["chunk x", "chunk y"], budget=4)
+    assert routed == ["chunk x\nchunk y"] * 2
+
+
+def test_a_claim_is_routed_to_the_chunk_that_shares_its_words():
+    chunks = [
+        "fibronektin adhaesionsrate wurde gemessen",
+        "kollagen substrat ergebnisse tabelle",
+        "laminin oberflaeche beschichtung daten",
+        "photonen detektion zaehlrate histogramm",
+        "kalibrierung labor aufbau beschreibung",
+    ]
+    (routed,) = metrics.route_contexts(
+        ["Die Adhaesionsrate von Fibronektin wurde gemessen"], chunks, budget=2
+    )
+    assert "fibronektin" in routed
+    assert len(routed.split("\n")) == 2, "never more than the budget"
+
+
+def test_routing_keeps_retrieval_order():
+    # The judge sees a numbered context, so shuffling it would change what "[1]" means.
+    chunks = ["alpha unique", "beta words", "gamma terms", "delta items", "alpha again"]
+    (routed,) = metrics.route_contexts(["alpha"], chunks, budget=2)
+    assert routed.split("\n") == ["alpha unique", "alpha again"]
+
+
+def test_every_claim_gets_its_own_context():
+    chunks = ["fibronektin rate", "photonen zaehlung", "kalibrierung aufbau", "tabelle werte", "laminin daten"]
+    routed = metrics.route_contexts(["fibronektin", "photonen"], chunks, budget=1)
+    assert "fibronektin" in routed[0] and "photonen" in routed[1]
+    assert routed[0] != routed[1], "routing must not collapse to one shared context"

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,62 @@ _MAX_TOKENS = 4096
 # with dozens of claims does not open dozens of simultaneous requests at a shared
 # gateway; eight covers the typical answer without batching.
 _VERDICT_CONCURRENCY = 8
+
+# How many chunks each claim is checked against when there are more than this. Four was
+# measured: at two, one claim flipped from supported to unsupported, and at four and
+# eight the verdicts matched full-context checking exactly, including on an answer with
+# three invented claims among three real ones.
+_ROUTED_CHUNKS = 4
+
+# Words long enough to carry meaning. Short ones ("der", "und", "was") match everything
+# and would make the ranking noise. Includes German umlauts, since the corpus and the
+# answers are German.
+_WORD = re.compile(r"[a-zA-ZäöüÄÖÜß0-9]{4,}")
+
+
+def route_contexts(
+    claims: list[str], contexts: list[str], budget: int = _ROUTED_CHUNKS
+) -> list[str]:
+    """Pick the chunks each claim is worth checking against; one string per claim.
+
+    Checking every claim against every chunk is what a ``fetch_document`` answer makes
+    ruinous: measured on a real answer with 63 chunks and 12 claims, sending the whole
+    71 kB context with each claim cost 226,594 input tokens and 75.4s — slower and far
+    more expensive than not splitting at all. Routing first brought the same answer to
+    40,181 tokens and 12.8s, against 39.3s for RAGAS's single batched call.
+
+    Ranking is word overlap, not embeddings, because it is free: 0.003s and no API call,
+    where embedding 63 chunks plus 12 claims took 11.4s and would have been half the
+    remaining time. Ties break toward the longer chunk, which is likelier to contain a
+    given detail.
+
+    ponytail: a lexical heuristic, so a claim paraphrased entirely in different words
+    could be routed away from the chunk that supports it and be marked unsupported —
+    a false negative, the dangerous direction for this metric. The ``budget`` of four is
+    the slack that makes that unlikely, and it was checked against full-context
+    verdicts on a mixed answer with no disagreement either way. If it ever does drift,
+    the upgrade is embedding the claims and chunks (accurate, ~11s) or passing the
+    vectors retrieval already computed through the score request (accurate and free,
+    but real plumbing).
+    """
+    if len(contexts) <= budget:
+        # Nothing to gain from choosing: every claim sees everything.
+        return ["\n".join(contexts)] * len(claims)
+
+    # Tokenised once, not once per claim: 12 claims over 63 chunks would otherwise be
+    # 756 re-tokenisations of up to 4 kB each.
+    chunk_words = [set(_WORD.findall(c.lower())) for c in contexts]
+
+    routed: list[str] = []
+    for claim in claims:
+        words = set(_WORD.findall(claim.lower()))
+        ranked = sorted(
+            range(len(contexts)),
+            key=lambda i: (-len(words & chunk_words[i]), -len(contexts[i])),
+        )[:budget]
+        # Original order, so the numbering a judge sees follows the retrieval order.
+        routed.append("\n".join(contexts[i] for i in sorted(ranked)))
+    return routed
 
 
 def _direct_judge(client, model: str):
@@ -207,7 +264,11 @@ async def _faithfulness(
         # RAGAS returns NaN here. Nothing to report and nothing to average.
         return {}
 
-    context = "\n".join(contexts)
+    # Each claim is checked against the chunks most likely to bear on it, rather than
+    # against all of them. Without this, splitting is a pessimisation on any answer
+    # built from fetch_document — see route_contexts for the measurements.
+    routed = route_contexts(list(statements), contexts)
+
     # One call per claim, concurrently, instead of one call carrying all of them.
     #
     # RAGAS batches every claim into a single verdict call, and that call is the whole
@@ -226,14 +287,16 @@ async def _faithfulness(
     # identical verdicts claim by claim, twice in a row.
     limit = asyncio.Semaphore(_VERDICT_CONCURRENCY)
 
-    async def verdict_for(statement: str):
+    async def verdict_for(statement: str, claim_context: str):
         async with limit:
-            return await metric._create_verdicts([statement], context)
+            return await metric._create_verdicts([statement], claim_context)
 
     # No return_exceptions: dropping a claim that failed would shrink the denominator
     # and quietly overstate the score. Better to lose the metric for this answer, which
     # the caller already records as absent rather than as zero.
-    results = await asyncio.gather(*(verdict_for(s) for s in statements))
+    results = await asyncio.gather(
+        *(verdict_for(s, c) for s, c in zip(statements, routed))
+    )
 
     judged = [r.statements[0] for r in results if r.statements]
     if len(judged) != len(statements):

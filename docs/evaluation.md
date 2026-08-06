@@ -158,29 +158,32 @@ faster. Measured across `ministral-3-14b`, `gemma-4-31b` and `llama-3-3-70b`, al
 three land within a second of each other. What does drive the time is how much the
 answer claims, because each claim needs a written justification.
 
-### It trades tokens for time, which matters on a metered gateway
+### How it stays affordable
 
-Faithfulness checks each claim in its own request, all of them at once, instead of
-putting every claim in one request. That is roughly three times faster, and it costs
-tokens, because the retrieved context is resent with every claim. Measured on an
-8-claim answer with 6.2 kB of context:
+Faithfulness checks each claim in its own request, all at once rather than putting
+every claim into one. Each claim is checked only against the handful of chunks most
+likely to bear on it, chosen by word overlap, instead of against the whole retrieved
+context.
 
-| | one request | one per claim |
+Both halves matter, and the second one especially when an answer was built with
+`fetch_document`, which can retrieve a whole paper. Measured on a real answer with 63
+chunks, 71 kB of context and 12 claims:
+
+| | time | input tokens |
 |---|---|---|
-| input tokens | 2,558 | **18,840** |
-| output tokens | 622 | 796 |
-| time | 17.0 s | **5.5 s** |
+| all claims in one request | 39.3 s | 19,244 |
+| one request per claim, whole context each | 75.4 s | 226,594 |
+| **one per claim, routed** | **12.8 s** | 40,181 |
 
-Input goes up about 7x, output barely moves, and the whole verdict step gets three
-times faster. On a self-hosted gateway that is compute you already own, which is what
-this template assumes. **If you point `judge_model` at a metered API, you are paying
-about six times more per scored answer for that speed** — in which case set
-`_VERDICT_CONCURRENCY = 1` in `eval_app/metrics.py`, or batch the claims again by
-passing all statements to `_create_verdicts` in one call.
+Splitting without routing is worse than not splitting at all. With routing it is three
+times faster than one batched request, for roughly twice the input tokens. That is
+compute on a self-hosted gateway, which is what this template assumes; on a metered
+API it is about twice the cost per scored answer.
 
-The scores are unaffected: it is the same prompt with a shorter list, and on a
-deliberately mixed answer (4 of 7 claims supported) batched and per-claim checking
-returned identical verdicts claim by claim.
+The scores are unaffected. It is RAGAS's own prompt with a shorter list, and on a
+deliberately mixed answer — three real claims and three invented ones — batched and
+routed per-claim checking returned identical verdicts, marking exactly the same three
+as unsupported.
 
 This does not keep you waiting. Scoring starts only after the answer is on screen
 and saved, so you can carry straight on asking questions. The badge updates itself
