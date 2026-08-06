@@ -206,6 +206,18 @@ class RetrievalConfig(BaseModel):
     """Upper bound the model may request. Defaults to ``top_k`` when unset."""
     max_source_links: int = Field(default=8, ge=0)
     score_threshold: float = Field(default=0.0, ge=0.0)
+    hybrid: bool = False
+    """Search dense *and* sparse (lexical) vectors and fuse the two rankings.
+    Helps where embeddings are weakest: standard numbers, compound technical
+    terms, proper names. Enabling it on an existing collection requires a
+    re-ingest with ``--recreate`` — points written before have no sparse vector."""
+    fusion: Literal["rrf", "dbsf"] = "rrf"
+    """``hybrid`` only. ``rrf`` fuses on rank position, ``dbsf`` on
+    distribution-normalized scores. RRF is the safer default; DBSF can win when
+    one of the two retrievers is clearly stronger. Measure before switching."""
+    prefetch_limit: int = Field(default=30, ge=1)
+    """``hybrid`` only: candidates each leg retrieves before fusion. Must exceed
+    ``top_k`` or fusion has nothing to reorder."""
     payload_indexes: list[str] = Field(default_factory=list)
     """Metadata fields to build Qdrant keyword indexes on."""
     filterable_fields: list[str] = Field(default_factory=list)

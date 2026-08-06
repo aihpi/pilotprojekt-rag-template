@@ -208,8 +208,9 @@ class FakeClient:
         for point in points:
             self.points[point.id] = _Record(payload=point.payload, vector=point.vector)
 
-    def create_collection(self, collection_name, vectors_config=None):
+    def create_collection(self, collection_name, vectors_config=None, sparse_vectors_config=None):
         self.collections.add(collection_name)
+        self.sparse_config = sparse_vectors_config
 
     def delete_collection(self, collection_name, timeout=None):
         self.collections.discard(collection_name)

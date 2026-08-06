@@ -46,6 +46,7 @@ plugins:
             Field-Mapping DSL: Field-Mapping-DSL
             Example Corpus: Beispielkorpus
             Agentic Tools: Agentische Tools
+            Hybrid Retrieval: Hybride Suche
             Figures & Images: Abbildungen
             System Prompts: System-Prompts
             Extending (parsers & chunkers): Erweitern (Parser & Chunker)
@@ -79,6 +80,7 @@ nav:
   - Example Corpus: example-corpus.md
   - Adding Your Data: adding-data.md
   - Agentic Tools: tools.md
+  - Hybrid Retrieval: retrieval.md
   - Figures & Images: images.md
   - System Prompts: prompts.md
   - Troubleshooting: troubleshooting.md

@@ -19,6 +19,7 @@ from kb.chunkers import get_chunker
 from kb.chunkers.base import Chunk
 from kb.parsers import get_parser
 from kb.parsers.base import FileGate, file_gate
+from kb.sparse import SPARSE_VECTOR, sparse_vector
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +119,10 @@ def _distance(name: str):
     return {"cosine": Distance.COSINE, "dot": Distance.DOT, "euclid": Distance.EUCLID}[name]
 
 
-def _ensure_collection(client, name: str, size: int, distance: str, recreate: bool) -> None:
-    from qdrant_client.models import VectorParams
+def _ensure_collection(
+    client, name: str, size: int, distance: str, recreate: bool, hybrid: bool
+) -> None:
+    from qdrant_client.models import Modifier, SparseVectorParams, VectorParams
 
     if recreate and collection_exists(client, name):
         client.delete_collection(collection_name=name, timeout=60)
@@ -127,6 +130,12 @@ def _ensure_collection(client, name: str, size: int, distance: str, recreate: bo
         client.create_collection(
             collection_name=name,
             vectors_config=VectorParams(size=size, distance=_distance(distance)),
+            # The dense vector stays unnamed, so a non-hybrid collection is
+            # byte-identical to before. IDF is applied server-side, which is why
+            # the client only ever sends term frequencies (see kb/sparse.py).
+            sparse_vectors_config=(
+                {SPARSE_VECTOR: SparseVectorParams(modifier=Modifier.IDF)} if hybrid else None
+            ),
         )
 
 
@@ -243,11 +252,18 @@ async def ingest_chunks(
     batch_size: int | None = None,
     max_batch_chars: int | None = None,
     embed_model: str | None = None,
+    hybrid: bool = False,
     progress: ProgressCallback | None = None,
 ) -> int:
     from qdrant_client.models import PointStruct
 
     from llm import embed
+
+    def _vector(dense: list[float], text: str):
+        """Dense alone, or dense + the lexical vector when hybrid is on."""
+        if not hybrid:
+            return dense
+        return {"": dense, SPARSE_VECTOR: sparse_vector(text)}
 
     if not chunks:
         logger.info("ingest: no chunks to ingest")
@@ -270,13 +286,19 @@ async def ingest_chunks(
             )
 
     first_vec = (await embed([chunks[0].text]))[0]
-    _ensure_collection(client, collection, len(first_vec), distance, recreate)
+    _ensure_collection(client, collection, len(first_vec), distance, recreate, hybrid)
     _ensure_payload_indexes(client, collection, payload_indexes or [])
     _write_sentinel(client, collection, embed_model, len(first_vec), first_vec)
 
     client.upsert(
         collection_name=collection,
-        points=[PointStruct(id=_point_id(chunks[0].doc_id), vector=first_vec, payload=_payload(chunks[0]))],
+        points=[
+            PointStruct(
+                id=_point_id(chunks[0].doc_id),
+                vector=_vector(first_vec, chunks[0].text),
+                payload=_payload(chunks[0]),
+            )
+        ],
     )
 
     start = 1
@@ -292,7 +314,7 @@ async def ingest_chunks(
             total += n
         vectors = await embed([c.text for c in batch])
         points = [
-            PointStruct(id=_point_id(c.doc_id), vector=v, payload=_payload(c))
+            PointStruct(id=_point_id(c.doc_id), vector=_vector(v, c.text), payload=_payload(c))
             for c, v in zip(batch, vectors, strict=True)
         ]
         try:
@@ -546,6 +568,7 @@ async def ingest_all(
             payload_indexes=config.retrieval.payload_indexes,
             recreate=recreate,
             embed_model=config.models.embed_model,
+            hybrid=config.retrieval.hybrid,
             progress=progress,
         )
     elif gate.skipped and not removed:
