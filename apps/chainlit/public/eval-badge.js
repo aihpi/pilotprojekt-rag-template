@@ -39,6 +39,7 @@
   var badge = null;
   var panel = null;
   var lastStatus = null;
+  var lastPath = null;
 
   function styles() {
     if (document.getElementById(ID + "-styles")) return;
@@ -268,6 +269,31 @@
     return true;
   }
 
+  /* Chainlit routes client-side, so switching chats never re-runs this script and
+   * nothing here noticed the URL had changed. The badge therefore waited for the next
+   * POLL_MS tick: up to 5s late, ~2.5s on average, which read as "switching chats is
+   * slow". Worse, until that tick it showed the numbers of the conversation you had
+   * just left.
+   *
+   * Called from the mutation observer (a swap fires hundreds of records) and from
+   * popstate. Assigning lastPath BEFORE polling is what keeps that to one request. */
+  function onNavigation() {
+    if (location.pathname === lastPath) return false;
+    lastPath = location.pathname;
+
+    // Blank first. A stale score on the wrong conversation is worse than no score,
+    // and this is the half that matters more than the latency.
+    if (badge) badge.removeAttribute("data-show");
+    if (panel) panel.removeAttribute("data-open");
+    lastStatus = null;
+    // Otherwise the revision short-circuit suppresses the re-render whenever the new
+    // conversation happens to round to the same numbers as the old one.
+    lastRevision = null;
+
+    poll();
+    return true;
+  }
+
   function pct(value) {
     return Math.round(value * 100) + "%";
   }
@@ -359,14 +385,20 @@
   }
 
   function start() {
+    lastPath = location.pathname;
     poll();
     setInterval(poll, POLL_MS);
     // The composer is React-rendered, so a re-render can drop the badge or replace
-    // its parent. Put it back whenever that happens.
+    // its parent. Put it back whenever that happens. The same burst of mutations is
+    // also the earliest signal that a chat switch is under way, which is why
+    // onNavigation is checked here rather than on a timer of its own.
     var observer = new MutationObserver(function () {
+      onNavigation();
       if (badge && badge.getAttribute("data-show")) place();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
+    // Back/forward may not produce the same mutation burst.
+    window.addEventListener("popstate", onNavigation);
     window.addEventListener("resize", positionPanel);
   }
 
