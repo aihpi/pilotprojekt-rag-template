@@ -22,6 +22,53 @@ score means the answer may be perfectly true and still beside the point.
 Neither one needs a "correct answer" written by hand, which is why they work on
 the real conversations people are already having.
 
+### How they are calculated
+
+The badge shows the same thing in its hover panel, so you should not need this page
+open while you work. It is here for reference.
+
+**Faithfulness** breaks the answer into individual claims and checks each one
+against the retrieved chunks:
+
+```
+Faithfulness = supported claims / all claims
+```
+
+That is why the number is worth more than a grade: 0.5 does not mean "mediocre", it
+means *half the claims in that answer were not backed by the sources*. The hover
+panel lists them, each with the judge's reason, so you can see which claim failed
+rather than guessing.
+
+**Relevance** generates questions from the answer and compares them to the question
+that was actually asked:
+
+```
+Relevance = ⌀ cos( E(generated questionᵢ) , E(real question) )
+```
+
+`E(...)` is your embedding model, so this metric costs an embedding call as well as
+a judge call.
+
+**The badge value** is the running mean over the conversation:
+
+```
+⌀ = (1/n) · Σ valueᵢ
+```
+
+### Relevance 0% usually means the assistant declined
+
+This one is worth knowing before it alarms you. If the answer is judged
+*noncommittal* — "that is not in the documents" — the similarity is thrown away and
+relevance is forced to **0**:
+
+```
+Relevance = mean(cosine) × (0 if the answer declined, else 1)
+```
+
+So 0% does not mean the answer was off-topic. It usually means the assistant refused
+to answer, which is the behaviour you *want* when the corpus does not cover a
+question. The hover panel says so explicitly when it happens.
+
 ## Read the change, not the number
 
 This is the one thing worth remembering.

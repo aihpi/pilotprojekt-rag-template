@@ -24,6 +24,54 @@ Thema vorbeigehen.
 Keine der beiden braucht eine von Hand geschriebene „richtige Antwort". Genau
 deshalb funktionieren sie auf den echten Gesprächen, die sowieso schon stattfinden.
 
+### Wie sie berechnet werden
+
+Das Abzeichen zeigt dasselbe in seinem Hover-Fenster, du sollst diese Seite also
+nicht offen halten müssen. Hier steht es zum Nachschlagen.
+
+**Treue** zerlegt die Antwort in einzelne Aussagen und prüft jede gegen die
+abgerufenen Textstellen:
+
+```
+Treue = gedeckte Aussagen / alle Aussagen
+```
+
+Deshalb ist die Zahl mehr als eine Note: 0,5 heißt nicht „mittelmäßig", sondern
+*die Hälfte der Aussagen dieser Antwort war nicht durch die Quellen gedeckt*. Das
+Hover-Fenster listet sie einzeln auf, mit der Begründung des Bewertungsmodells, du
+siehst also welche Aussage durchgefallen ist und musst nicht raten.
+
+**Relevanz** erzeugt aus der Antwort Fragen und vergleicht sie mit der Frage, die
+tatsächlich gestellt wurde:
+
+```
+Relevanz = ⌀ cos( E(erzeugte Frageᵢ) , E(echte Frage) )
+```
+
+`E(...)` ist dein Embedding-Modell, diese Kennzahl kostet also zusätzlich zum
+Bewertungs-Aufruf einen Embedding-Aufruf.
+
+**Der Wert im Abzeichen** ist der laufende Mittelwert über das Gespräch:
+
+```
+⌀ = (1/n) · Σ Wertᵢ
+```
+
+### Relevanz 0% heißt meistens: der Assistent hat sich enthalten
+
+Das solltest du wissen, bevor es dich erschreckt. Wird die Antwort als
+*enthaltend* eingeschätzt — „steht nicht in den Dokumenten" — wird die Ähnlichkeit
+verworfen und die Relevanz auf **0** gesetzt:
+
+```
+Relevanz = ⌀(Cosinus) × (0 wenn die Antwort sich enthält, sonst 1)
+```
+
+0% heißt also nicht, dass die Antwort am Thema vorbeiging. Meistens heißt es, dass
+der Assistent die Antwort verweigert hat, und genau das *soll* er tun, wenn der
+Korpus eine Frage nicht abdeckt. Das Hover-Fenster sagt es in diesem Fall
+ausdrücklich.
+
 ## Lies die Veränderung, nicht die Zahl
 
 Das ist das Einzige, was du dir merken musst.

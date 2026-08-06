@@ -88,27 +88,68 @@ async def _score_one(
     than no row. A failure is recorded as absent, never as 0.0 — which matters
     especially here, because 0.0 is itself a meaningful faithfulness score.
     """
-    from ragas.metrics.collections import AnswerRelevancy, Faithfulness
+    from ragas.metrics.collections import AnswerRelevancy
 
     try:
         if name == "faithfulness":
-            result = await Faithfulness(llm=llm).ascore(
-                user_input=question, response=answer, retrieved_contexts=contexts
-            )
-        else:
-            # AnswerRelevancy takes no contexts by design: it asks whether the
-            # answer fits the question, which is answerable without them.
-            result = await AnswerRelevancy(llm=llm, embeddings=embeddings).ascore(
-                user_input=question, response=answer
-            )
+            return await _faithfulness(question, answer, contexts, llm)
+        # AnswerRelevancy takes no contexts by design: it asks whether the answer
+        # fits the question, which is answerable without them.
+        result = await AnswerRelevancy(llm=llm, embeddings=embeddings).ascore(
+            user_input=question, response=answer
+        )
     except Exception as exc:
         logger.warning("evaluation: metric %s failed (%s)", name, exc)
         return {}
 
-    out: dict[str, Any] = {name: float(result.value)}
-    if getattr(result, "reason", None):
-        out[f"{name}_reason"] = result.reason
+    score = float(result.value)
+    out: dict[str, Any] = {"relevance": score}
+    # RAGAS computes `cosine_sim.mean() * int(not all_noncommittal)`, so a score of
+    # exactly 0 means the answer was judged noncommittal ("not in the documents")
+    # and the similarity was thrown away — not that the answer was off-topic. Worth
+    # surfacing, because a bare 0% reads as a failure when the assistant did the
+    # right thing by declining.
+    #
+    # ponytail: inferred from the exact zero rather than read from the flag, because
+    # RAGAS keeps that flag in a local inside ascore() with no accessor, and the
+    # alternative is reproducing its numpy cosine block. A genuine mean cosine of
+    # exactly 0.0 needs perfectly orthogonal embeddings, so the inference is safe.
+    # Reproduce the loop if RAGAS ever exposes the flag.
+    if score == 0.0:
+        out["relevance_declined"] = True
     return out
+
+
+async def _faithfulness(
+    question: str, answer: str, contexts: list[str], llm: Any
+) -> dict[str, Any]:
+    """Faithfulness, keeping the per-claim verdicts that ``ascore()`` discards.
+
+    ``Faithfulness.ascore()`` breaks the answer into atomic claims, checks each
+    against the retrieved chunks, and then returns only the ratio — throwing away a
+    per-claim verdict *with a reason*, which is the most useful thing it produced.
+    Driving its three steps directly keeps them, and the score is still RAGAS's own
+    ``_compute_score`` rather than arithmetic of ours.
+
+    These are private methods. Acceptable here because ``ragas`` is pinned to an
+    exact version, so they cannot shift underneath us, and because the alternative
+    is showing a number with no way to see what it counted.
+    """
+    from ragas.metrics.collections import Faithfulness
+
+    metric = Faithfulness(llm=llm)
+    statements = await metric._create_statements(question, answer)
+    if not statements:
+        # RAGAS returns NaN here. Nothing to report and nothing to average.
+        return {}
+    verdicts = await metric._create_verdicts(statements, "\n".join(contexts))
+    score = float(metric._compute_score(verdicts))
+
+    claims = [
+        {"text": s.statement, "ok": bool(s.verdict), "why": s.reason}
+        for s in verdicts.statements
+    ]
+    return {"faithfulness": score, "faithfulness_claims": claims}
 
 
 async def score(

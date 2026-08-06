@@ -2309,6 +2309,8 @@ async def on_app_startup() -> None:
             "faithfulness": faithfulness,
             "relevance": summary.get("relevance"),
             "trend": trend,
+            # Why the last scored answer got those numbers, for the hover panel.
+            "detail": summary.get("last_detail"),
             # Lets the badge skip a re-render when nothing moved, same trick as
             # /ingest-status. Answer count plus the rounded means is enough: any
             # change that is visible at whole-percent resolution changes this.

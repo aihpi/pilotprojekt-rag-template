@@ -164,6 +164,13 @@ async def post_score(request: ScoreRequest) -> dict[str, object]:
         base_url=LITELLM_BASE_URL,
         api_key=LITELLM_API_KEY,
     )
+    # Why the judge landed where it did, kept separately from the numbers because it
+    # is read whole and never aggregated.
+    detail = {
+        key: scores[key]
+        for key in ("faithfulness_claims", "relevance_declined")
+        if key in scores
+    }
     storage.add_score(
         DB_PATH,
         question=request.question,
@@ -174,5 +181,6 @@ async def post_score(request: ScoreRequest) -> dict[str, object]:
         relevance=scores.get("relevance"),
         message_id=request.message_id,
         thread_id=request.thread_id,
+        detail=detail or None,
     )
     return scores

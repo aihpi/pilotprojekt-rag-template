@@ -66,6 +66,9 @@
       "#" + ID + "-panel {",
       "  position: fixed; z-index: 90; display: none;",
       "  max-width: min(30rem, calc(100vw - 2rem));",
+      /* An answer with a dozen claims makes this tall fast, and the panel is
+       * positioned above a badge that already sits near the bottom of the window. */
+      "  max-height: min(60vh, 32rem); overflow-y: auto; overscroll-behavior: contain;",
       "  padding: .8rem .9rem; border-radius: .6rem;",
       "  border: 1px solid hsl(var(--border));",
       "  background: hsl(var(--background)); color: hsl(var(--foreground));",
@@ -87,6 +90,26 @@
       "  color: hsl(var(--foreground));",
       "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem;",
       "  white-space: normal; overflow-wrap: anywhere;",
+      "}",
+      "#" + ID + "-panel .reb-claims-head { margin: 0 0 .4rem; }",
+      "#" + ID + "-panel .reb-claim {",
+      "  display: flex; gap: .45rem; margin: .3rem 0;",
+      "  color: hsl(var(--muted-foreground));",
+      "}",
+      "#" + ID + "-panel .reb-claim-mark { flex: 0 0 auto; font-weight: 700; }",
+      /* The tick and cross are the only colour in the whole badge, and they mark a
+       * per-claim yes/no rather than grading a number, so they cannot be misread as
+       * a threshold. */
+      '#' + ID + '-panel .reb-claim[data-ok="1"] .reb-claim-mark { color: #48bb78; }',
+      '#' + ID + '-panel .reb-claim[data-ok="0"] .reb-claim-mark { color: #fc8181; }',
+      "#" + ID + "-panel .reb-claim-why { opacity: .75; font-size: .95em; }",
+      "#" + ID + "-panel .reb-note {",
+      "  margin: .55rem 0 0; padding: .4rem .5rem; border-radius: .35rem;",
+      "  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));",
+      "}",
+      "#" + ID + "-panel h4 + h4, #" + ID + "-panel .reb-claim + h4 {",
+      "  margin-top: .8rem; padding-top: .6rem;",
+      "  border-top: 1px solid hsl(var(--border));",
       "}",
       "#" + ID + "-panel .reb-warn {",
       "  margin-top: .7rem; padding-top: .55rem;",
@@ -130,9 +153,55 @@
     panel.style.top = Math.max(8, r.top - h - 8) + "px";
   }
 
+  function escapeHtml(text) {
+    var d = document.createElement("div");
+    d.textContent = text == null ? "" : String(text);
+    return d.innerHTML;
+  }
+
+  /* What the judge actually decided about the last answer. This is the part that
+   * makes a number act like evidence instead of a verdict: rather than telling
+   * anyone whether 67% is "good", show that it means two of three claims were
+   * backed by the sources, and which one was not. */
+  function detailHtml(status) {
+    var d = status.detail;
+    if (!d) return "";
+    var out = ["<h4>Letzte bewertete Antwort</h4>"];
+
+    var claims = d.faithfulness_claims || [];
+    if (claims.length) {
+      var ok = claims.filter(function (c) { return c.ok; }).length;
+      out.push(
+        '<div class="reb-claims-head">' +
+          ok + " von " + claims.length +
+          (claims.length === 1 ? " Aussage" : " Aussagen") +
+          " durch die Quellen gedeckt</div>"
+      );
+      claims.forEach(function (c) {
+        out.push(
+          '<div class="reb-claim" data-ok="' + (c.ok ? "1" : "0") + '">' +
+            '<span class="reb-claim-mark">' + (c.ok ? "&#10003;" : "&#10007;") + "</span>" +
+            "<div><div>" + escapeHtml(c.text) + "</div>" +
+            (c.why ? '<div class="reb-claim-why">' + escapeHtml(c.why) + "</div>" : "") +
+            "</div></div>"
+        );
+      });
+    }
+
+    if (d.relevance_declined) {
+      out.push(
+        '<div class="reb-note">Relevanz 0%: die Antwort hat sich enthalten ' +
+          "(etwa &bdquo;steht nicht in den Dokumenten&ldquo;). Das ist keine " +
+          "schlechte Antwort, sondern eine verweigerte &mdash; die Kennzahl wird " +
+          "in diesem Fall auf 0 gesetzt.</div>"
+      );
+    }
+    return out.join("");
+  }
+
   function panelHtml(status) {
     var n = status.answers;
-    return [
+    return [detailHtml(status)].concat([
       "<h4>Antwortqualität in diesem Gespräch</h4>",
       "<dl>",
       "<dt>Treue</dt><dd>",
@@ -158,7 +227,7 @@
       "Beide Werte stammen von einem Sprachmodell, das ein anderes bewertet, und tragen ",
       "dessen Meinung und Rauschen mit. Einzelwerte sagen wenig, Veränderungen sagen etwas.",
       "</div>",
-    ].join("");
+    ]).join("");
   }
 
   function element() {

@@ -33,7 +33,11 @@ CREATE TABLE IF NOT EXISTS eval_scores (
     contexts         TEXT NOT NULL DEFAULT '[]',
     config_signature TEXT NOT NULL,
     faithfulness     REAL,
-    relevance        REAL
+    relevance        REAL,
+    -- Why the judge scored it that way: the per-claim verdicts behind faithfulness,
+    -- and whether the answer declined to answer (which forces relevance to 0). JSON
+    -- rather than columns because it is read whole and never queried into.
+    detail           TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_eval_scores_signature
@@ -78,6 +82,12 @@ def connect(db_path: Path) -> sqlite3.Connection:
 def init_db(db_path: Path) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA_SQL)
+        # CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so
+        # a column added after someone has scored answers needs an explicit ALTER.
+        # Same pattern as chat_history's column migrations.
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(eval_scores)")}
+        if "detail" not in existing:
+            conn.execute("ALTER TABLE eval_scores ADD COLUMN detail TEXT")
 
 
 def add_score(
@@ -91,6 +101,7 @@ def add_score(
     relevance: float | None = None,
     message_id: str | None = None,
     thread_id: str | None = None,
+    detail: dict[str, Any] | None = None,
 ) -> str:
     row_id = str(uuid.uuid4())
     with connect(db_path) as conn:
@@ -98,8 +109,8 @@ def add_score(
             """
             INSERT INTO eval_scores (
                 id, timestamp, message_id, thread_id, question, answer,
-                contexts, config_signature, faithfulness, relevance
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                contexts, config_signature, faithfulness, relevance, detail
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row_id,
@@ -112,6 +123,7 @@ def add_score(
                 config_signature,
                 faithfulness,
                 relevance,
+                json.dumps(detail, ensure_ascii=False) if detail else None,
             ),
         )
     return row_id
@@ -223,12 +235,32 @@ def thread_summary(db_path: Path, thread_id: str) -> dict[str, Any]:
             ).fetchone()
             last[f"last_{metric}"] = found[0] if found else None
 
+        # The newest row that actually explains itself. An older explanation is more
+        # use than none, so this is not restricted to the very latest row.
+        detail_row = conn.execute(
+            """
+            SELECT detail FROM eval_scores
+            WHERE thread_id = ? AND detail IS NOT NULL
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+            """,
+            (thread_id,),
+        ).fetchone()
+
+    detail = None
+    if detail_row and detail_row["detail"]:
+        try:
+            detail = json.loads(detail_row["detail"])
+        except json.JSONDecodeError:
+            detail = None
+
     return {
         "thread_id": thread_id,
         "answers": row["answers"] or 0,
         "faithfulness": row["faithfulness"],
         "relevance": row["relevance"],
         **last,
+        "last_detail": detail,
     }
 
 
