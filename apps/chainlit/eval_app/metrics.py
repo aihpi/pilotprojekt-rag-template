@@ -68,7 +68,24 @@ def _judge_and_embeddings(
         base_url=openai_base_url(base_url) if base_url else None,
         api_key=api_key or "unused",
     )
-    llm = llm_factory(judge_model, provider="openai", client=client)
+    llm = llm_factory(
+        judge_model,
+        provider="openai",
+        client=client,
+        # temperature=0 was promised in this module's docstring from the start but was
+        # lost in the switch from DeepEval, which took its own temperature argument.
+        # A sampling judge adds exactly the run-to-run noise the documentation tells
+        # people to read through.
+        temperature=0.0,
+        # Faithfulness returns one verdict *with a reason* per claim, so a long answer
+        # produces a long structured response. Against the gateway's default budget
+        # that truncates, instructor fails to parse it, and the metric is dropped:
+        # "metric faithfulness failed (The output is incomplete due to a max_tokens
+        # length limit.)". The answers that hit it are the detailed ones with many
+        # claims — precisely the answers worth checking — and the failure was silent
+        # apart from that log line, showing up only as a missing number.
+        max_tokens=4096,
+    )
     embeddings = OpenAIEmbeddings(client=client, model=embed_model)
     return llm, embeddings
 
@@ -95,7 +112,14 @@ async def _score_one(
             return await _faithfulness(question, answer, contexts, llm)
         # AnswerRelevancy takes no contexts by design: it asks whether the answer
         # fits the question, which is answerable without them.
-        result = await AnswerRelevancy(llm=llm, embeddings=embeddings).ascore(
+        # strictness=1 rather than RAGAS's default 3. The parameter regenerates the
+        # questions N times to average out judge variance, but RAGAS loops with an
+        # await inside, so the calls are *serial*: measured 24.0s at 3 against 13.5s
+        # at 1, for scores of 0.278 and 0.277. Paying eleven seconds for the third
+        # decimal is not a trade worth making on a metric the docs tell you to read as
+        # a delta. Raise it here if a noisy judge ever makes the averaging earn its
+        # keep.
+        result = await AnswerRelevancy(llm=llm, embeddings=embeddings, strictness=1).ascore(
             user_input=question, response=answer
         )
     except Exception as exc:

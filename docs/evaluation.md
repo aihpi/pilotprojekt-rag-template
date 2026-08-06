@@ -24,7 +24,7 @@ the real conversations people are already having.
 
 ### How they are calculated
 
-The badge shows the same thing in its hover panel, so you should not need this page
+The badge shows the same thing when you click it, so you should not need this page
 open while you work. It is here for reference.
 
 **Faithfulness** breaks the answer into individual claims and checks each one
@@ -35,7 +35,7 @@ Faithfulness = supported claims / all claims
 ```
 
 That is why the number is worth more than a grade: 0.5 does not mean "mediocre", it
-means *half the claims in that answer were not backed by the sources*. The hover
+means *half the claims in that answer were not backed by the sources*. The
 panel lists them, each with the judge's reason, so you can see which claim failed
 rather than guessing.
 
@@ -67,7 +67,7 @@ Relevance = mean(cosine) × (0 if the answer declined, else 1)
 
 So 0% does not mean the answer was off-topic. It usually means the assistant refused
 to answer, which is the behaviour you *want* when the corpus does not cover a
-question. The hover panel says so explicitly when it happens.
+question. The panel says so explicitly when it happens.
 
 ## Read the change, not the number
 
@@ -142,13 +142,19 @@ error and answers are unaffected.
 
 ## What it costs
 
-Every scored answer costs **two judge calls and one embedding call**, on top of
-the answer itself. That is the whole reason this is opt-in.
+Every scored answer costs **three judge calls and two embedding calls**, on top of
+the answer itself: two to split the answer into claims and check them, one to
+generate questions from it, and the embeddings to compare those questions with
+yours. That is the whole reason this is opt-in.
 
-It is also not fast. Measured against a self-hosted 70B model that was answering
-ordinary requests in about a second, scoring one answer took **roughly 40 seconds**.
-The two metrics run at the same time, so that is the slower of the two rather than
-the sum, but it is still far longer than the answer took.
+It is also not fast: scoring one answer takes **roughly 25 seconds**. The two
+metrics run at the same time, so that is the slower of the two rather than their sum.
+
+A bigger judge model will not make it slower and a smaller one will not make it
+faster. Measured across `ministral-3-14b`, `gemma-4-31b` and `llama-3-3-70b`, all
+three land within a second of each other, because the cost is the gateway's
+round-trip on each structured-output request rather than the model thinking. Five
+such requests per answer is the floor.
 
 This does not keep you waiting. Scoring starts only after the answer is on screen
 and saved, so you can carry straight on asking questions. The badge updates itself
@@ -161,6 +167,10 @@ it is still there after a page reload.
 If scoring seems to take many minutes rather than tens of seconds, the judge model
 is probably failing rather than thinking. Check that the model you named is
 actually answering.
+
+While a judge is running the badge says `Bewertung läuft…`, so a missing number
+means either that it has not started or that it failed — never that you should keep
+waiting.
 
 The judge calls go through the same gateway and the same credentials as everything
 else, so there is nothing extra to configure.

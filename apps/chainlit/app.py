@@ -342,10 +342,17 @@ TOOL_NAME: str = get_config().tool.name
 # so without this they are collectable and simply never run — the same trap the
 # document watcher documents at its own create_task.
 _SCORING_TASKS: set[asyncio.Task] = set()
+# Threads with a score in flight, so /eval-status can say "working on it" instead of
+# leaving the badge silent for the ~25s a judge takes. Measured: that cost is gateway
+# round-trip per structured-output call, not model size — ministral-3-14b, gemma-4-31b
+# and llama-3-3-70b all land within a second of each other — so it is a wait to
+# explain rather than one to optimise away.
+_SCORING_THREADS: set[str] = set()
 
 
 def _forget_scoring_task(task: asyncio.Task) -> None:
     _SCORING_TASKS.discard(task)
+    _SCORING_THREADS.discard(getattr(task, "_eval_thread_id", "") or "")
     # A detached task swallows its exception unless somebody asks for it, and scoring
     # that fails in silence is exactly how a dropped task went unnoticed once already.
     if not task.cancelled() and task.exception() is not None:
@@ -2318,6 +2325,7 @@ async def on_app_startup() -> None:
         cfg = get_config()
         if not cfg.evaluation.enabled or not cfg.evaluation.show_badge:
             return {"enabled": False, "revision": 0}
+        pending = bool(thread_id) and thread_id in _SCORING_THREADS
         if not thread_id:
             return {"enabled": True, "answers": 0, "revision": 0}
 
@@ -2331,7 +2339,7 @@ async def on_app_startup() -> None:
             # The eval service is optional; a badge that cannot reach it should go
             # quiet rather than turn into an error in the corner of the chat.
             print(f"[WARN] eval_status_unavailable: {exc.__class__.__name__}: {exc}")
-            return {"enabled": True, "answers": 0, "revision": 0}
+            return {"enabled": True, "answers": 0, "pending": pending, "revision": 0}
 
         faithfulness = summary.get("faithfulness")
         trend = trend_sign(
@@ -2344,12 +2352,15 @@ async def on_app_startup() -> None:
             "faithfulness": faithfulness,
             "relevance": summary.get("relevance"),
             "trend": trend,
-            # Why the last scored answer got those numbers, for the hover panel.
+            # A judge is working right now, so the badge can say so rather than
+            # sitting silent for ~25s and looking broken.
+            "pending": pending,
+            # Why the last scored answer got those numbers, for the panel.
             "detail": summary.get("last_detail"),
             # Lets the badge skip a re-render when nothing moved, same trick as
             # /ingest-status. Answer count plus the rounded means is enough: any
             # change that is visible at whole-percent resolution changes this.
-            "revision": f"{summary.get('answers', 0)}:{_pct(faithfulness)}:{_pct(summary.get('relevance'))}:{trend}",
+            "revision": f"{summary.get('answers', 0)}:{_pct(faithfulness)}:{_pct(summary.get('relevance'))}:{trend}:{int(pending)}",
         }
 
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/pdf/{file_name:path}")
@@ -3825,7 +3836,10 @@ async def main(message: cl.Message):
                     message_id=assistant_reply.id,
                 )
             )
+            task._eval_thread_id = session_id  # read back by the done callback
             _SCORING_TASKS.add(task)
+            if session_id:
+                _SCORING_THREADS.add(session_id)
             task.add_done_callback(_forget_scoring_task)
     else:
         # No retrieval happened, so any marker here would be imitation (e.g. copied

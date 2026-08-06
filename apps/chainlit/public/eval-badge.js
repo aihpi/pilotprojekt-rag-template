@@ -26,8 +26,11 @@
 
   var ENDPOINT = "/eval-status";
   /* A score lands tens of seconds after its answer, so there is nothing to gain
-   * from polling as briskly as the document watcher does. */
+   * from polling as briskly as the document watcher does while idle. */
   var POLL_MS = 5000;
+  /* While a judge is running we know a result is imminent, so check more often
+   * rather than making the user wait out an idle interval on top of the judge. */
+  var PENDING_POLL_MS = 1500;
   var ID = "rag-eval-badge";
   var ANCHOR_ID = "message-composer";
 
@@ -40,6 +43,14 @@
   var panel = null;
   var lastStatus = null;
   var lastPath = null;
+  var pollTimer = null;
+
+  /* One self-rescheduling timer rather than a fixed setInterval, so the cadence can
+   * follow whether a judge is currently running. */
+  function schedule(ms) {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(poll, ms);
+  }
 
   function styles() {
     if (document.getElementById(ID + "-styles")) return;
@@ -66,6 +77,13 @@
       "#" + ID + " .reb-sep { opacity: .45; }",
       "#" + ID + " .reb-trend { font-size: .9em; opacity: .8; }",
       "#" + ID + " .reb-count { opacity: .7; }",
+      /* Working state: a slow pulse, not a spinner. The wait is ~25s, so anything
+       * busier than this would be an irritation for half a minute. */
+      "#" + ID + '[data-pending="1"] { animation: reb-pulse 1.8s ease-in-out infinite; }',
+      "@keyframes reb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }",
+      "@media (prefers-reduced-motion: reduce) {",
+      "  #" + ID + '[data-pending="1"] { animation: none; opacity: .7; }',
+      "}",
       /* Hover panel. Fixed and body-mounted rather than absolute inside the badge:
        * the composer's ancestors clip and scroll, so a positioned child got cut off. */
       "#" + ID + "-panel {",
@@ -337,9 +355,28 @@
     styles();
     var el = element();
 
-    if (!status || !status.enabled || !status.answers) {
+    if (!status || !status.enabled) {
       el.removeAttribute("data-show");
       return;
+    }
+
+    // A judge takes ~25s, which is gateway round-trip per call rather than anything
+    // we can shorten. Saying so beats leaving the badge blank and looking broken —
+    // and on the first scored answer of a conversation there is nothing else to show.
+    if (!status.answers) {
+      if (!status.pending) {
+        el.removeAttribute("data-show");
+        return;
+      }
+      el.innerHTML = '<span class="reb-count">Bewertung läuft…</span>';
+      el.setAttribute("data-show", "1");
+      el.setAttribute("data-pending", "1");
+      return;
+    }
+    if (status.pending) {
+      el.setAttribute("data-pending", "1");
+    } else {
+      el.removeAttribute("data-pending");
     }
 
     var parts = [];
@@ -391,12 +428,21 @@
         return r.ok ? r.json() : null;
       })
       .then(function (status) {
-        if (!status) return;
+        // Every exit below has to reschedule. This is a self-rescheduling timeout
+        // rather than a setInterval, so a single path that returns without one stops
+        // the badge updating for the rest of the page's life.
+        if (!status) {
+          schedule(POLL_MS);
+          return;
+        }
         lastStatus = status;
         if (status.revision !== lastRevision) {
           lastRevision = status.revision;
           render(status);
         }
+        // Faster only while a judge is actually running, so the number appears when
+        // it lands instead of up to an idle interval later.
+        schedule(status.pending ? PENDING_POLL_MS : POLL_MS);
         // Outside the revision check on purpose. The numbers usually have not
         // changed, but the badge may still need re-attaching, and skipping this is
         // exactly how it stayed invisible: the first poll ran before the composer
@@ -405,13 +451,13 @@
       })
       .catch(function () {
         /* offline or restarting: try again on the next tick */
+        schedule(POLL_MS);
       });
   }
 
   function start() {
     lastPath = location.pathname;
     poll();
-    setInterval(poll, POLL_MS);
     // The composer is React-rendered, so a re-render can drop the badge or replace
     // its parent. Put it back whenever that happens. The same burst of mutations is
     // also the earliest signal that a chat switch is under way, which is why

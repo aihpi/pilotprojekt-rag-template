@@ -26,7 +26,7 @@ deshalb funktionieren sie auf den echten Gesprächen, die sowieso schon stattfin
 
 ### Wie sie berechnet werden
 
-Das Abzeichen zeigt dasselbe in seinem Hover-Fenster, du sollst diese Seite also
+Das Abzeichen zeigt dasselbe, wenn du es anklickst, du sollst diese Seite also
 nicht offen halten müssen. Hier steht es zum Nachschlagen.
 
 **Treue** zerlegt die Antwort in einzelne Aussagen und prüft jede gegen die
@@ -38,7 +38,7 @@ Treue = gedeckte Aussagen / alle Aussagen
 
 Deshalb ist die Zahl mehr als eine Note: 0,5 heißt nicht „mittelmäßig", sondern
 *die Hälfte der Aussagen dieser Antwort war nicht durch die Quellen gedeckt*. Das
-Hover-Fenster listet sie einzeln auf, mit der Begründung des Bewertungsmodells, du
+Abzeichen-Fenster listet sie einzeln auf, mit der Begründung des Bewertungsmodells, du
 siehst also welche Aussage durchgefallen ist und musst nicht raten.
 
 **Relevanz** erzeugt aus der Antwort Fragen und vergleicht sie mit der Frage, die
@@ -69,7 +69,7 @@ Relevanz = ⌀(Cosinus) × (0 wenn die Antwort sich enthält, sonst 1)
 
 0% heißt also nicht, dass die Antwort am Thema vorbeiging. Meistens heißt es, dass
 der Assistent die Antwort verweigert hat, und genau das *soll* er tun, wenn der
-Korpus eine Frage nicht abdeckt. Das Hover-Fenster sagt es in diesem Fall
+Korpus eine Frage nicht abdeckt. Das Fenster sagt es in diesem Fall
 ausdrücklich.
 
 ## Lies die Veränderung, nicht die Zahl
@@ -147,15 +147,21 @@ und die Antworten sind unverändert.
 
 ## Was es kostet
 
-Jede bewertete Antwort kostet **zwei Bewertungs-Aufrufe und einen
-Embedding-Aufruf**, zusätzlich zur Antwort selbst. Das ist der ganze Grund, warum
-das Ganze optional ist.
+Jede bewertete Antwort kostet **drei Bewertungs-Aufrufe und zwei
+Embedding-Aufrufe**, zusätzlich zur Antwort selbst: zwei, um die Antwort in Aussagen
+zu zerlegen und zu prüfen, einen, um daraus Fragen zu erzeugen, und die Embeddings
+für den Vergleich dieser Fragen mit deiner. Das ist der ganze Grund, warum das Ganze
+optional ist.
 
-Schnell ist es außerdem nicht. Gemessen gegen ein selbst betriebenes 70B-Modell,
-das normale Anfragen in etwa einer Sekunde beantwortete, dauerte die Bewertung einer
-Antwort **rund 40 Sekunden**. Die beiden Kennzahlen laufen gleichzeitig, es ist also
-die langsamere der beiden und nicht ihre Summe, aber immer noch weit mehr als die
-Antwort selbst gebraucht hat.
+Schnell ist es außerdem nicht: Die Bewertung einer Antwort dauert **rund 25
+Sekunden**. Die beiden Kennzahlen laufen gleichzeitig, es ist also die langsamere der
+beiden und nicht ihre Summe.
+
+Ein größeres Bewertungsmodell macht es nicht langsamer und ein kleineres nicht
+schneller. Gemessen über `ministral-3-14b`, `gemma-4-31b` und `llama-3-3-70b` liegen
+alle drei innerhalb einer Sekunde beieinander, weil die Zeit im Round-Trip des
+Gateways pro strukturierter Anfrage steckt und nicht im Nachdenken des Modells. Fünf
+solche Anfragen pro Antwort sind die Untergrenze.
 
 Warten musst du deswegen nicht. Die Bewertung startet erst, wenn die Antwort auf dem
 Bildschirm steht und gespeichert ist, du kannst also direkt weiterfragen. Das
@@ -169,6 +175,10 @@ hast, und er ist nach einem Neuladen der Seite weiterhin da.
 Wenn die Bewertung viele Minuten statt einiger Sekunden braucht, denkt das
 Bewertungsmodell wahrscheinlich nicht, sondern scheitert. Prüfe, ob das angegebene
 Modell tatsächlich antwortet.
+
+Solange eine Bewertung läuft, zeigt das Abzeichen `Bewertung läuft…`. Eine fehlende
+Zahl heißt also: entweder hat sie nicht angefangen oder sie ist gescheitert, nie dass
+du weiter warten solltest.
 
 Die Bewertungs-Aufrufe gehen über dasselbe Gateway und dieselben Zugangsdaten wie
 alles andere, du musst also nichts zusätzlich einrichten.
