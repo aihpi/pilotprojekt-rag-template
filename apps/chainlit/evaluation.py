@@ -22,11 +22,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Judge calls are two LLM round-trips plus an embedding, so the read budget is
-# generous. The connect budget deliberately is not: the eval service being absent
-# is the normal case (it is optional), and we would rather give up immediately
-# than hold a background task open waiting for something that is not there.
-_TIMEOUT = httpx.Timeout(120.0, connect=3.0)
+# The read budget has to cover a judge model grading an answer, which measured at
+# ~100s per metric against a self-hosted gpt-oss-120b. The service runs its metrics
+# concurrently, so this is a ceiling on the slowest one, not on their sum. Set high
+# because nothing is waiting on it: the answer is already delivered.
+# The connect budget deliberately is not generous. The eval service being absent is
+# the normal case, since it is optional, and giving up at once beats holding a
+# background task open for something that is not there.
+_TIMEOUT = httpx.Timeout(300.0, connect=3.0)
 
 
 def config_signature(cfg: "RagConfig") -> str:
@@ -118,6 +121,7 @@ async def post_score(
             "contexts": contexts,
             "metrics": list(ev.metrics),
             "judge_model": ev.judge_model or cfg.models.chat_model,
+            "embed_model": cfg.models.embed_model,
             "config_signature": config_signature(cfg),
             "thread_id": thread_id,
             "message_id": message_id,

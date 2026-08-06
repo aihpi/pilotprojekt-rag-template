@@ -81,6 +81,21 @@ Jede bewertete Antwort kostet **zwei Bewertungs-Aufrufe und einen
 Embedding-Aufruf**, zusätzlich zur Antwort selbst. Das ist der ganze Grund, warum
 das Ganze optional ist.
 
+Schnell ist es außerdem nicht. Gemessen gegen ein selbst betriebenes 70B-Modell,
+das normale Anfragen in etwa einer Sekunde beantwortete, dauerte die Bewertung einer
+Antwort **rund 40 Sekunden**. Die beiden Kennzahlen laufen gleichzeitig, es ist also
+die langsamere der beiden und nicht ihre Summe, aber immer noch weit mehr als die
+Antwort selbst gebraucht hat.
+
+Warten musst du deswegen nicht. Die Bewertung startet erst, wenn die Antwort auf dem
+Bildschirm steht und gespeichert ist, du kannst also direkt weiterfragen. Die Werte
+erscheinen unter der Antwort, sobald sie fertig sind, unter Umständen eine halbe
+Minute später.
+
+Wenn die Bewertung viele Minuten statt einiger Sekunden braucht, denkt das
+Bewertungsmodell wahrscheinlich nicht, sondern scheitert. Prüfe, ob das angegebene
+Modell tatsächlich antwortet.
+
 Die Bewertungs-Aufrufe gehen über dasselbe Gateway und dieselben Zugangsdaten wie
 alles andere, du musst also nichts zusätzlich einrichten.
 

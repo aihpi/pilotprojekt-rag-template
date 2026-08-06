@@ -147,18 +147,21 @@ def test_failure_categories_group_per_config(db):
 
 
 # --------------------------------------------------------------------------- #
-# Judge model naming
+# Gateway URL normalisation
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
     "given, expected",
     [
-        ("gpt-oss-120b", "openai/gpt-oss-120b"),  # bare gateway name needs a provider
-        ("gemma-4-31b", "openai/gemma-4-31b"),
-        ("anthropic/claude-x", "anthropic/claude-x"),  # already routed, leave alone
-        ("openai/gpt-oss-120b", "openai/gpt-oss-120b"),  # idempotent
+        # The example env file ships the trailing-slash form, so this is the case
+        # that actually occurs; appending blindly would give "…//v1" and 404.
+        ("https://api.example.de/", "https://api.example.de/v1"),
+        ("https://api.example.de", "https://api.example.de/v1"),
+        ("https://api.example.de/v1", "https://api.example.de/v1"),  # already there
+        ("https://api.example.de/v1/", "https://api.example.de/v1"),  # both at once
+        ("http://localhost:4000", "http://localhost:4000/v1"),
     ],
 )
-def test_judge_model_names_get_a_provider_prefix(given, expected):
-    assert metrics.litellm_model_name(given) == expected
+def test_the_gateway_url_gets_exactly_one_v1(given, expected):
+    assert metrics.openai_base_url(given) == expected

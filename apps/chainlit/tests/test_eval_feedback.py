@@ -38,8 +38,15 @@ def _rows(db):
         return [dict(r) for r in conn.execute("SELECT * FROM feedback")]
 
 
-def _reply(monkeypatch, text):
-    """Make litellm.acompletion answer with `text`, without importing litellm."""
+def _reply(monkeypatch, text=None, *, raises=None):
+    """Swap openai.AsyncOpenAI for a fake that answers with `text`.
+
+    Returns the list of prompts it was asked, so a test can assert the model was
+    never called at all.
+    """
+    import openai
+
+    asked: list[str] = []
 
     class _Message:
         content = text
@@ -50,15 +57,24 @@ def _reply(monkeypatch, text):
     class _Response:
         choices = [_Choice()]
 
-    async def fake_acompletion(**kwargs):
-        return _Response()
+    class _Completions:
+        async def create(self, **kwargs):
+            if raises is not None:
+                raise raises
+            asked.append(kwargs["messages"][0]["content"])
+            return _Response()
 
-    import sys
-    import types
+    class _Chat:
+        completions = _Completions()
 
-    stub = types.ModuleType("litellm")
-    stub.acompletion = fake_acompletion
-    monkeypatch.setitem(sys.modules, "litellm", stub)
+    class _Client:
+        def __init__(self, **kwargs):
+            pass
+
+        chat = _Chat()
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", _Client)
+    return asked
 
 
 def _classify(comment):
@@ -89,30 +105,13 @@ def test_only_an_unambiguous_category_survives(monkeypatch, reply, expected):
 
 
 def test_an_empty_comment_is_not_sent_to_the_model(monkeypatch):
-    def explode(**kwargs):
-        raise AssertionError("classify called the model for an empty comment")
-
-    import sys
-    import types
-
-    stub = types.ModuleType("litellm")
-    stub.acompletion = explode
-    monkeypatch.setitem(sys.modules, "litellm", stub)
-
+    asked = _reply(monkeypatch, "hallucination")
     assert _classify("   ") is None
+    assert asked == [], "an empty comment must not cost a judge call"
 
 
 def test_a_failing_judge_yields_no_category(monkeypatch):
-    async def fake_acompletion(**kwargs):
-        raise RuntimeError("gateway 503")
-
-    import sys
-    import types
-
-    stub = types.ModuleType("litellm")
-    stub.acompletion = fake_acompletion
-    monkeypatch.setitem(sys.modules, "litellm", stub)
-
+    _reply(monkeypatch, raises=RuntimeError("gateway 503"))
     assert _classify("war falsch") is None
 
 

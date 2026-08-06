@@ -5,6 +5,9 @@ only about classifying free text that already exists. It runs here rather than i
 the app for the same reason scoring does: this service owns every LLM call whose
 job is to judge the app, and a thumbs-click should not wait on one.
 
+Uses the same ``openai.AsyncOpenAI`` client as the metrics rather than litellm, so
+there is one HTTP path to the gateway in this service instead of two.
+
 Categories deliberately map to where you would go looking:
 
 * ``hallucination``  — the answer, so check the prompt and faithfulness scores
@@ -18,7 +21,7 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from eval_app.metrics import litellm_model_name
+from eval_app.metrics import openai_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -59,14 +62,16 @@ async def classify(
     if not comment.strip():
         return None
 
-    import litellm
+    from openai import AsyncOpenAI
 
     try:
-        response = await litellm.acompletion(
-            model=litellm_model_name(judge_model),
+        client = AsyncOpenAI(
+            base_url=openai_base_url(base_url) if base_url else None,
+            api_key=api_key or "unused",
+        )
+        response = await client.chat.completions.create(
+            model=judge_model,
             messages=[{"role": "user", "content": _PROMPT.format(comment=comment)}],
-            api_base=base_url,
-            api_key=api_key,
             temperature=0.0,
         )
         raw = (response.choices[0].message.content or "").lower()

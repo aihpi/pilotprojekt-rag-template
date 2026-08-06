@@ -65,6 +65,9 @@ class ScoreRequest(BaseModel):
     # metrics.py has to hand-check.
     metrics: list[MetricName] = Field(default_factory=lambda: list(SUPPORTED_METRICS))
     judge_model: str
+    # relevance compares questions generated from the answer against the real one,
+    # so it needs the embedding model as well as the judge.
+    embed_model: str
     config_signature: str
     thread_id: str | None = None
     message_id: str | None = None
@@ -146,6 +149,7 @@ async def post_score(request: ScoreRequest) -> dict[str, object]:
         request.contexts,
         metrics=request.metrics,
         judge_model=request.judge_model,
+        embed_model=request.embed_model,
         base_url=LITELLM_BASE_URL,
         api_key=LITELLM_API_KEY,
     )

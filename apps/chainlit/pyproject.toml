@@ -35,13 +35,30 @@ dev = [
 ]
 # The eval service only. Install with `uv sync --only-group eval`, which omits the
 # app's own dependencies — the whole point of running scoring in its own container
-# is to keep this chain out of the Chainlit image (see eval_app/main.py).
-# litellm is listed explicitly because deepeval does NOT declare it, in hard deps
-# or extras: its LiteLLMModel imports it lazily and leaves installing it to the
-# caller. Same floor as the app so both resolve to one version.
+# is to keep this chain out of the Chainlit image (see eval_app/main.py). RAGAS
+# drags in langchain and datasets, which is exactly the weight that must not land
+# in the app image.
+#
+# Pinned exactly. 0.4.3 has been the newest release since 2026-01-13 with no commits
+# since February, and it deprecates its own `ragas.metrics` import path in favour of
+# a v1.0 that has not shipped, so a range would be a bet on an unmaintained
+# resolution. eval_app/metrics.py imports from `ragas.metrics.collections`, the
+# non-deprecated path.
+#
+# DeepEval was tried first and could not score against a self-hosted gateway at all
+# (see the note in eval_app/metrics.py). openai is declared because RAGAS is driven
+# through an AsyncOpenAI client rather than litellm.
 eval = [
-    "deepeval>=4.1,<5",
-    "litellm>=1.75.8",
+    "ragas==0.4.3",
+    # ragas 0.4.3 does `from langchain_community.chat_models.vertexai import
+    # ChatVertexAI` at import time, and langchain-community removed that module in
+    # 0.4.2 — so `import ragas` raises ModuleNotFoundError on anything newer. ragas
+    # has had no commits since February, so this will not be fixed upstream and the
+    # ceiling has to live here. Found the hard way: the resolver picked 0.4.2 for the
+    # container while a local venv happened to hold 0.4.1, so it worked locally and
+    # died in Docker.
+    "langchain-community<0.4.2",
+    "openai>=1.0",
     "fastapi>=0.115",
     "uvicorn>=0.30",
 ]

@@ -3682,25 +3682,40 @@ async def main(message: cl.Message):
             metadata=message_metadata,
         )
 
-        # Answer-quality scoring (off unless evaluation.enabled). Last on purpose:
-        # the answer is already sent and saved, so no judge call is in the user's
-        # way. The sibling branch below retrieves nothing, so it has no contexts to
-        # check an answer against and is left alone.
-        scores = await post_score(
-            question=message.content,
-            answer=content,
-            contexts=[r.text for r in last_results],
-            thread_id=session_id,
-            message_id=assistant_reply.id,
-        )
-        if get_config().evaluation.show_inline:
+        # Answer-quality scoring (off unless evaluation.enabled). Detached on
+        # purpose: a judge grading an answer measured at ~100s against a self-hosted
+        # gpt-oss-120b, and awaiting that here would leave the session busy, unable
+        # to take the next question, for the whole time. The answer is already sent
+        # and saved, so the scores just arrive when they arrive.
+        # The sibling branch below retrieves nothing, so it has no chunks to check an
+        # answer against and is deliberately left alone.
+        async def _score_in_background(
+            question: str, answer: str, results: list[Any], reply: cl.Message
+        ) -> None:
+            scores = await post_score(
+                question=question,
+                answer=answer,
+                contexts=[r.text for r in results],
+                thread_id=session_id,
+                message_id=reply.id,
+            )
+            if not get_config().evaluation.show_inline:
+                return
             inline = format_inline(scores)
-            if inline:
-                # Appended to the sent message, not to `content` — the transcript
-                # row above must stay the model's answer, or a resumed chat would
-                # feed old scores back to the model as if it had written them.
-                assistant_reply.content = f"{assistant_reply.content}\n\n*{inline}*"
-                await assistant_reply.update()
+            if not inline:
+                return
+            # Appended to the sent message, never to `content` — the transcript row
+            # written above must stay the model's own answer, or a resumed chat
+            # would feed old scores back to the model as words it had written.
+            reply.content = f"{reply.content}\n\n*{inline}*"
+            await reply.update()
+
+        if get_config().evaluation.enabled:
+            # create_task copies the current context, so cl.context still resolves
+            # inside the task and reply.update() reaches the right session.
+            asyncio.create_task(
+                _score_in_background(message.content, content, last_results, assistant_reply)
+            )
     else:
         # No retrieval happened, so any marker here would be imitation (e.g. copied
         # from a resumed transcript) — strip defensively.

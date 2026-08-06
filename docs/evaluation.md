@@ -77,6 +77,19 @@ error and answers are unaffected.
 Every scored answer costs **two judge calls and one embedding call**, on top of
 the answer itself. That is the whole reason this is opt-in.
 
+It is also not fast. Measured against a self-hosted 70B model that was answering
+ordinary requests in about a second, scoring one answer took **roughly 40 seconds**.
+The two metrics run at the same time, so that is the slower of the two rather than
+the sum, but it is still far longer than the answer took.
+
+This does not keep you waiting. Scoring starts only after the answer is on screen
+and saved, so you can carry straight on asking questions. The scores appear
+underneath the answer whenever they are ready, which may be half a minute later.
+
+If scoring seems to take many minutes rather than tens of seconds, the judge model
+is probably failing rather than thinking. Check that the model you named is
+actually answering.
+
 The judge calls go through the same gateway and the same credentials as everything
 else, so there is nothing extra to configure.
 

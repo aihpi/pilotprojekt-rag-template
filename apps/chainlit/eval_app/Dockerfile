@@ -17,21 +17,14 @@ ENV PATH="/opt/venv/bin:$PATH"
 ENV UV_LINK_MODE=copy
 ENV UV_NO_CACHE=1
 
-# deepeval hard-depends on posthog and sentry-sdk and phones home by default. Set here
-# as well as in docker-compose.yml so the opt-out survives someone running this image
-# directly. metrics.py sets it a third time, before the deepeval import, because that is
-# when deepeval reads it.
-ENV DEEPEVAL_TELEMETRY_OPT_OUT=YES
-ENV DEEPEVAL_UPDATE_WARNING_OPT_OUT=YES
-ENV ERROR_REPORTING=NO
-
 WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
 
 # --only-group installs the group WITHOUT the project's own dependencies, which is what
-# keeps this image slim. --frozen fails loudly if pyproject.toml and uv.lock drift apart,
-# so the eval group must be present in the lockfile (`uv lock`).
+# keeps this image slim: RAGAS pulls langchain and datasets, and none of that belongs in
+# the app image. --frozen fails loudly if pyproject.toml and uv.lock drift apart, so the
+# eval group must be present in the lockfile (`uv lock`).
 COPY pyproject.toml uv.lock /app/
 RUN uv sync --frozen --no-install-project --only-group eval
 

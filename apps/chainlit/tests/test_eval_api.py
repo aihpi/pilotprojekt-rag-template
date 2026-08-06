@@ -35,6 +35,7 @@ def _body(**kw):
         "contexts": ["[1] Die Rate lag bei 40-60%."],
         "metrics": ["faithfulness", "relevance"],
         "judge_model": "gpt-oss-120b",
+        "embed_model": "octen-embedding-8b",
         "config_signature": SIG,
         **kw,
     }

@@ -73,6 +73,12 @@ services:
       RAG_CONFIG: ${RAG_CONFIG:-examples/papers/rag.config.yaml}
       # IMPORTANT: inside Docker network, use service DNS name (not localhost)
       QDRANT_URL: http://qdrant:6333
+      # Answer scoring. Empty means "leave the YAML alone", so this is off unless
+      # you either set EVALUATION_ENABLED=true or turn it on in rag.config.yaml.
+      # Also start the service: docker compose --profile eval up -d
+      EVALUATION_ENABLED: ${EVALUATION_ENABLED:-}
+      EVALUATION_SERVICE_URL: ${EVALUATION_SERVICE_URL:-http://eval:8001}
+      EVALUATION_JUDGE_MODEL: ${EVALUATION_JUDGE_MODEL:-}
     volumes:
       # Documents (and generated figures) live under ./data/documents, which is
       # already covered by the `.:/app` mount below.
@@ -175,12 +181,6 @@ services:
       LITELLM_BASE_URL: ${LITELLM_BASE_URL}
       LITELLM_API_KEY: ${LITELLM_API_KEY}
       EVAL_DB_PATH: ${DOCKER_EVAL_DB_PATH:-/app/.evaldb/eval.sqlite3}
-      # deepeval pulls posthog and sentry-sdk and phones home unless told not to.
-      # Also set in the Dockerfile and in metrics.py; a public-institution
-      # deployment should not depend on one of the three being present.
-      DEEPEVAL_TELEMETRY_OPT_OUT: "YES"
-      DEEPEVAL_UPDATE_WARNING_OPT_OUT: "YES"
-      ERROR_REPORTING: "NO"
     volumes:
       # A named volume, not a bind mount: this is SQLite in WAL mode and needs real
       # POSIX locking, exactly as described for chat_db above.
