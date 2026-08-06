@@ -54,7 +54,7 @@ from native_chat import (
     upsert_feedback,
 )
 from config import get_config
-from rag_tool import build_context, extract_page, extract_source_file, retrieve
+from rag_tool import build_context, context_with_source, extract_page, extract_source_file, retrieve
 from figure_markers import (
     build_figure_candidates,
     figure_display_name,
@@ -3817,7 +3817,10 @@ async def main(message: cl.Message):
                 post_score(
                     question=message.content,
                     answer=content,
-                    contexts=[r.text for r in last_results],
+                    # With the source line, not bare text: the answer ends by naming
+                    # its sources, and a judge that cannot see where a chunk came
+                    # from marks that sentence unsupported every single time.
+                    contexts=[context_with_source(r) for r in last_results],
                     thread_id=session_id,
                     message_id=assistant_reply.id,
                 )
