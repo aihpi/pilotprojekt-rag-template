@@ -37,7 +37,21 @@ cp .env.example .env
 ```
 
 Open the new `.env` file and fill in the address and key of your AI service.
-Nothing works until those two are set. Then start everything:
+Nothing works until those two are set.
+
+Check them before starting anything else:
+
+```bash
+make check
+```
+
+It tries each model a few times and tells you whether a problem is your settings,
+your connection, or the service itself, with the steps to take for each.
+
+This first run builds the container, so it takes a few minutes; later runs take
+seconds. The build has to happen anyway, and doing it here means a wrong address
+or key turns up now, instead of part-way through reading your documents in. When
+the check comes back green, start everything:
 
 ```bash
 docker compose up -d --build

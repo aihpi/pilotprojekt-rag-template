@@ -38,7 +38,22 @@ cp .env.example .env
 ```
 
 Öffne die neue Datei `.env` und trage Adresse und Schlüssel deines KI-Dienstes
-ein. Ohne diese beiden Angaben funktioniert nichts. Dann alles starten:
+ein. Ohne diese beiden Angaben funktioniert nichts.
+
+Prüfe die Angaben, bevor du sonst etwas startest:
+
+```bash
+make check
+```
+
+Der Befehl probiert jedes Modell mehrmals und sagt dir, ob ein Problem an deinen
+Einstellungen, an deiner Verbindung oder am Dienst liegt, mit den passenden
+Schritten dazu.
+
+Der erste Durchlauf baut den Container mit und dauert deshalb ein paar Minuten,
+spätere Durchläufe dauern Sekunden. Gebaut wird ohnehin, und hier fällt eine
+falsche Adresse oder ein falscher Schlüssel sofort auf statt mitten beim Einlesen
+der Dokumente. Wenn die Prüfung grün zurückkommt, alles starten:
 
 ```bash
 docker compose up -d --build

@@ -48,15 +48,8 @@ database and the search index, but no model. You point it at an existing service
 by putting an address and a key into the `.env` file. That can be a service your
 organisation provides, or a model server running on your own machine.
 
-To check that the service is reachable before you read any documents in:
-
-```bash
-cd apps/chainlit && make check
-```
-
-It tries each model a few times and tells you whether a problem is your settings,
-your connection, or the service. Every result comes with the steps to check, in
-order.
+Whether your service is reachable and your key is right is what `make check` in
+the [Quickstart](#quickstart) confirms, before anything is read in.
 
 ## Quickstart
 
@@ -66,13 +59,21 @@ Copy these lines into a terminal, one block at a time:
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
 cd pilotprojekt-rag-template/apps/chainlit
 
-cp .env.example .env            # put your gateway URL + API key in .env
+cp .env.example .env            # copies the template, now fill in .env
+```
+
+Open the new `.env` file and fill in the address and key for your AI service.
+Then check them before you start:
+
+```bash
+make check                      # reachable? key correct?
 docker compose up -d --build    # starts everything
 ```
 
-The second command copies a template for your settings. Open the new `.env` file
-and fill in the address and key for your AI service. The last command starts the
-assistant, which takes a few minutes the first time.
+The first check builds the container too, so it takes a few minutes; after that it
+runs in seconds. The build has to happen anyway, and this way a wrong key turns up
+before your documents are read in rather than halfway through. If something is
+wrong, the output tells you what to check.
 
 Then open <http://localhost:8000> and log in with `admin` / `admin`. Change that
 password before anyone else can reach the app.

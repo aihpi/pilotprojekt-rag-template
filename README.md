@@ -51,15 +51,8 @@ bestehenden Dienst, indem du Adresse und Schlüssel in die Datei `.env` einträg
 Das kann ein Dienst deiner Einrichtung sein oder ein Modellserver auf deinem
 eigenen Rechner.
 
-Um zu prüfen, ob der Dienst erreichbar ist, bevor du Dokumente einliest:
-
-```bash
-cd apps/chainlit && make check
-```
-
-Der Befehl probiert jedes Modell mehrmals und sagt dir, ob ein Problem an deinen
-Einstellungen, an deiner Verbindung oder am Dienst liegt. Zu jedem Ergebnis
-stehen die Schritte dabei, die du der Reihe nach prüfen kannst.
+Ob dein Dienst erreichbar ist und dein Schlüssel stimmt, prüft `make check` im
+[Schnellstart](#schnellstart), bevor irgendetwas eingelesen wird.
 
 ## Schnellstart
 
@@ -69,14 +62,21 @@ Kopiere diese Zeilen blockweise in ein Terminal:
 git clone https://github.com/aihpi/pilotprojekt-rag-template.git
 cd pilotprojekt-rag-template/apps/chainlit
 
-cp .env.example .env            # Gateway-URL + API-Key in .env eintragen
+cp .env.example .env            # legt die Vorlage an, jetzt .env ausfüllen
+```
+
+Öffne die neue Datei `.env` und trage dort Adresse und Zugangsschlüssel deines
+KI-Dienstes ein. Prüfe sie dann, bevor du startest:
+
+```bash
+make check                      # erreichbar? Schlüssel richtig?
 docker compose up -d --build    # startet alles
 ```
 
-Der zweite Befehl legt eine Vorlage für deine Einstellungen an. Öffne die neue
-Datei `.env` und trage dort Adresse und Zugangsschlüssel deines KI-Dienstes ein.
-Der letzte Befehl startet den Assistenten. Beim ersten Mal dauert das ein paar
-Minuten.
+Beim ersten Mal baut die Prüfung den Container mit, das dauert ein paar Minuten,
+danach läuft sie in Sekunden. Gebaut wird ohnehin, und so erfährst du von einem
+falschen Schlüssel, bevor die Dokumente eingelesen werden, statt mittendrin. Bei
+einem Problem sagt dir die Ausgabe, was zu prüfen ist.
 
 Danach <http://localhost:8000> öffnen und mit `admin` / `admin` anmelden. Ändere
 dieses Passwort, bevor andere auf die App zugreifen können.
