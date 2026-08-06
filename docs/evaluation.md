@@ -119,10 +119,12 @@ answer that has been scored in this chat, with the number of answers beside it.
 **The count matters.** "67% over 1 answer" and "67% over 20" are not the same
 claim, which is why the badge always shows it.
 
-**The arrow compares the last answer to that average.** ↗ means the latest answer
-scored better than the conversation's average, ↘ worse, and no arrow means it
-landed about where the average already was. It needs at least two answers to mean
-anything, so it does not appear before then.
+**Each metric gets its own arrow, comparing the last answer to that metric's
+average.** ↗ means the latest answer scored better than the conversation's average,
+↘ worse, and no arrow means it landed about where the average already was. The two
+move independently — `Treue 58% ↘ · Relevanz 17% ↗` is a normal reading, and a useful
+one. An arrow needs at least two answers to mean anything, so it does not appear
+before then.
 
 **Click the badge** for the full explanation: which claims the last answer made,
 which of them the sources backed, and how each number is calculated. It stays open

@@ -340,14 +340,19 @@
     return Math.round(value * 100) + "%";
   }
 
-  function metric(label, value) {
+  /* Both metrics get a trend arrow. They are running means over the same
+   * conversation, so showing one on only one of them just looks like a bug. */
+  function metric(label, value, trend) {
     if (value === null || value === undefined) return "";
+    var arrow = trend > 0 ? "&#8599;" : trend < 0 ? "&#8600;" : "";
     return (
       '<span class="reb-metric">' +
       label +
       ' <span class="reb-value">' +
       pct(value) +
-      "</span></span>"
+      "</span>" +
+      (arrow ? ' <span class="reb-trend">' + arrow + "</span>" : "") +
+      "</span>"
     );
   }
 
@@ -380,12 +385,9 @@
     }
 
     var parts = [];
-    var faith = metric("Treue", status.faithfulness);
-    if (faith) {
-      var arrow = status.trend > 0 ? "&#8599;" : status.trend < 0 ? "&#8600;" : "";
-      parts.push(faith + (arrow ? ' <span class="reb-trend">' + arrow + "</span>" : ""));
-    }
-    var rel = metric("Relevanz", status.relevance);
+    var faith = metric("Treue", status.faithfulness, status.trend);
+    if (faith) parts.push(faith);
+    var rel = metric("Relevanz", status.relevance, status.trend_relevance);
     if (rel) parts.push(rel);
 
     // Nothing scored yet in a conversation that has scored attempts: say so rather

@@ -2342,16 +2342,21 @@ async def on_app_startup() -> None:
             return {"enabled": True, "answers": 0, "pending": pending, "revision": 0}
 
         faithfulness = summary.get("faithfulness")
-        trend = trend_sign(
-            faithfulness, summary.get("last_faithfulness"), summary.get("answers", 0)
-        )
+        relevance = summary.get("relevance")
+        answers = summary.get("answers", 0)
+        # One per metric. Both are running means over the same conversation, so a
+        # trend on only one of them is a UI inconsistency rather than a statement
+        # about the metrics.
+        trend = trend_sign(faithfulness, summary.get("last_faithfulness"), answers)
+        trend_relevance = trend_sign(relevance, summary.get("last_relevance"), answers)
 
         return {
             "enabled": True,
             "answers": summary.get("answers", 0),
             "faithfulness": faithfulness,
-            "relevance": summary.get("relevance"),
+            "relevance": relevance,
             "trend": trend,
+            "trend_relevance": trend_relevance,
             # A judge is working right now, so the badge can say so rather than
             # sitting silent for ~25s and looking broken.
             "pending": pending,
@@ -2360,7 +2365,7 @@ async def on_app_startup() -> None:
             # Lets the badge skip a re-render when nothing moved, same trick as
             # /ingest-status. Answer count plus the rounded means is enough: any
             # change that is visible at whole-percent resolution changes this.
-            "revision": f"{summary.get('answers', 0)}:{_pct(faithfulness)}:{_pct(summary.get('relevance'))}:{trend}:{int(pending)}",
+            "revision": f"{answers}:{_pct(faithfulness)}:{_pct(relevance)}:{trend}:{trend_relevance}:{int(pending)}",
         }
 
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/pdf/{file_name:path}")

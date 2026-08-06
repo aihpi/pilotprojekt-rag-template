@@ -124,10 +124,12 @@ Mittelwert über alle bewerteten Antworten dieses Chats, mit der Anzahl daneben.
 **Auf die Anzahl kommt es an.** „67% über 1 Antwort" und „67% über 20" sind nicht
 dieselbe Aussage, deshalb steht sie immer dabei.
 
-**Der Pfeil vergleicht die letzte Antwort mit diesem Mittelwert.** ↗ heißt, die
-letzte Antwort war besser als der Schnitt des Gesprächs, ↘ schlechter, und kein
-Pfeil heißt, sie lag etwa dort, wo der Mittelwert schon war. Sinnvoll ist das erst
-ab zwei Antworten, vorher erscheint er nicht.
+**Jede Kennzahl hat ihren eigenen Pfeil und vergleicht die letzte Antwort mit dem
+Mittelwert dieser Kennzahl.** ↗ heißt, die letzte Antwort war besser als der Schnitt
+des Gesprächs, ↘ schlechter, und kein Pfeil heißt, sie lag etwa dort, wo der
+Mittelwert schon war. Die beiden bewegen sich unabhängig voneinander —
+`Treue 58% ↘ · Relevanz 17% ↗` ist eine normale und durchaus nützliche Anzeige.
+Sinnvoll ist ein Pfeil erst ab zwei Antworten, vorher erscheint er nicht.
 
 **Klicke auf das Abzeichen** für die ganze Erklärung: welche Aussagen die letzte
 Antwort gemacht hat, welche davon die Quellen decken, und den Rechenweg für jede
