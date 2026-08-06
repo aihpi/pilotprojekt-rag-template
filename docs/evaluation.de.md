@@ -155,15 +155,38 @@ zu zerlegen und zu prüfen, einen, um daraus Fragen zu erzeugen, und die Embeddi
 für den Vergleich dieser Fragen mit deiner. Das ist der ganze Grund, warum das Ganze
 optional ist.
 
-Schnell ist es außerdem nicht: Die Bewertung einer Antwort dauert **rund 25
+Schnell ist es außerdem nicht: Die Bewertung einer Antwort dauert **rund 15
 Sekunden**. Die beiden Kennzahlen laufen gleichzeitig, es ist also die langsamere der
-beiden und nicht ihre Summe.
+beiden und nicht ihre Summe, und die langsamere ist immer die Treue.
 
 Ein größeres Bewertungsmodell macht es nicht langsamer und ein kleineres nicht
 schneller. Gemessen über `ministral-3-14b`, `gemma-4-31b` und `llama-3-3-70b` liegen
-alle drei innerhalb einer Sekunde beieinander, weil die Zeit im Round-Trip des
-Gateways pro strukturierter Anfrage steckt und nicht im Nachdenken des Modells. Fünf
-solche Anfragen pro Antwort sind die Untergrenze.
+alle drei innerhalb einer Sekunde beieinander. Was die Zeit bestimmt, ist wie viel die
+Antwort behauptet, denn jede Aussage braucht eine ausgeschriebene Begründung.
+
+### Es tauscht Tokens gegen Zeit, und das zählt bei einem bezahlten Gateway
+
+Die Treue prüft jede Aussage in einer eigenen Anfrage, alle gleichzeitig, statt alle
+Aussagen in eine Anfrage zu packen. Das ist etwa dreimal schneller und kostet Tokens,
+weil die abgerufenen Textstellen mit jeder Aussage erneut mitgeschickt werden. Gemessen
+an einer Antwort mit 8 Aussagen und 6,2 kB Kontext:
+
+| | eine Anfrage | eine pro Aussage |
+|---|---|---|
+| Input-Tokens | 2.558 | **18.840** |
+| Output-Tokens | 622 | 796 |
+| Zeit | 17,0 s | **5,5 s** |
+
+Der Input steigt etwa um Faktor 7, der Output kaum, und der Prüfschritt wird dreimal
+schneller. Bei einem selbst betriebenen Gateway ist das Rechenzeit, die du schon
+besitzt, und genau davon geht dieses Template aus. **Richtest du `judge_model` auf eine
+bezahlte API, zahlst du für diese Geschwindigkeit etwa das Sechsfache pro bewerteter
+Antwort** — dann setze `_VERDICT_CONCURRENCY = 1` in `eval_app/metrics.py` oder bündle
+die Aussagen wieder in einen Aufruf.
+
+Die Werte ändern sich dadurch nicht: Es ist derselbe Prompt mit einer kürzeren Liste,
+und an einer absichtlich gemischten Antwort (4 von 7 Aussagen gedeckt) lieferten
+gebündelte und einzelne Prüfung dieselben Urteile Aussage für Aussage.
 
 Warten musst du deswegen nicht. Die Bewertung startet erst, wenn die Antwort auf dem
 Bildschirm steht und gespeichert ist, du kannst also direkt weiterfragen. Das

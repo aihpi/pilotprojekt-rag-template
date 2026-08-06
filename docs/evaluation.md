@@ -149,14 +149,38 @@ the answer itself: two to split the answer into claims and check them, one to
 generate questions from it, and the embeddings to compare those questions with
 yours. That is the whole reason this is opt-in.
 
-It is also not fast: scoring one answer takes **roughly 25 seconds**. The two
-metrics run at the same time, so that is the slower of the two rather than their sum.
+It is also not fast: scoring one answer takes **roughly 15 seconds**. The two metrics
+run at the same time, so that is the slower of the two rather than their sum, and
+faithfulness is always the slower one.
 
 A bigger judge model will not make it slower and a smaller one will not make it
 faster. Measured across `ministral-3-14b`, `gemma-4-31b` and `llama-3-3-70b`, all
-three land within a second of each other, because the cost is the gateway's
-round-trip on each structured-output request rather than the model thinking. Five
-such requests per answer is the floor.
+three land within a second of each other. What does drive the time is how much the
+answer claims, because each claim needs a written justification.
+
+### It trades tokens for time, which matters on a metered gateway
+
+Faithfulness checks each claim in its own request, all of them at once, instead of
+putting every claim in one request. That is roughly three times faster, and it costs
+tokens, because the retrieved context is resent with every claim. Measured on an
+8-claim answer with 6.2 kB of context:
+
+| | one request | one per claim |
+|---|---|---|
+| input tokens | 2,558 | **18,840** |
+| output tokens | 622 | 796 |
+| time | 17.0 s | **5.5 s** |
+
+Input goes up about 7x, output barely moves, and the whole verdict step gets three
+times faster. On a self-hosted gateway that is compute you already own, which is what
+this template assumes. **If you point `judge_model` at a metered API, you are paying
+about six times more per scored answer for that speed** — in which case set
+`_VERDICT_CONCURRENCY = 1` in `eval_app/metrics.py`, or batch the claims again by
+passing all statements to `_create_verdicts` in one call.
+
+The scores are unaffected: it is the same prompt with a shorter list, and on a
+deliberately mixed answer (4 of 7 claims supported) batched and per-claim checking
+returned identical verdicts claim by claim.
 
 This does not keep you waiting. Scoring starts only after the answer is on screen
 and saved, so you can carry straight on asking questions. The badge updates itself

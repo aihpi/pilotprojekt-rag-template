@@ -62,6 +62,11 @@ def openai_base_url(base_url: str) -> str:
 # it hit were the detailed ones with many claims, exactly the ones worth checking.
 _MAX_TOKENS = 4096
 
+# How many per-claim verdict calls may be in flight at once. Bounded so a long answer
+# with dozens of claims does not open dozens of simultaneous requests at a shared
+# gateway; eight covers the typical answer without batching.
+_VERDICT_CONCURRENCY = 8
+
 
 def _direct_judge(client, model: str):
     """RAGAS's prompts and scoring, with its transport replaced.
@@ -194,17 +199,56 @@ async def _faithfulness(
     """
     from ragas.metrics.collections import Faithfulness
 
+    from ragas.metrics.collections.faithfulness.util import NLIStatementOutput
+
     metric = Faithfulness(llm=llm)
     statements = await metric._create_statements(question, answer)
     if not statements:
         # RAGAS returns NaN here. Nothing to report and nothing to average.
         return {}
-    verdicts = await metric._create_verdicts(statements, "\n".join(contexts))
-    score = float(metric._compute_score(verdicts))
+
+    context = "\n".join(contexts)
+    # One call per claim, concurrently, instead of one call carrying all of them.
+    #
+    # RAGAS batches every claim into a single verdict call, and that call is the whole
+    # critical path: it must generate a verdict *and* a written reason for each claim,
+    # so its cost is output length. Measured on a real 8-claim answer with 6.2 kB of
+    # context: 17.0s batched against 5.5s split.
+    #
+    # The context is resent with every call and that is close to free — 1 claim with
+    # the full 6.2 kB took 2.9s against 2.6s with 400 bytes, so prefill is not what
+    # costs. It is 8x the input tokens, which on a self-hosted gateway is compute
+    # rather than money.
+    #
+    # This is still RAGAS's prompt and RAGAS's scoring: _create_verdicts takes a list,
+    # so a one-element list changes the batching and nothing else. Verified on a
+    # deliberately mixed answer (4 of 7 claims supported) that batched and split return
+    # identical verdicts claim by claim, twice in a row.
+    limit = asyncio.Semaphore(_VERDICT_CONCURRENCY)
+
+    async def verdict_for(statement: str):
+        async with limit:
+            return await metric._create_verdicts([statement], context)
+
+    # No return_exceptions: dropping a claim that failed would shrink the denominator
+    # and quietly overstate the score. Better to lose the metric for this answer, which
+    # the caller already records as absent rather than as zero.
+    results = await asyncio.gather(*(verdict_for(s) for s in statements))
+
+    judged = [r.statements[0] for r in results if r.statements]
+    if len(judged) != len(statements):
+        raise ValueError(
+            f"judge returned {len(judged)} verdicts for {len(statements)} claims"
+        )
+
+    # Reassembled so the score is still RAGAS's _compute_score rather than arithmetic
+    # of ours, and gather preserves order so the claims line up with the answer.
+    merged = NLIStatementOutput(statements=judged)
+    score = float(metric._compute_score(merged))
 
     claims = [
         {"text": s.statement, "ok": bool(s.verdict), "why": s.reason}
-        for s in verdicts.statements
+        for s in merged.statements
     ]
     return {"faithfulness": score, "faithfulness_claims": claims}
 
