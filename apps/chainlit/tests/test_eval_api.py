@@ -93,6 +93,43 @@ def test_a_partial_result_stores_the_metric_that_worked(client, monkeypatch):
     assert row["faithfulness"] is None
 
 
+# --------------------------------------------------------------------------- #
+# Dashboard
+# --------------------------------------------------------------------------- #
+
+
+def test_the_dashboard_page_is_served(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "RAG Evaluation" in response.text
+
+
+def test_stats_are_empty_on_a_fresh_database(client):
+    # The page keys its "turn evaluation on" panel off an empty configs list, so
+    # empty must mean empty rather than an error.
+    assert client.get("/api/stats").json() == {"configs": [], "failures": []}
+
+
+def test_stats_report_scores_and_failures_together(client, monkeypatch):
+    _fake_score(monkeypatch, {"faithfulness": 0.9, "relevance": 0.7})
+    client.post("/api/score", json=_body())
+    storage.add_feedback(
+        main.DB_PATH,
+        rating="down",
+        config_signature=SIG,
+        failure_category="hallucination",
+    )
+
+    payload = client.get("/api/stats").json()
+
+    (config,) = payload["configs"]
+    assert config["config_signature"] == SIG
+    assert (config["answers"], config["thumbs_down"]) == (1, 1)
+    assert payload["failures"] == [
+        {"config_signature": SIG, "failure_category": "hallucination", "n": 1}
+    ]
+
+
 def test_the_reason_strings_are_returned_but_not_stored(client, monkeypatch):
     # The reasons are useful to show a user right now; they are not worth a column
     # until something actually queries them.

@@ -40,7 +40,7 @@ from chat_history import (
     update_chat_session_metadata,
     upsert_user_profile,
 )
-from evaluation import format_inline, post_score
+from evaluation import format_inline, post_feedback, post_score
 from llm import cached_chat_models, chat, list_chat_models, message_to_dict
 from tools import ToolContext, build_openai_tools
 from native_chat import (
@@ -2273,13 +2273,23 @@ async def on_app_startup() -> None:
 
 @cl.on_feedback
 async def on_feedback(feedback: cl.types.Feedback):
-    if not DATABASE_URL:
-        return
-    await upsert_feedback(
-        DATABASE_URL,
-        feedback_id=feedback.id or str(__import__("uuid").uuid4()),
+    if DATABASE_URL:
+        await upsert_feedback(
+            DATABASE_URL,
+            feedback_id=feedback.id or str(__import__("uuid").uuid4()),
+            step_id=feedback.forId,
+            value=float(feedback.value),
+            comment=feedback.comment,
+        )
+    # Also record it against the active configuration, which is what the evaluation
+    # dashboard groups by. Outside the DATABASE_URL branch on purpose: the eval
+    # store is a separate service, so thumbs stay measurable without Postgres.
+    # Chainlit's own comment box supplies feedback.comment — nothing here prompts
+    # for it — and classifying it happens in the eval service, not on this click.
+    await post_feedback(
+        rating="up" if feedback.value else "down",
         step_id=feedback.forId,
-        value=float(feedback.value),
+        thread_id=getattr(feedback, "threadId", None) or cl.context.session.thread_id,
         comment=feedback.comment,
     )
 

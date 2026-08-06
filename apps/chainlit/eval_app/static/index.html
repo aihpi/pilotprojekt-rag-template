@@ -1,0 +1,162 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Evaluation</title>
+<!--
+  One file, no build step, no charting library. Every "chart" here is a 0-100%
+  bar, which is a div with a percentage width - a dependency would buy nothing
+  and would have to be vendored into the repo or fetched from a CDN.
+-->
+<style>
+  :root {
+    --bg: #fff; --fg: #1a1a1a; --muted: #666; --line: #e4e4e7;
+    --bar: #d4d4d8; --good: #2f855a; --bad: #c53030; --accent: #2b6cb0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #18181b; --fg: #ededed; --muted: #a1a1aa; --line: #303034;
+      --bar: #3f3f46; --good: #48bb78; --bad: #fc8181; --accent: #63b3ed;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.5rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; margin: 2.5rem 0 .75rem; }
+  .sub { color: var(--muted); margin: 0 0 2rem; font-size: .9rem; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: .55rem .7rem; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; color: var(--muted); font-size: .78rem;
+       text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+
+  /* A "chart": track + fill + label. */
+  .metric { display: flex; align-items: center; gap: .6rem; min-width: 190px; }
+  .track { flex: 1; height: 8px; border-radius: 4px; background: var(--bar); overflow: hidden; }
+  .fill { height: 100%; background: var(--accent); border-radius: 4px; }
+  .metric span { font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; }
+  .none { color: var(--muted); }
+  .up { color: var(--good); } .down { color: var(--bad); }
+
+  .cfg { display: grid; gap: .1rem; }
+  .cfg b { font-weight: 600; }
+  .cfg small { color: var(--muted); }
+
+  .empty {
+    border: 1px solid var(--line); border-radius: 8px; padding: 1.5rem;
+    background: color-mix(in srgb, var(--fg) 3%, transparent);
+  }
+  .empty p { margin: 0 0 .75rem; }
+  .empty pre {
+    margin: 0; padding: .75rem; overflow-x: auto; border-radius: 6px;
+    background: color-mix(in srgb, var(--fg) 7%, transparent); font-size: .85em;
+  }
+  .note { color: var(--muted); font-size: .85rem; margin-top: 2.5rem;
+          border-top: 1px solid var(--line); padding-top: 1rem; }
+</style>
+
+<main>
+  <h1>RAG Evaluation</h1>
+  <p class="sub">
+    Answer quality per configuration. Read these as deltas, not as grades: a
+    faithfulness of 0.87 says little on its own, 0.87&nbsp;&rarr;&nbsp;0.71 after a
+    chunking change says a lot.
+  </p>
+  <div id="body">Loading&hellip;</div>
+  <p class="note">
+    Faithfulness asks whether the answer's claims are supported by the retrieved
+    chunks. Relevance asks whether the answer addresses the question. Both are
+    judged by an LLM, so they carry its opinion and its noise &mdash; compare runs,
+    do not trust absolute values.
+  </p>
+</main>
+
+<script>
+const pct = v => v == null ? null : Math.round(v * 100);
+
+function bar(value) {
+  const p = pct(value);
+  if (p === null) return '<span class="none">not scored</span>';
+  return `<div class="metric"><div class="track"><div class="fill" style="width:${p}%"></div></div><span>${p}%</span></div>`;
+}
+
+function config(signature) {
+  // {chat_model}|{embed_model}|{strategy}|{max_chars}|{collection}
+  if (!signature) return '<span class="none">unknown configuration</span>';
+  const [chat, embed, strategy, chunk, collection] = signature.split('|');
+  return `<div class="cfg"><b>${chat}</b><small>${embed} &middot; ${strategy} @ ${chunk} &middot; <code>${collection}</code></small></div>`;
+}
+
+function thumbs(up, down) {
+  if (!up && !down) return '<span class="none">&ndash;</span>';
+  return `<span class="up">&#9650;${up}</span> / <span class="down">&#9660;${down}</span>`;
+}
+
+function configTable(rows) {
+  return `<div class="scroll"><table>
+    <thead><tr>
+      <th>Configuration</th><th class="num">Answers</th>
+      <th>Faithfulness</th><th>Relevance</th><th class="num">Thumbs</th>
+    </tr></thead>
+    <tbody>${rows.map(r => `<tr>
+      <td>${config(r.config_signature)}</td>
+      <td class="num">${r.answers}</td>
+      <td>${bar(r.faithfulness)}</td>
+      <td>${bar(r.relevance)}</td>
+      <td class="num">${thumbs(r.thumbs_up, r.thumbs_down)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function failureTable(failures) {
+  if (!failures.length) return '';
+  // Share within the configuration's own reported failures, not across all of
+  // them: "half of this config's complaints were hallucinations" is actionable,
+  // "this bar is shorter than another config's bar" is not.
+  const totals = {};
+  for (const f of failures) {
+    totals[f.config_signature] = (totals[f.config_signature] || 0) + f.n;
+  }
+  return `<h2>Reported failures</h2>
+  <p class="sub" style="margin:-.4rem 0 .75rem">
+    Thumbs-down comments, classified. Share is of that configuration's own complaints.
+  </p>
+  <div class="scroll"><table>
+    <thead><tr><th>Configuration</th><th>Category</th><th class="num">Count</th><th>Share</th></tr></thead>
+    <tbody>${failures.map(f => `<tr>
+      <td>${config(f.config_signature)}</td>
+      <td>${f.failure_category.replace(/_/g, ' ')}</td>
+      <td class="num">${f.n}</td>
+      <td>${bar(f.n / totals[f.config_signature])}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+const EMPTY = `<div class="empty">
+  <p><strong>No scores recorded yet.</strong> Turn evaluation on in your
+  <code>rag.config.yaml</code> and ask the assistant a question:</p>
+  <pre>evaluation:
+  enabled: true</pre>
+  <p style="margin:.75rem 0 0">Scoring is off by default because each answer costs
+  two judge calls plus one embedding call. To compare two configurations, ingest
+  each into its own collection &mdash; they are grouped by model, embedding model,
+  chunking and collection.</p>
+</div>`;
+
+fetch('api/stats')
+  .then(r => r.json())
+  .then(({ configs, failures }) => {
+    document.getElementById('body').innerHTML = configs.length
+      ? configTable(configs) + failureTable(failures)
+      : EMPTY;
+  })
+  .catch(err => {
+    document.getElementById('body').innerHTML =
+      `<div class="empty"><p><strong>Could not load statistics.</strong></p><pre>${err}</pre></div>`;
+  });
+</script>

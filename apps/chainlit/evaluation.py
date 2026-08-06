@@ -60,6 +60,31 @@ def config_signature(cfg: "RagConfig") -> str:
     )
 
 
+def _resolve(cfg: "RagConfig | None"):
+    if cfg is None:
+        from config import get_config
+
+        cfg = get_config()
+    return cfg, cfg.evaluation
+
+
+async def _post(ev, path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """POST to the eval service, returning ``None`` on any failure whatsoever.
+
+    Deliberately broad: nothing reachable from here is worth failing an answer or a
+    thumbs-click over, and the user has no way to act on it either way.
+    """
+    url = f"{ev.service_url.rstrip('/')}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            return response.json()
+    except Exception as exc:
+        logger.warning("evaluation: %s unavailable (%s)", path, exc)
+        return None
+
+
 async def post_score(
     *,
     question: str,
@@ -74,11 +99,7 @@ async def post_score(
     Returns ``None`` — and never raises — when evaluation is off, when there is
     nothing meaningful to score, or when the service cannot be reached.
     """
-    if cfg is None:
-        from config import get_config
-
-        cfg = get_config()
-    ev = cfg.evaluation
+    cfg, ev = _resolve(cfg)
     if not ev.enabled:
         return None
     # Faithfulness asks whether the answer's claims are supported by the retrieved
@@ -88,27 +109,61 @@ async def post_score(
     if not contexts or not answer.strip():
         return None
 
-    payload = {
-        "question": question,
-        "answer": answer,
-        "contexts": contexts,
-        "metrics": list(ev.metrics),
-        "judge_model": ev.judge_model or cfg.models.chat_model,
-        "config_signature": config_signature(cfg),
-        "thread_id": thread_id,
-        "message_id": message_id,
-    }
-    url = f"{ev.service_url.rstrip('/')}/api/score"
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            return response.json()
-    except Exception as exc:
-        # Deliberately broad. Nothing this function can hit is worth failing an
-        # answer over, and the user has no way to act on it either way.
-        logger.warning("evaluation: scoring unavailable (%s)", exc)
-        return None
+    return await _post(
+        ev,
+        "/api/score",
+        {
+            "question": question,
+            "answer": answer,
+            "contexts": contexts,
+            "metrics": list(ev.metrics),
+            "judge_model": ev.judge_model or cfg.models.chat_model,
+            "config_signature": config_signature(cfg),
+            "thread_id": thread_id,
+            "message_id": message_id,
+        },
+    )
+
+
+async def post_feedback(
+    *,
+    rating: str,
+    step_id: str | None = None,
+    thread_id: str | None = None,
+    comment: str | None = None,
+    cfg: "RagConfig | None" = None,
+) -> None:
+    """Record a thumbs click for the dashboard. Never raises.
+
+    Separate from the Postgres feedback row the app already writes: that one is
+    per-thread and belongs to Chainlit's own history, this one is per
+    configuration and belongs to the eval store. It is also independent of
+    ``DATABASE_URL``, so thumbs stay measurable on an instance running without
+    Postgres.
+
+    ponytail: identifies the rated answer only by Chainlit's ``forId``, which may
+    be the parent run step rather than the assistant message our scores are keyed
+    by — so a feedback row cannot reliably be joined to its own score row. Nothing
+    needs that yet (the dashboard groups by signature, which is exact), and the
+    join would cost a Postgres round-trip per click. Resolve ``forId`` through the
+    LEFT JOIN LATERAL pattern in ``native_chat.export_feedback_csv`` if a
+    per-answer view is ever wanted.
+    """
+    cfg, ev = _resolve(cfg)
+    if not ev.enabled:
+        return
+    await _post(
+        ev,
+        "/api/feedback",
+        {
+            "rating": rating,
+            "step_id": step_id,
+            "thread_id": thread_id,
+            "comment": comment,
+            "config_signature": config_signature(cfg),
+            "judge_model": ev.judge_model or cfg.models.chat_model,
+        },
+    )
 
 
 def format_inline(scores: dict[str, Any] | None) -> str:

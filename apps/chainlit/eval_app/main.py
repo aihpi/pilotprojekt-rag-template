@@ -19,10 +19,13 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from eval_app import feedback as feedback_mod
 from eval_app import metrics, storage
 # Imported by name, not reached through the module: the request model has a field
 # called `metrics`, which shadows the module when pydantic resolves annotations.
@@ -35,6 +38,8 @@ logger = logging.getLogger(__name__)
 # under the bind-mounted app directory — a WAL database on a bind mount is how
 # this project corrupted its chat history once already.
 DB_PATH = Path(os.getenv("EVAL_DB_PATH", "/app/.evaldb/eval.sqlite3"))
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 # Same gateway and credentials the app uses. Passed through by compose exactly as
 # they are for the ingest service.
@@ -65,9 +70,65 @@ class ScoreRequest(BaseModel):
     message_id: str | None = None
 
 
+class FeedbackRequest(BaseModel):
+    rating: Literal["up", "down"]
+    judge_model: str
+    config_signature: str | None = None
+    comment: str | None = None
+    step_id: str | None = None
+    thread_id: str | None = None
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/")
+async def dashboard() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/stats")
+async def stats() -> dict[str, list]:
+    """Everything the dashboard draws, in one request.
+
+    One endpoint rather than one per widget: the payload is a handful of rows per
+    configuration, so splitting it would only buy the page more round-trips to
+    coordinate.
+    """
+    return {
+        "configs": storage.stats_by_config(DB_PATH),
+        "failures": storage.failure_categories(DB_PATH),
+    }
+
+
+@app.post("/api/feedback")
+async def post_feedback(request: FeedbackRequest) -> dict[str, str | None]:
+    """Record a thumbs click, classifying the comment when there is one.
+
+    Only thumbs-down comments are classified. A thumbs-up with a comment is praise
+    or a stray note, and running it through a failure taxonomy would invent a
+    failure that the user did not report.
+    """
+    category = None
+    if request.rating == "down" and request.comment:
+        category = await feedback_mod.classify(
+            request.comment,
+            judge_model=request.judge_model,
+            base_url=LITELLM_BASE_URL,
+            api_key=LITELLM_API_KEY,
+        )
+    storage.add_feedback(
+        DB_PATH,
+        rating=request.rating,
+        step_id=request.step_id,
+        thread_id=request.thread_id,
+        config_signature=request.config_signature,
+        failure_reason=request.comment,
+        failure_category=category,
+    )
+    return {"failure_category": category}
 
 
 @app.post("/api/score")

@@ -183,5 +183,18 @@ default_avatar_file_url = ""
 #     url = "https://github.com/Chainlit/chainlit/issues"
 #     target = "_blank" (default)  # Optional: "_self", "_parent", "_top".
 
+# Link to the evaluation dashboard. Commented out because the eval service is
+# opt-in (`docker compose --profile eval up -d`), and a header link that 404s is
+# worse than no link at all. Uncomment once you are running it.
+#
+# The URL is the one YOUR BROWSER needs, not the one the app container uses:
+# http://eval:8001 only resolves inside the compose network, so this stays
+# localhost even under Docker. Adjust the port if you set EVAL_PORT.
+# [[UI.header_links]]
+#     name = "Evaluation"
+#     display_name = "Evaluation"
+#     icon_url = "/public/icons/evaluation.svg"
+#     url = "http://localhost:8001"
+
 [meta]
 generated_by = "2.9.6"

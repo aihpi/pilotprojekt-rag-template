@@ -43,6 +43,8 @@ Every field below is generated directly from the pydantic models in
 
 ::: config.schema.ImagesConfig
 
+::: config.schema.EvaluationConfig
+
 ::: config.schema.ProfileConfig
 
 ::: config.schema.AppConfig

@@ -190,6 +190,39 @@ def test_a_config_with_one_metric_only_asks_for_that_metric(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# Feedback posting
+# --------------------------------------------------------------------------- #
+
+
+def _feedback(cfg, **kw):
+    return asyncio.run(evaluation.post_feedback(rating="down", cfg=cfg, **kw))
+
+
+def test_a_disabled_config_posts_no_feedback_either(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", _ExplodingClient)
+    assert _feedback(RagConfig()) is None
+
+
+def test_feedback_carries_the_signature_and_the_raw_comment(monkeypatch):
+    calls = _install_client(monkeypatch)
+    cfg = _enabled()
+
+    _feedback(cfg, step_id="s-1", thread_id="t-1", comment="steht nicht im PDF")
+
+    url, body = calls[0]
+    assert url == "http://eval:8001/api/feedback"
+    assert body["rating"] == "down"
+    assert body["comment"] == "steht nicht im PDF"
+    assert body["config_signature"] == evaluation.config_signature(cfg)
+    assert (body["step_id"], body["thread_id"]) == ("s-1", "t-1")
+
+
+def test_an_unreachable_service_does_not_break_a_thumbs_click(monkeypatch):
+    _install_client(monkeypatch, raises=httpx.ConnectError("connection refused"))
+    assert _feedback(_enabled(), comment="x") is None
+
+
+# --------------------------------------------------------------------------- #
 # Inline rendering
 # --------------------------------------------------------------------------- #
 
