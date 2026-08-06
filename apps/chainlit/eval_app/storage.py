@@ -183,6 +183,55 @@ def stats_by_config(db_path: Path) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def thread_summary(db_path: Path, thread_id: str) -> dict[str, Any]:
+    """Running numbers for one conversation, for the badge above the chatbox.
+
+    ``AVG`` ignores NULLs, so a conversation where some answers scored and others
+    did not reports the mean of what actually scored, rather than being dragged
+    towards zero by failures. ``answers`` counts every scored *attempt* though,
+    including the ones that produced nothing — the badge shows it because "94% over
+    2 answers" and "94% over 20" are different claims.
+
+    ``last_*`` is the most recent non-null value, which is what the trend arrow
+    compares against the mean. A partially scored conversation is the normal case,
+    not an error, so every field is independently nullable.
+    """
+    with connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*)            AS answers,
+                AVG(faithfulness)   AS faithfulness,
+                AVG(relevance)      AS relevance
+            FROM eval_scores
+            WHERE thread_id = ?
+            """,
+            (thread_id,),
+        ).fetchone()
+        # Separate lookups rather than a window function: the newest row with a
+        # faithfulness score is not necessarily the newest row with a relevance one.
+        last = {}
+        for metric in ("faithfulness", "relevance"):
+            found = conn.execute(
+                f"""
+                SELECT {metric} FROM eval_scores
+                WHERE thread_id = ? AND {metric} IS NOT NULL
+                ORDER BY timestamp DESC, id DESC
+                LIMIT 1
+                """,
+                (thread_id,),
+            ).fetchone()
+            last[f"last_{metric}"] = found[0] if found else None
+
+    return {
+        "thread_id": thread_id,
+        "answers": row["answers"] or 0,
+        "faithfulness": row["faithfulness"],
+        "relevance": row["relevance"],
+        **last,
+    }
+
+
 def failure_categories(db_path: Path) -> list[dict[str, Any]]:
     with connect(db_path) as conn:
         rows = conn.execute(

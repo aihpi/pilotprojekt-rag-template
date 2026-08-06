@@ -71,6 +71,24 @@ def _resolve(cfg: "RagConfig | None"):
     return cfg, cfg.evaluation
 
 
+def trend_sign(mean: float | None, last: float | None, answers: int) -> int:
+    """Which way the last answer went against the conversation's average.
+
+    ``1`` up, ``-1`` down, ``0`` for "about the same" — a sign only, because the
+    badge has room for an arrow and not a second number.
+
+    Returns ``0`` below two answers: with one answer the last value *is* the mean,
+    so any arrow would be noise dressed up as a signal. The dead band keeps a
+    judge's rounding jitter from showing as a trend.
+    """
+    if answers < 2 or mean is None or last is None:
+        return 0
+    delta = last - mean
+    if delta > 0.01:
+        return 1
+    return -1 if delta < -0.01 else 0
+
+
 async def _post(ev, path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
     """POST to the eval service, returning ``None`` on any failure whatsoever.
 
@@ -170,17 +188,3 @@ async def post_feedback(
     )
 
 
-def format_inline(scores: dict[str, Any] | None) -> str:
-    """Render scores as the one-line panel shown under an answer.
-
-    Returns ``""`` when there is nothing to show, so the caller can decide whether
-    to attach an element by truthiness alone.
-    """
-    if not scores:
-        return ""
-    # The isinstance filter is what drops the sibling "<metric>_reason" strings.
-    return " · ".join(
-        f"{name.capitalize()}: {value * 100:.0f}%"
-        for name, value in scores.items()
-        if isinstance(value, (int, float))
-    )

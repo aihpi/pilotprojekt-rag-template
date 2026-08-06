@@ -223,22 +223,27 @@ def test_an_unreachable_service_does_not_break_a_thumbs_click(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Inline rendering
+# Trend arrow on the badge
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
-    "scores, expected",
+    "mean, last, answers, expected",
     [
-        ({"faithfulness": 0.923, "relevance": 0.871}, "Faithfulness: 92% · Relevance: 87%"),
-        ({"faithfulness": 0.5}, "Faithfulness: 50%"),  # one metric configured
-        ({"relevance": 1.0}, "Relevance: 100%"),
-        # The reason strings ride along in the same dict and must not be rendered.
-        ({"faithfulness": 0.5, "faithfulness_reason": "claim 2 unsupported"}, "Faithfulness: 50%"),
-        ({}, ""),  # nothing computed
-        (None, ""),  # scoring failed or was skipped
-        ({"faithfulness": None}, ""),  # metric returned nothing usable
+        (0.60, 0.90, 3, 1),  # last answer clearly better than the conversation
+        (0.90, 0.60, 3, -1),  # clearly worse
+        (0.80, 0.80, 3, 0),  # unchanged
+        (0.80, 0.805, 3, 0),  # inside the dead band: judge jitter, not a trend
+        (0.80, 0.795, 3, 0),
+        # With one answer the last value IS the mean, so an arrow would be noise
+        # presented as signal.
+        (0.67, 0.67, 1, 0),
+        (0.10, 0.90, 1, 0),
+        # A metric that never scored must not produce a direction.
+        (None, 0.9, 5, 0),
+        (0.9, None, 5, 0),
+        (None, None, 5, 0),
     ],
 )
-def test_inline_rendering(scores, expected):
-    assert evaluation.format_inline(scores) == expected
+def test_the_trend_is_a_sign_and_needs_two_answers(mean, last, answers, expected):
+    assert evaluation.trend_sign(mean, last, answers) == expected

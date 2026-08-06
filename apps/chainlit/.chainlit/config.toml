@@ -139,11 +139,12 @@ custom_css = "/public/custom.css"
 
 # Specify a JavaScript file that can be used to customize the user interface.
 # The JavaScript file can be served from the public directory.
-# Shows a toast in the top right while the document watcher is indexing. Only ONE
-# custom_js can be set, which is why this is its own file: public/custom.js holds
-# older, never-enabled code, and switching that on as a side effect would surprise
-# people.
-custom_js = "/public/ingest-status.js"
+# A loader for the two badges: the document-watcher status in the header, and the
+# evaluation score above the chatbox. Only ONE custom_js can be set, hence the
+# loader rather than two entries. Deliberately not public/custom.js, which holds
+# older, never-enabled code that would surprise people if switched on as a side
+# effect of adding a badge.
+custom_js = "/public/badges.js"
 
 # The style of alert boxes. Can be "classic" or "modern".
 alert_style = "classic"

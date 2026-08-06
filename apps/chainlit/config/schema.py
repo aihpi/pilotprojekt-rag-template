@@ -471,10 +471,10 @@ class EvaluationConfig(BaseModel):
     """Model that grades the answer. ``None`` → ``models.chat_model``. Judging a
     model with itself inflates the scores, so prefer naming a different model here
     if anyone is going to read the absolute values."""
-    show_inline: bool = True
-    """Show the scores under each answer. ``false`` still records them for the
-    dashboard — which is what you want once the numbers stop being interesting to
-    watch live."""
+    show_badge: bool = True
+    """Show the running conversation score in a badge above the chatbox. ``false``
+    still records everything for the dashboard, which is what you want when you would
+    rather not put a number in front of workshop participants."""
     service_url: str = "http://eval:8001"
     """Base URL of the ``eval_app`` service. The default resolves on the compose
     network; running locally with ``uv run`` it is ``http://localhost:8001``."""

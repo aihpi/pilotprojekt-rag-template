@@ -60,17 +60,37 @@ evaluation:
   enabled: true
   metrics: [faithfulness, relevance]
   judge_model: null      # null nimmt models.chat_model
-  show_inline: true
+  show_badge: true
 ```
 
-Starte die App neu und stelle eine Frage. Die Werte erscheinen unter der Antwort:
+Starte die App neu und stelle eine Frage. Über dem Eingabefeld erscheint ein
+kleines Abzeichen:
 
 ```
-Faithfulness: 92% · Relevance: 87%
+Treue 67% ↗ · Relevanz 88% · 3 Antworten
 ```
 
-Wenn du die Zahlen nur für das Dashboard sammeln willst, ohne dass sie unter jeder
-Antwort auftauchen, setze `show_inline: false`.
+Das ist das Gespräch bis hierher, nicht die letzte Antwort: ein laufender
+Mittelwert über alle bewerteten Antworten dieses Chats, mit der Anzahl daneben.
+
+**Auf die Anzahl kommt es an.** „67% über 1 Antwort" und „67% über 20" sind nicht
+dieselbe Aussage, deshalb steht sie immer dabei.
+
+**Der Pfeil vergleicht die letzte Antwort mit diesem Mittelwert.** ↗ heißt, die
+letzte Antwort war besser als der Schnitt des Gesprächs, ↘ schlechter, und kein
+Pfeil heißt, sie lag etwa dort, wo der Mittelwert schon war. Sinnvoll ist das erst
+ab zwei Antworten, vorher erscheint er nicht.
+
+**Fahre mit der Maus über das Abzeichen** (oder fokussiere es mit der Tastatur) für
+die ganze Erklärung, samt Rechenweg für jede Zahl. Du sollst das nicht im Kopf haben
+oder dafür auf diese Seite zurückkommen müssen.
+
+Das Abzeichen gehört zu einem Gespräch und erscheint deshalb erst, wenn darin eine
+Antwort bewertet wurde. Auf der Startseite steht nichts, statt der Zahlen von dem,
+was du zuletzt gemacht hast.
+
+Wenn du die Zahlen sammeln willst, ohne sie jemandem vor die Nase zu setzen, setze
+`show_badge: false`. Das Dashboard füllt sich weiterhin.
 
 Läuft der Dienst nicht, speichert die App einfach nichts. Du siehst keinen Fehler,
 und die Antworten sind unverändert.
@@ -88,9 +108,13 @@ die langsamere der beiden und nicht ihre Summe, aber immer noch weit mehr als di
 Antwort selbst gebraucht hat.
 
 Warten musst du deswegen nicht. Die Bewertung startet erst, wenn die Antwort auf dem
-Bildschirm steht und gespeichert ist, du kannst also direkt weiterfragen. Die Werte
-erscheinen unter der Antwort, sobald sie fertig sind, unter Umständen eine halbe
-Minute später.
+Bildschirm steht und gespeichert ist, du kannst also direkt weiterfragen. Das
+Abzeichen aktualisiert sich von selbst, sobald ein Wert fertig ist, unter Umständen
+eine halbe Minute nach der Antwort.
+
+Weil das Abzeichen zum Gespräch gehört und nicht zu einer einzelnen Nachricht, zählt
+ein Wert auch dann noch, wenn er erst fertig wird, nachdem du schon weitergefragt
+hast, und er ist nach einem Neuladen der Seite weiterhin da.
 
 Wenn die Bewertung viele Minuten statt einiger Sekunden braucht, denkt das
 Bewertungsmodell wahrscheinlich nicht, sondern scheitert. Prüfe, ob das angegebene

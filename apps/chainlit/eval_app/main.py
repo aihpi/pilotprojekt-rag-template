@@ -92,6 +92,17 @@ async def dashboard() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/api/thread/{thread_id}")
+async def thread(thread_id: str) -> dict[str, object]:
+    """Running numbers for one conversation, for the badge above the chatbox.
+
+    Always 200, even for a thread nobody has scored: an unscored conversation is
+    the normal starting state, and making the caller distinguish 404-because-new
+    from 404-because-broken would push that guess into the browser.
+    """
+    return storage.thread_summary(DB_PATH, thread_id)
+
+
 @app.get("/api/stats")
 async def stats() -> dict[str, list]:
     """Everything the dashboard draws, in one request.

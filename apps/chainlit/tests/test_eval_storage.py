@@ -130,6 +130,61 @@ def test_many_ratings_on_one_answer_do_not_multiply_the_answer_count(db):
 
 
 # --------------------------------------------------------------------------- #
+# Per-conversation summary (the badge above the chatbox)
+# --------------------------------------------------------------------------- #
+
+
+def test_an_unscored_conversation_summarises_to_zero_not_an_error(db):
+    # A brand-new chat is the normal starting state, so this must be answerable
+    # rather than a missing row the browser has to interpret.
+    s = storage.thread_summary(db, "t-unknown")
+    assert s["answers"] == 0
+    assert s["faithfulness"] is None and s["relevance"] is None
+    assert s["last_faithfulness"] is None
+
+
+def test_the_summary_averages_only_this_conversation(db):
+    _score(db, thread_id="t-1", faithfulness=1.0)
+    _score(db, thread_id="t-1", faithfulness=0.5)
+    _score(db, thread_id="t-2", faithfulness=0.0)
+
+    s = storage.thread_summary(db, "t-1")
+    assert s["answers"] == 2
+    assert s["faithfulness"] == pytest.approx(0.75), "t-2 must not leak in"
+
+
+def test_a_failed_metric_is_excluded_from_the_mean_but_counted_as_an_answer(db):
+    _score(db, thread_id="t-1", faithfulness=0.8)
+    _score(db, thread_id="t-1", faithfulness=None)  # judge failed
+
+    s = storage.thread_summary(db, "t-1")
+    assert s["faithfulness"] == pytest.approx(0.8), "a null must not pull the mean down"
+    assert s["answers"] == 2, (
+        "the count is of answers scored, so the badge cannot overstate its evidence"
+    )
+
+
+def test_the_last_value_is_per_metric_not_per_row(db):
+    # The newest row carrying a faithfulness score need not be the newest row
+    # carrying a relevance one, which is why they are looked up separately.
+    _score(db, thread_id="t-1", faithfulness=0.2, relevance=0.9)
+    _score(db, thread_id="t-1", faithfulness=0.4, relevance=None)
+
+    s = storage.thread_summary(db, "t-1")
+    assert s["last_faithfulness"] == 0.4
+    assert s["last_relevance"] == 0.9, "fall back to the newest row that actually has one"
+
+
+def test_relevance_absent_throughout_is_reported_as_absent(db):
+    # The normal partial case: faithfulness worked, relevance did not.
+    _score(db, thread_id="t-1", faithfulness=0.7)
+
+    s = storage.thread_summary(db, "t-1")
+    assert s["faithfulness"] == pytest.approx(0.7)
+    assert s["relevance"] is None and s["last_relevance"] is None
+
+
+# --------------------------------------------------------------------------- #
 # Failure categories
 # --------------------------------------------------------------------------- #
 

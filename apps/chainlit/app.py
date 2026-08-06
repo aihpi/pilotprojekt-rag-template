@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import quote
 
 import asyncpg
+import httpx
 import bcrypt
 import chainlit as cl
 from chainlit.auth import get_current_user
@@ -40,7 +41,7 @@ from chat_history import (
     update_chat_session_metadata,
     upsert_user_profile,
 )
-from evaluation import format_inline, post_feedback, post_score
+from evaluation import post_feedback, post_score, trend_sign
 from llm import cached_chat_models, chat, list_chat_models, message_to_dict
 from tools import ToolContext, build_openai_tools
 from native_chat import (
@@ -336,6 +337,24 @@ def _active_retrieval_filters() -> dict[str, Any]:
 TOOLS, TOOL_BY_FUNCTION_NAME = build_openai_tools(get_config())
 # The search tool's name, still used by the "call the tool first" retry nudge.
 TOOL_NAME: str = get_config().tool.name
+
+# Strong references to in-flight answer-scoring tasks. asyncio holds only a weak one,
+# so without this they are collectable and simply never run — the same trap the
+# document watcher documents at its own create_task.
+_SCORING_TASKS: set[asyncio.Task] = set()
+
+
+def _forget_scoring_task(task: asyncio.Task) -> None:
+    _SCORING_TASKS.discard(task)
+    # A detached task swallows its exception unless somebody asks for it, and scoring
+    # that fails in silence is exactly how a dropped task went unnoticed once already.
+    if not task.cancelled() and task.exception() is not None:
+        print(f"[WARN] evaluation_scoring_failed: {task.exception()!r}")
+
+
+def _pct(value: float | None) -> str:
+    """Whole-percent rendering, used only to build the badge's revision string."""
+    return "-" if value is None else str(round(value * 100))
 
 
 def _utc_stamp() -> str:
@@ -2243,6 +2262,59 @@ async def on_app_startup() -> None:
             filename=csv_file.name,
         )
 
+    @chainlit_fastapi_app.get("/eval-status")
+    async def eval_status(thread_id: str | None = None, current_user=Depends(get_current_user)):
+        """Running answer-quality numbers for the badge above the chatbox.
+
+        Scoring happens in a background task with no live session, so it cannot push
+        anything to a browser; the badge polls this instead, exactly like
+        ``/ingest-status`` above. Behind auth like every other route here, because
+        the numbers describe someone's own conversation.
+
+        ``thread_id`` comes from the browser, which reads it out of a ``/thread/<uuid>``
+        URL. It is required rather than guessed: without it there is nothing to
+        report, and answering with the user's most recent conversation instead would
+        put the previous chat's numbers above an empty composer. Chainlit routes to
+        ``/thread/<uuid>`` as soon as the first message is sent, so a real
+        conversation always has one.
+        """
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        cfg = get_config()
+        if not cfg.evaluation.enabled or not cfg.evaluation.show_badge:
+            return {"enabled": False, "revision": 0}
+        if not thread_id:
+            return {"enabled": True, "answers": 0, "revision": 0}
+
+        url = f"{cfg.evaluation.service_url.rstrip('/')}/api/thread/{thread_id}"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                summary = response.json()
+        except Exception as exc:
+            # The eval service is optional; a badge that cannot reach it should go
+            # quiet rather than turn into an error in the corner of the chat.
+            print(f"[WARN] eval_status_unavailable: {exc.__class__.__name__}: {exc}")
+            return {"enabled": True, "answers": 0, "revision": 0}
+
+        faithfulness = summary.get("faithfulness")
+        trend = trend_sign(
+            faithfulness, summary.get("last_faithfulness"), summary.get("answers", 0)
+        )
+
+        return {
+            "enabled": True,
+            "answers": summary.get("answers", 0),
+            "faithfulness": faithfulness,
+            "relevance": summary.get("relevance"),
+            "trend": trend,
+            # Lets the badge skip a re-render when nothing moved, same trick as
+            # /ingest-status. Answer count plus the rounded means is enough: any
+            # change that is visible at whole-percent resolution changes this.
+            "revision": f"{summary.get('answers', 0)}:{_pct(faithfulness)}:{_pct(summary.get('relevance'))}:{trend}",
+        }
+
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/pdf/{file_name:path}")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/figure/{file_name:path}")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/citations/{step_id}")
@@ -2250,6 +2322,7 @@ async def on_app_startup() -> None:
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/feedback")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/auth/register")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/ingest-status")
+    _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-status")
 
     _patch_cookie_security_openapi_model()
 
@@ -3682,40 +3755,38 @@ async def main(message: cl.Message):
             metadata=message_metadata,
         )
 
-        # Answer-quality scoring (off unless evaluation.enabled). Detached on
-        # purpose: a judge grading an answer measured at ~100s against a self-hosted
-        # gpt-oss-120b, and awaiting that here would leave the session busy, unable
-        # to take the next question, for the whole time. The answer is already sent
-        # and saved, so the scores just arrive when they arrive.
+        # Answer-quality scoring (off unless evaluation.enabled). Detached on purpose:
+        # a judge takes tens of seconds, and awaiting it here would leave the session
+        # busy and unable to take the next question for the whole time. Nothing in the
+        # UI is waiting on the result either — the badge above the chatbox polls
+        # /eval-status, so a score that lands after the socket closed still counts and
+        # still shows up on the next page load.
+        #
+        # This deliberately does NOT touch the sent message. Appending to it from here
+        # was the original design and it never worked: Message.update() emits over the
+        # session websocket, and by the time a ~40s judge returns the handler is gone
+        # and the emit silently goes nowhere.
+        #
         # The sibling branch below retrieves nothing, so it has no chunks to check an
         # answer against and is deliberately left alone.
-        async def _score_in_background(
-            question: str, answer: str, results: list[Any], reply: cl.Message
-        ) -> None:
-            scores = await post_score(
-                question=question,
-                answer=answer,
-                contexts=[r.text for r in results],
-                thread_id=session_id,
-                message_id=reply.id,
-            )
-            if not get_config().evaluation.show_inline:
-                return
-            inline = format_inline(scores)
-            if not inline:
-                return
-            # Appended to the sent message, never to `content` — the transcript row
-            # written above must stay the model's own answer, or a resumed chat
-            # would feed old scores back to the model as words it had written.
-            reply.content = f"{reply.content}\n\n*{inline}*"
-            await reply.update()
-
         if get_config().evaluation.enabled:
-            # create_task copies the current context, so cl.context still resolves
-            # inside the task and reply.update() reaches the right session.
-            asyncio.create_task(
-                _score_in_background(message.content, content, last_results, assistant_reply)
+            print("[DEBUG] evaluation_scoring: contexts=", len(last_results))
+            # The reference must be held until the task finishes: asyncio keeps only a
+            # weak one, so a bare create_task() can be collected mid-flight — the same
+            # trap the document watcher documents at its own create_task above. Dropped
+            # it here first, and the symptom was silence: no scores, no request reaching
+            # the service, and nothing in the log.
+            task = asyncio.create_task(
+                post_score(
+                    question=message.content,
+                    answer=content,
+                    contexts=[r.text for r in last_results],
+                    thread_id=session_id,
+                    message_id=assistant_reply.id,
+                )
             )
+            _SCORING_TASKS.add(task)
+            task.add_done_callback(_forget_scoring_task)
     else:
         # No retrieval happened, so any marker here would be imitation (e.g. copied
         # from a resumed transcript) — strip defensively.

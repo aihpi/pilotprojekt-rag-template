@@ -120,7 +120,7 @@ evaluation:
   # relevance    = does the answer address the question that was asked
   judge_model: null                 # null = models.chat_model; prefer a different
                                     # model here, self-judging inflates the scores
-  show_inline: true                 # false still records scores for the dashboard
+  show_badge: true                  # false still records scores for the dashboard
 
 prompt:
   # No system_prompt_path -> the app generates one at startup from the template

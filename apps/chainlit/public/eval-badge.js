@@ -1,0 +1,309 @@
+/*
+ * A badge above the chatbox showing how this conversation is scoring.
+ *
+ * Same shape as ingest-status.js and for the same reason: scoring runs in a
+ * background task with no live session, so it cannot push anything to a browser.
+ * This polls /eval-status instead.
+ *
+ * It replaced a per-answer line appended under each message, which never worked.
+ * Chainlit's Message.update() emits over the session websocket, and a judge takes
+ * tens of seconds, so by the time the score arrived the handler was gone and the
+ * emit went nowhere silently. A badge belongs to no message, so it does not care
+ * how long scoring takes and it repopulates after a reload.
+ *
+ * Placement: immediately before #message-composer, inside that element's flex
+ * column. The column already has `gap-2`, so spacing comes for free and nothing
+ * floats over the conversation — the lesson ingest-status.js records from three
+ * rounds of placement feedback.
+ *
+ * No colour bands on the numbers, deliberately. The whole point of the docs is that
+ * these values mean nothing in absolute terms; painting 62% red would invite exactly
+ * the reading we tell people to avoid. The only judgement shown is the trend arrow,
+ * which is relative by construction.
+ */
+(function () {
+  "use strict";
+
+  var ENDPOINT = "/eval-status";
+  /* A score lands tens of seconds after its answer, so there is nothing to gain
+   * from polling as briskly as the document watcher does. */
+  var POLL_MS = 5000;
+  var ID = "rag-eval-badge";
+  var ANCHOR_ID = "message-composer";
+
+  var lastRevision = null;
+  /* Held in a variable rather than looked up by id every time. The composer is
+   * React-rendered and is often not present on the first poll, so the badge starts
+   * life detached; getElementById would not find it and we would build a new orphan
+   * on every render. */
+  var badge = null;
+  var panel = null;
+  var lastStatus = null;
+
+  function styles() {
+    if (document.getElementById(ID + "-styles")) return;
+    var css = document.createElement("style");
+    css.id = ID + "-styles";
+    css.textContent = [
+      "#" + ID + " {",
+      "  display: none; align-items: center; gap: .5rem;",
+      "  align-self: center; max-width: 100%;",
+      "  padding: .2rem .7rem; margin: 0;",
+      "  font-size: .78rem; line-height: 1.4;",
+      "  border: 1px solid hsl(var(--border)); border-radius: 999px;",
+      "  color: hsl(var(--muted-foreground)); background: transparent;",
+      "  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+      "  cursor: default; user-select: none;",
+      "}",
+      "#" + ID + '[data-show="1"] { display: inline-flex; }',
+      "#" + ID + " .reb-metric { font-variant-numeric: tabular-nums; }",
+      "#" + ID + " .reb-value { color: hsl(var(--foreground)); font-weight: 600; }",
+      "#" + ID + " .reb-sep { opacity: .45; }",
+      "#" + ID + " .reb-trend { font-size: .9em; opacity: .8; }",
+      "#" + ID + " .reb-count { opacity: .7; }",
+      /* Hover panel. Fixed and body-mounted rather than absolute inside the badge:
+       * the composer's ancestors clip and scroll, so a positioned child got cut off. */
+      "#" + ID + "-panel {",
+      "  position: fixed; z-index: 90; display: none;",
+      "  max-width: min(30rem, calc(100vw - 2rem));",
+      "  padding: .8rem .9rem; border-radius: .6rem;",
+      "  border: 1px solid hsl(var(--border));",
+      "  background: hsl(var(--background)); color: hsl(var(--foreground));",
+      "  box-shadow: 0 8px 28px rgba(0,0,0,.28);",
+      "  font-size: .78rem; line-height: 1.5; text-align: left;",
+      "}",
+      "#" + ID + '-panel[data-open="1"] { display: block; }',
+      "#" + ID + "-panel h4 {",
+      "  margin: 0 0 .45rem; font-size: .8rem; font-weight: 600;",
+      "}",
+      "#" + ID + "-panel dl { margin: 0; }",
+      "#" + ID + "-panel dt {",
+      "  margin-top: .55rem; font-weight: 600;",
+      "}",
+      "#" + ID + "-panel dd { margin: .1rem 0 0; color: hsl(var(--muted-foreground)); }",
+      "#" + ID + "-panel .reb-formula {",
+      "  display: block; margin: .25rem 0 0; padding: .3rem .45rem;",
+      "  border-radius: .35rem; background: hsl(var(--muted));",
+      "  color: hsl(var(--foreground));",
+      "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem;",
+      "  white-space: normal; overflow-wrap: anywhere;",
+      "}",
+      "#" + ID + "-panel .reb-warn {",
+      "  margin-top: .7rem; padding-top: .55rem;",
+      "  border-top: 1px solid hsl(var(--border));",
+      "  color: hsl(var(--muted-foreground));",
+      "}",
+      /* The border colour above resolves through Chainlit's CSS variables, which
+       * already differ per theme. This is only a safety net for the case where a
+       * theme has not defined them. */
+      "@media (prefers-color-scheme: dark) {",
+      "  #" + ID + " { border-color: rgba(255,255,255,.14); }",
+      "}",
+    ].join("\n");
+    document.head.appendChild(css);
+  }
+
+  function panelElement() {
+    if (panel) return panel;
+    panel = document.createElement("div");
+    panel.id = ID + "-panel";
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  function positionPanel() {
+    if (!badge || !panel || !badge.isConnected) return;
+    var r = badge.getBoundingClientRect();
+    // Measure first, then clamp into the viewport: the badge is centred over a
+    // composer whose width changes with the sidebar, so a fixed anchor on either
+    // side would overflow.
+    panel.style.left = "0px";
+    panel.style.top = "0px";
+    var w = panel.offsetWidth;
+    var h = panel.offsetHeight;
+    panel.style.left =
+      Math.min(
+        Math.max(8, r.left + r.width / 2 - w / 2),
+        Math.max(8, window.innerWidth - w - 8)
+      ) + "px";
+    // Above the badge, because the badge sits near the bottom of the window.
+    panel.style.top = Math.max(8, r.top - h - 8) + "px";
+  }
+
+  function panelHtml(status) {
+    var n = status.answers;
+    return [
+      "<h4>Antwortqualität in diesem Gespräch</h4>",
+      "<dl>",
+      "<dt>Treue</dt><dd>",
+      "Wie viele Aussagen der Antwort von den abgerufenen Textstellen gedeckt sind.",
+      '<code class="reb-formula">Treue = gedeckte Aussagen / alle Aussagen</code>',
+      "</dd>",
+      "<dt>Relevanz</dt><dd>",
+      "Wie gut die Antwort zur Frage passt. Aus der Antwort werden Fragen erzeugt und ",
+      "mit der echten Frage verglichen.",
+      '<code class="reb-formula">Relevanz = ⌀ cos( E(erzeugte Frageᵢ) , E(echte Frage) )</code>',
+      "</dd>",
+      "<dt>Angezeigter Wert</dt><dd>",
+      "Laufender Mittelwert über die bewerteten Antworten dieses Gesprächs",
+      " (n&nbsp;=&nbsp;" + n + ").",
+      '<code class="reb-formula">⌀ = (1/n) · Σ Wertᵢ</code>',
+      "</dd>",
+      "<dt>Pfeil</dt><dd>",
+      "Vergleicht die letzte Antwort mit diesem Mittelwert: ↗ besser, ↘ schlechter. ",
+      "Erscheint erst ab zwei Antworten.",
+      "</dd>",
+      "</dl>",
+      '<div class="reb-warn">',
+      "Beide Werte stammen von einem Sprachmodell, das ein anderes bewertet, und tragen ",
+      "dessen Meinung und Rauschen mit. Einzelwerte sagen wenig, Veränderungen sagen etwas.",
+      "</div>",
+    ].join("");
+  }
+
+  function element() {
+    if (badge) return badge;
+    badge = document.createElement("div");
+    badge.id = ID;
+    badge.setAttribute("role", "status");
+    badge.setAttribute("aria-live", "polite");
+    badge.setAttribute("tabindex", "0");
+    var open = function () {
+      if (!lastStatus) return;
+      var p = panelElement();
+      p.innerHTML = panelHtml(lastStatus);
+      p.setAttribute("data-open", "1");
+      positionPanel();
+    };
+    var close = function () {
+      if (panel) panel.removeAttribute("data-open");
+    };
+    badge.addEventListener("mouseenter", open);
+    badge.addEventListener("mouseleave", close);
+    // Keyboard users get the same explanation; the badge is focusable above.
+    badge.addEventListener("focus", open);
+    badge.addEventListener("blur", close);
+    return badge;
+  }
+
+  /* Called on every tick, not only when the numbers change: the composer may appear
+   * after the first poll, and a React re-render can replace its parent and drop the
+   * badge with it. Cheap — one getElementById and an identity check. */
+  function place() {
+    if (!badge) return false;
+    var anchor = document.getElementById(ANCHOR_ID);
+    if (!anchor || !anchor.parentNode) return false;
+    if (anchor.previousElementSibling !== badge) {
+      anchor.parentNode.insertBefore(badge, anchor);
+    }
+    return true;
+  }
+
+  function pct(value) {
+    return Math.round(value * 100) + "%";
+  }
+
+  function metric(label, value) {
+    if (value === null || value === undefined) return "";
+    return (
+      '<span class="reb-metric">' +
+      label +
+      ' <span class="reb-value">' +
+      pct(value) +
+      "</span></span>"
+    );
+  }
+
+  function render(status) {
+    styles();
+    var el = element();
+
+    if (!status || !status.enabled || !status.answers) {
+      el.removeAttribute("data-show");
+      return;
+    }
+
+    var parts = [];
+    var faith = metric("Treue", status.faithfulness);
+    if (faith) {
+      var arrow = status.trend > 0 ? "&#8599;" : status.trend < 0 ? "&#8600;" : "";
+      parts.push(faith + (arrow ? ' <span class="reb-trend">' + arrow + "</span>" : ""));
+    }
+    var rel = metric("Relevanz", status.relevance);
+    if (rel) parts.push(rel);
+
+    // Nothing scored yet in a conversation that has scored attempts: say so rather
+    // than showing an empty pill, so "on but quiet" is distinguishable from "off".
+    if (!parts.length) {
+      parts.push('<span class="reb-count">Bewertung ausstehend</span>');
+    } else {
+      parts.push(
+        '<span class="reb-count">' +
+          status.answers +
+          (status.answers === 1 ? " Antwort" : " Antworten") +
+          "</span>"
+      );
+    }
+
+    el.innerHTML = parts.join('<span class="reb-sep">&middot;</span>');
+    el.setAttribute("data-show", "1");
+    // Refresh an open panel in place, so the answer count does not go stale while
+    // somebody is reading it.
+    if (panel && panel.getAttribute("data-open")) {
+      panel.innerHTML = panelHtml(status);
+      positionPanel();
+    }
+  }
+
+  function threadQuery() {
+    // ponytail: reads the thread id out of the URL, and lets the server fall back to
+    // the newest thread when there is none. A brand-new chat has no thread in its URL
+    // until the first answer, so for those few seconds the badge can describe the
+    // previous conversation. Pass the id from the session instead if that ever
+    // actually confuses anyone.
+    var m = /\/thread\/([0-9a-fA-F-]{36})/.exec(location.pathname);
+    return m ? "?thread_id=" + encodeURIComponent(m[1]) : "";
+  }
+
+  function poll() {
+    fetch(ENDPOINT + threadQuery(), { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        // 401 before login is expected and not worth shouting about.
+        return r.ok ? r.json() : null;
+      })
+      .then(function (status) {
+        if (!status) return;
+        lastStatus = status;
+        if (status.revision !== lastRevision) {
+          lastRevision = status.revision;
+          render(status);
+        }
+        // Outside the revision check on purpose. The numbers usually have not
+        // changed, but the badge may still need re-attaching, and skipping this is
+        // exactly how it stayed invisible: the first poll ran before the composer
+        // existed, and no later tick ever tried again.
+        place();
+      })
+      .catch(function () {
+        /* offline or restarting: try again on the next tick */
+      });
+  }
+
+  function start() {
+    poll();
+    setInterval(poll, POLL_MS);
+    // The composer is React-rendered, so a re-render can drop the badge or replace
+    // its parent. Put it back whenever that happens.
+    var observer = new MutationObserver(function () {
+      if (badge && badge.getAttribute("data-show")) place();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    window.addEventListener("resize", positionPanel);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else {
+    start();
+  }
+})();

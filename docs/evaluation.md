@@ -57,17 +57,36 @@ evaluation:
   enabled: true
   metrics: [faithfulness, relevance]
   judge_model: null      # null uses models.chat_model
-  show_inline: true
+  show_badge: true
 ```
 
-Restart the app and ask a question. The scores appear under the answer:
+Restart the app and ask a question. A small badge appears above the chatbox:
 
 ```
-Faithfulness: 92% · Relevance: 87%
+Treue 67% ↗ · Relevanz 88% · 3 Antworten
 ```
 
-If you only want the numbers collected for the dashboard, without them appearing
-under every answer, set `show_inline: false`.
+That is the conversation so far, not the last answer: a running average over every
+answer that has been scored in this chat, with the number of answers beside it.
+
+**The count matters.** "67% over 1 answer" and "67% over 20" are not the same
+claim, which is why the badge always shows it.
+
+**The arrow compares the last answer to that average.** ↗ means the latest answer
+scored better than the conversation's average, ↘ worse, and no arrow means it
+landed about where the average already was. It needs at least two answers to mean
+anything, so it does not appear before then.
+
+**Hover the badge** (or focus it with the keyboard) for the full explanation,
+including how each number is calculated. You should not have to remember any of
+this, or come back to this page for it.
+
+The badge belongs to one conversation, so it appears only once that conversation has
+a scored answer. The start page shows nothing, rather than the numbers from whatever
+you were doing last.
+
+If you would rather collect the numbers without putting them in front of anyone,
+set `show_badge: false`. The dashboard still fills up.
 
 If the service is not running, the app simply records nothing. You will not see an
 error and answers are unaffected.
@@ -83,8 +102,12 @@ The two metrics run at the same time, so that is the slower of the two rather th
 the sum, but it is still far longer than the answer took.
 
 This does not keep you waiting. Scoring starts only after the answer is on screen
-and saved, so you can carry straight on asking questions. The scores appear
-underneath the answer whenever they are ready, which may be half a minute later.
+and saved, so you can carry straight on asking questions. The badge updates itself
+whenever a score is ready, which may be half a minute after the answer.
+
+Because the badge belongs to the conversation rather than to any one message, a
+score that finishes after you have already asked something else still counts, and
+it is still there after a page reload.
 
 If scoring seems to take many minutes rather than tens of seconds, the judge model
 is probably failing rather than thinking. Check that the model you named is
