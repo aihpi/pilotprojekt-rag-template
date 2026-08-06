@@ -55,12 +55,62 @@ def openai_base_url(base_url: str) -> str:
     return trimmed if trimmed.endswith("/v1") else f"{trimmed}/v1"
 
 
+# Faithfulness returns one verdict *with a reason* per claim, so a long answer
+# produces a long structured response. Against the gateway's default budget that
+# truncates, the parse fails, and the metric is dropped with "The output is incomplete
+# due to a max_tokens length limit" — silently, apart from that log line. The answers
+# it hit were the detailed ones with many claims, exactly the ones worth checking.
+_MAX_TOKENS = 4096
+
+
+def _direct_judge(client, model: str):
+    """RAGAS's prompts and scoring, with its transport replaced.
+
+    RAGAS routes every call through instructor, and that wrapper costs about four
+    seconds per call on top of the request. Measured against the same model, prompt
+    and schema: ``llm.agenerate`` 5.5s, the client's own ``completions.parse`` 1.5s.
+    At three calls per scored answer that was most of the wall clock — and none of it
+    was the gateway, which answers a plain request in 0.6s, a structured one in 0.9s,
+    and three concurrent structured ones in 1.2s.
+
+    The two metrics only ever call ``agenerate`` (checked against their source), so
+    implementing that single method keeps everything worth having from RAGAS — the
+    claim decomposition, the prompts, the scoring — and drops the slow layer. The base
+    class must be subclassed rather than duck-typed, because ``BaseMetric`` runs an
+    ``isinstance`` check on it.
+    """
+    from ragas.llms.base import InstructorBaseRagasLLM
+
+    class _DirectJudge(InstructorBaseRagasLLM):
+        def generate(self, prompt, response_model):
+            # These metrics are async throughout; nothing calls the sync path.
+            raise NotImplementedError("use agenerate")
+
+        async def agenerate(self, prompt, response_model):
+            response = await client.chat.completions.parse(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format=response_model,
+                # A sampling judge adds exactly the run-to-run noise the docs tell
+                # people to read through.
+                temperature=0.0,
+                max_tokens=_MAX_TOKENS,
+            )
+            parsed = response.choices[0].message.parsed
+            if parsed is None:
+                raise ValueError(
+                    f"judge returned nothing parsable as {response_model.__name__}"
+                )
+            return parsed
+
+    return _DirectJudge()
+
+
 def _judge_and_embeddings(
     judge_model: str, embed_model: str, base_url: str | None, api_key: str | None
 ):
     from openai import AsyncOpenAI
     from ragas.embeddings import OpenAIEmbeddings
-    from ragas.llms import llm_factory
 
     # Bare model names, no provider prefix: this speaks the OpenAI protocol to the
     # gateway directly, and the gateway rejects a prefixed name.
@@ -68,24 +118,7 @@ def _judge_and_embeddings(
         base_url=openai_base_url(base_url) if base_url else None,
         api_key=api_key or "unused",
     )
-    llm = llm_factory(
-        judge_model,
-        provider="openai",
-        client=client,
-        # temperature=0 was promised in this module's docstring from the start but was
-        # lost in the switch from DeepEval, which took its own temperature argument.
-        # A sampling judge adds exactly the run-to-run noise the documentation tells
-        # people to read through.
-        temperature=0.0,
-        # Faithfulness returns one verdict *with a reason* per claim, so a long answer
-        # produces a long structured response. Against the gateway's default budget
-        # that truncates, instructor fails to parse it, and the metric is dropped:
-        # "metric faithfulness failed (The output is incomplete due to a max_tokens
-        # length limit.)". The answers that hit it are the detailed ones with many
-        # claims — precisely the answers worth checking — and the failure was silent
-        # apart from that log line, showing up only as a missing number.
-        max_tokens=4096,
-    )
+    llm = _direct_judge(client, judge_model)
     embeddings = OpenAIEmbeddings(client=client, model=embed_model)
     return llm, embeddings
 
