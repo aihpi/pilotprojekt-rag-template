@@ -357,6 +357,41 @@ def _pct(value: float | None) -> str:
     return "-" if value is None else str(round(value * 100))
 
 
+def _make_public_assets_revalidate() -> None:
+    """Make browsers re-check ``/public/`` assets instead of guessing.
+
+    Chainlit serves that directory with ``ETag`` and ``Last-Modified`` but no
+    ``Cache-Control``. With no directive a browser falls back to *heuristic* caching
+    and may reuse a file without ever asking, so editing ``custom.css`` or one of the
+    badge scripts can silently do nothing until somebody thinks to hard-reload. In a
+    template whose whole point is that people customise those files, that is a trap —
+    and it cost a full round of "your fix changed nothing" here.
+
+    ``no-cache`` does not mean "do not store", it means "revalidate before reuse":
+    the browser keeps the file and gets a small 304 when nothing changed. The cost is
+    one conditional request per asset per load; the gain is that an edit always lands.
+
+    Registered at import time on purpose. Starlette refuses ``add_middleware`` once
+    the application has started, so doing this from the startup hook that registers
+    our routes raises "Cannot add middleware after an application has started" — it
+    is logged and swallowed by Chainlit, which is a silent no-op.
+    """
+    from chainlit.server import app as _app
+
+    @_app.middleware("http")
+    async def _revalidate_public_assets(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/public/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+try:
+    _make_public_assets_revalidate()
+except Exception as exc:  # noqa: BLE001 — a stale asset is not worth a dead app
+    print(f"[WARN] public_asset_revalidation_unavailable: {exc.__class__.__name__}: {exc}")
+
+
 def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 

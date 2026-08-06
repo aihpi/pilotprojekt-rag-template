@@ -54,7 +54,11 @@
       "  border: 1px solid hsl(var(--border)); border-radius: 999px;",
       "  color: hsl(var(--muted-foreground)); background: transparent;",
       "  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
-      "  cursor: default; user-select: none;",
+      /* It opens a panel on click, so it has to look clickable. */
+      "  cursor: pointer; user-select: none;",
+      "}",
+      "#" + ID + ":hover, #" + ID + ":focus-visible {",
+      "  border-color: hsl(var(--ring)); color: hsl(var(--foreground));",
       "}",
       "#" + ID + '[data-show="1"] { display: inline-flex; }',
       "#" + ID + " .reb-metric { font-variant-numeric: tabular-nums; }",
@@ -238,22 +242,42 @@
     badge.setAttribute("role", "status");
     badge.setAttribute("aria-live", "polite");
     badge.setAttribute("tabindex", "0");
-    var open = function () {
-      if (!lastStatus) return;
-      var p = panelElement();
-      p.innerHTML = panelHtml(lastStatus);
-      p.setAttribute("data-open", "1");
-      positionPanel();
-    };
-    var close = function () {
-      if (panel) panel.removeAttribute("data-open");
-    };
-    badge.addEventListener("mouseenter", open);
-    badge.addEventListener("mouseleave", close);
-    // Keyboard users get the same explanation; the badge is focusable above.
-    badge.addEventListener("focus", open);
-    badge.addEventListener("blur", close);
+    badge.setAttribute("role", "button");
+    badge.setAttribute("aria-expanded", "false");
+
+    // Click to toggle, not hover. The panel scrolls when an answer has many claims,
+    // and a hover panel cannot be scrolled: reaching for it moves the pointer off the
+    // badge and closes the thing you were trying to read.
+    badge.addEventListener("click", function (event) {
+      event.stopPropagation();
+      isOpen() ? closePanel() : openPanel();
+    });
+    badge.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        isOpen() ? closePanel() : openPanel();
+      }
+    });
     return badge;
+  }
+
+  function isOpen() {
+    return !!(panel && panel.getAttribute("data-open"));
+  }
+
+  function openPanel() {
+    if (!lastStatus) return;
+    var p = panelElement();
+    p.innerHTML = panelHtml(lastStatus);
+    p.setAttribute("data-open", "1");
+    p.scrollTop = 0;
+    if (badge) badge.setAttribute("aria-expanded", "true");
+    positionPanel();
+  }
+
+  function closePanel() {
+    if (panel) panel.removeAttribute("data-open");
+    if (badge) badge.setAttribute("aria-expanded", "false");
   }
 
   /* Called on every tick, not only when the numbers change: the composer may appear
@@ -400,6 +424,17 @@
     // Back/forward may not produce the same mutation burst.
     window.addEventListener("popstate", onNavigation);
     window.addEventListener("resize", positionPanel);
+
+    // A click-to-open panel needs the usual ways out. Clicks inside it must not
+    // close it, or scrolling by dragging the scrollbar would dismiss it.
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) return;
+      if (panel.contains(event.target) || (badge && badge.contains(event.target))) return;
+      closePanel();
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) closePanel();
+    });
   }
 
   if (document.readyState === "loading") {

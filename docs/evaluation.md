@@ -124,9 +124,11 @@ scored better than the conversation's average, ↘ worse, and no arrow means it
 landed about where the average already was. It needs at least two answers to mean
 anything, so it does not appear before then.
 
-**Hover the badge** (or focus it with the keyboard) for the full explanation,
-including how each number is calculated. You should not have to remember any of
-this, or come back to this page for it.
+**Click the badge** for the full explanation: which claims the last answer made,
+which of them the sources backed, and how each number is calculated. It stays open
+so you can scroll through a long list, and closes on a second click, on Escape, or
+by clicking anywhere else. You should not have to remember any of this, or come back
+to this page for it.
 
 The badge belongs to one conversation, so it appears only once that conversation has
 a scored answer. The start page shows nothing, rather than the numbers from whatever

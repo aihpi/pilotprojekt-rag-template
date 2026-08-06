@@ -129,9 +129,11 @@ letzte Antwort war besser als der Schnitt des Gesprächs, ↘ schlechter, und ke
 Pfeil heißt, sie lag etwa dort, wo der Mittelwert schon war. Sinnvoll ist das erst
 ab zwei Antworten, vorher erscheint er nicht.
 
-**Fahre mit der Maus über das Abzeichen** (oder fokussiere es mit der Tastatur) für
-die ganze Erklärung, samt Rechenweg für jede Zahl. Du sollst das nicht im Kopf haben
-oder dafür auf diese Seite zurückkommen müssen.
+**Klicke auf das Abzeichen** für die ganze Erklärung: welche Aussagen die letzte
+Antwort gemacht hat, welche davon die Quellen decken, und den Rechenweg für jede
+Zahl. Es bleibt offen, du kannst also durch eine lange Liste scrollen, und schließt
+bei einem zweiten Klick, mit Escape oder per Klick daneben. Du sollst das nicht im
+Kopf haben oder dafür auf diese Seite zurückkommen müssen.
 
 Das Abzeichen gehört zu einem Gespräch und erscheint deshalb erst, wenn darin eine
 Antwort bewertet wurde. Auf der Startseite steht nichts, statt der Zahlen von dem,
