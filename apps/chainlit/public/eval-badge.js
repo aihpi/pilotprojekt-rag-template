@@ -267,7 +267,7 @@
       return;
     }
 
-    // A judge takes ~25s, which is gateway round-trip per call rather than anything
+    // A judge takes ~16s, which is gateway round-trip per call rather than anything
     // we can shorten. Saying so beats leaving the badge blank and looking broken —
     // and on the first scored answer of a conversation there is nothing else to show.
     if (!status.answers) {
@@ -316,11 +316,8 @@
   }
 
   function threadQuery() {
-    // ponytail: reads the thread id out of the URL, and lets the server fall back to
-    // the newest thread when there is none. A brand-new chat has no thread in its URL
-    // until the first answer, so for those few seconds the badge can describe the
-    // previous conversation. Pass the id from the session instead if that ever
-    // actually confuses anyone.
+    // No id until Chainlit routes to /thread/<uuid> on the first answer; the server
+    // reports nothing rather than guessing a conversation.
     var m = /\/thread\/([0-9a-fA-F-]{36})/.exec(location.pathname);
     return m ? "?thread_id=" + encodeURIComponent(m[1]) : "";
   }

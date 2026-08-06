@@ -53,10 +53,6 @@ def _fake_score(monkeypatch, result):
     monkeypatch.setattr(main.metrics, "score", fake)
 
 
-def test_health_is_reachable(client):
-    assert client.get("/health").json() == {"status": "ok"}
-
-
 def test_scores_are_returned_and_stored(client, monkeypatch):
     _fake_score(monkeypatch, {"faithfulness": 0.92, "relevance": 0.87})
 

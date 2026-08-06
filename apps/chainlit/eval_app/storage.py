@@ -1,4 +1,4 @@
-"""SQLite store for evaluation scores, feedback and A/B comparisons.
+"""SQLite store for evaluation scores and feedback.
 
 This service is the *only* writer. The Chainlit app posts finished answers here
 and never touches the file — which is deliberate: the one SQLite corruption this
@@ -44,12 +44,12 @@ CREATE INDEX IF NOT EXISTS idx_eval_scores_signature
 ON eval_scores(config_signature);
 
 -- Feedback arrives keyed by the Chainlit step id, which is not the same thing as
--- the assistant message id the scores are keyed by; both are recorded so the
--- dashboard can join either way.
+-- the assistant message id the scores are keyed by, so a rating cannot be joined to
+-- its own score row. The dashboard groups by config_signature instead, which is
+-- exact; see the ponytail note in the app's evaluation.post_feedback.
 CREATE TABLE IF NOT EXISTS feedback (
     id               TEXT PRIMARY KEY,
     timestamp        TEXT NOT NULL,
-    message_id       TEXT,
     step_id          TEXT,
     thread_id        TEXT,
     config_signature TEXT,
@@ -61,9 +61,6 @@ CREATE TABLE IF NOT EXISTS feedback (
 CREATE INDEX IF NOT EXISTS idx_feedback_signature
 ON feedback(config_signature);
 """
-# No `comparisons` table yet — A/B has no writer. This script re-runs on every
-# open and every statement is IF NOT EXISTS, so adding one later needs no
-# migration, which is why there is nothing to gain by declaring it early.
 
 
 def _utc_now_iso() -> str:
@@ -102,8 +99,7 @@ def add_score(
     message_id: str | None = None,
     thread_id: str | None = None,
     detail: dict[str, Any] | None = None,
-) -> str:
-    row_id = str(uuid.uuid4())
+) -> None:
     with connect(db_path) as conn:
         conn.execute(
             """
@@ -113,7 +109,7 @@ def add_score(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                row_id,
+                str(uuid.uuid4()),
                 _utc_now_iso(),
                 message_id,
                 thread_id,
@@ -126,33 +122,29 @@ def add_score(
                 json.dumps(detail, ensure_ascii=False) if detail else None,
             ),
         )
-    return row_id
 
 
 def add_feedback(
     db_path: Path,
     *,
     rating: str,
-    message_id: str | None = None,
     step_id: str | None = None,
     thread_id: str | None = None,
     config_signature: str | None = None,
     failure_reason: str | None = None,
     failure_category: str | None = None,
-) -> str:
-    row_id = str(uuid.uuid4())
+) -> None:
     with connect(db_path) as conn:
         conn.execute(
             """
             INSERT INTO feedback (
-                id, timestamp, message_id, step_id, thread_id,
+                id, timestamp, step_id, thread_id,
                 config_signature, rating, failure_reason, failure_category
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                row_id,
+                str(uuid.uuid4()),
                 _utc_now_iso(),
-                message_id,
                 step_id,
                 thread_id,
                 config_signature,
@@ -161,7 +153,6 @@ def add_feedback(
                 failure_category,
             ),
         )
-    return row_id
 
 
 def stats_by_config(db_path: Path) -> list[dict[str, Any]]:

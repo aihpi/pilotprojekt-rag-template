@@ -82,11 +82,6 @@ class FeedbackRequest(BaseModel):
     thread_id: str | None = None
 
 
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
 @app.get("/")
 async def dashboard() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")

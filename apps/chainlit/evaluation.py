@@ -22,10 +22,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# The read budget has to cover a judge model grading an answer, which measured at
-# ~100s per metric against a self-hosted gpt-oss-120b. The service runs its metrics
-# concurrently, so this is a ceiling on the slowest one, not on their sum. Set high
-# because nothing is waiting on it: the answer is already delivered.
+# The read budget has to cover a judge model grading an answer: ~16s for an ordinary
+# one, ~28s when fetch_document put a whole paper in the context. The service runs its
+# metrics concurrently, so this is a ceiling on the slowest one, not on their sum. Set
+# far above the measurement because nothing is waiting on it — the answer is already
+# delivered — and a gateway having a slow minute should not lose the score.
 # The connect budget deliberately is not generous. The eval service being absent is
 # the normal case, since it is optional, and giving up at once beats holding a
 # background task open for something that is not there.
@@ -186,5 +187,3 @@ async def post_feedback(
             "judge_model": ev.judge_model or cfg.models.chat_model,
         },
     )
-
-

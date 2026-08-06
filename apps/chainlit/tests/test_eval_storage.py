@@ -42,7 +42,7 @@ def _score(db, sig=SIG_A, **kw):
         "contexts": ["[1] 40-60%"],
         "config_signature": sig,
     }
-    return storage.add_score(db, **{**defaults, **kw})
+    storage.add_score(db, **{**defaults, **kw})
 
 
 def _stats(db):

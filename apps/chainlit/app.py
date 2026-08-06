@@ -343,7 +343,7 @@ TOOL_NAME: str = get_config().tool.name
 # document watcher documents at its own create_task.
 _SCORING_TASKS: set[asyncio.Task] = set()
 # Threads with a score in flight, so /eval-status can say "working on it" instead of
-# leaving the badge silent for the ~25s a judge takes. Measured: that cost is gateway
+# leaving the badge silent for the ~16s a judge takes. Measured: that cost is gateway
 # round-trip per structured-output call, not model size — ministral-3-14b, gemma-4-31b
 # and llama-3-3-70b all land within a second of each other — so it is a wait to
 # explain rather than one to optimise away.
@@ -2319,9 +2319,9 @@ async def on_app_startup() -> None:
         cfg = get_config()
         if not cfg.evaluation.enabled or not cfg.evaluation.show_badge:
             return {"enabled": False}
-        pending = bool(thread_id) and thread_id in _SCORING_THREADS
         if not thread_id:
             return {"enabled": True, "answers": 0}
+        pending = thread_id in _SCORING_THREADS
 
         url = f"{cfg.evaluation.service_url.rstrip('/')}/api/thread/{thread_id}"
         try:
@@ -2346,13 +2346,13 @@ async def on_app_startup() -> None:
 
         return {
             "enabled": True,
-            "answers": summary.get("answers", 0),
+            "answers": answers,
             "faithfulness": faithfulness,
             "relevance": relevance,
             "trend": trend,
             "trend_relevance": trend_relevance,
             # A judge is working right now, so the badge can say so rather than
-            # sitting silent for ~25s and looking broken.
+            # sitting silent for ~16s and looking broken.
             "pending": pending,
             # Why the last scored answer got those numbers, for the panel.
             "detail": summary.get("last_detail"),
@@ -3807,13 +3807,12 @@ async def main(message: cl.Message):
         #
         # This deliberately does NOT touch the sent message. Appending to it from here
         # was the original design and it never worked: Message.update() emits over the
-        # session websocket, and by the time a ~40s judge returns the handler is gone
+        # session websocket, and by the time a ~16s judge returns the handler is gone
         # and the emit silently goes nowhere.
         #
         # The sibling branch below retrieves nothing, so it has no chunks to check an
         # answer against and is deliberately left alone.
         if get_config().evaluation.enabled:
-            print("[DEBUG] evaluation_scoring: contexts=", len(last_results))
             # The reference must be held until the task finishes: asyncio keeps only a
             # weak one, so a bare create_task() can be collected mid-flight — the same
             # trap the document watcher documents at its own create_task above. Dropped

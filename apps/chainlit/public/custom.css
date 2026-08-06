@@ -80,7 +80,7 @@ img[src*="/logo"] { height: 96px !important; max-height: 96px !important; width:
 #rag-eval-badge .reb-trend { font-size: .9em; opacity: .8; }
 #rag-eval-badge .reb-count { opacity: .7; }
 
-/* Working state: a slow pulse, not a spinner. The wait is ~15s, and anything
+/* Working state: a slow pulse, not a spinner. The wait is ~16s, and anything
  * busier would be an irritation for that long. */
 #rag-eval-badge[data-pending="1"] { animation: reb-pulse 1.8s ease-in-out infinite; }
 @keyframes reb-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .55 } }

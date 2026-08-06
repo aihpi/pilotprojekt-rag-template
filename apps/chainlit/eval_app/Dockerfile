@@ -1,5 +1,5 @@
 # The evaluation service. Deliberately NOT built from the app Dockerfile: this image
-# installs only the `eval` dependency group, so it carries deepeval + litellm + fastapi
+# installs only the `eval` dependency group, so it carries ragas + openai + fastapi
 # and none of chainlit, docling or torch. Keeping the two apart is the whole point of
 # running scoring out of process — see eval_app/main.py.
 #

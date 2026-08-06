@@ -159,7 +159,7 @@ services:
   # Answer-quality scoring and the evaluation dashboard on :8001.
   #
   # Behind a compose profile, so a plain `docker compose up` neither builds nor runs
-  # it: this image installs deepeval and its ~30 dependencies, which is a build
+  # it: this image installs ragas and its langchain chain, which is a build
   # nobody should pay for while evaluation.enabled is false (the default). Start it
   # with
   #
