@@ -5,11 +5,20 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
+from qdrant_client.models import (
+    FieldCondition,
+    Filter,
+    Fusion,
+    FusionQuery,
+    MatchAny,
+    MatchValue,
+    Prefetch,
+)
 
 import citations
 import figure_markers as figure_markers_mod
 from config import get_config
+from kb.sparse import SPARSE_VECTOR, sparse_vector
 from llm import embed
 from settings import (
     QDRANT_API_KEY,
@@ -132,27 +141,49 @@ async def retrieve(
             must.append(FieldCondition(key=key, match=MatchValue(value=value)))
     query_filter = Filter(must=must, must_not=_EXCLUDE_META) if must else _META_FILTER
 
-    response = client.query_points(
-        collection_name=target,
-        query=vector,
-        limit=k,
-        score_threshold=SCORE_THRESHOLD,
-        with_payload=True,
-        with_vectors=include_vectors,
-        query_filter=query_filter,
-    )
+    def _query(active_filter):
+        if not cfg.retrieval.hybrid:
+            return client.query_points(
+                collection_name=target,
+                query=vector,
+                limit=k,
+                score_threshold=SCORE_THRESHOLD,
+                with_payload=True,
+                with_vectors=include_vectors,
+                query_filter=active_filter,
+            )
+        # score_threshold belongs on the dense leg, never on the fused query:
+        # RRF scores peak near 1/61, so a cosine-calibrated threshold applied to
+        # the fusion result discards everything. The filter has to ride on both
+        # legs too, or the _meta sentinel and manifest re-enter the candidate
+        # pool (see tests/test_retrieval_meta.py).
+        return client.query_points(
+            collection_name=target,
+            prefetch=[
+                Prefetch(
+                    query=vector,
+                    limit=cfg.retrieval.prefetch_limit,
+                    score_threshold=SCORE_THRESHOLD,
+                    filter=active_filter,
+                ),
+                Prefetch(
+                    query=sparse_vector(query),
+                    using=SPARSE_VECTOR,
+                    limit=cfg.retrieval.prefetch_limit,
+                    filter=active_filter,
+                ),
+            ],
+            query=FusionQuery(fusion=Fusion(cfg.retrieval.fusion)),
+            limit=k,
+            with_payload=True,
+            with_vectors=include_vectors,
+        )
+
+    response = _query(query_filter)
     points = list(response.points or [])
     if not points and must:
         # Compatibility fallback for collections without the filtered fields.
-        response = client.query_points(
-            collection_name=target,
-            query=vector,
-            limit=k,
-            score_threshold=SCORE_THRESHOLD,
-            with_payload=True,
-            with_vectors=include_vectors,
-            query_filter=_META_FILTER,
-        )
+        response = _query(_META_FILTER)
         points = list(response.points or [])
 
     hits: list[RagResult] = []
