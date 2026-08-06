@@ -40,6 +40,7 @@ from chat_history import (
     update_chat_session_metadata,
     upsert_user_profile,
 )
+from evaluation import format_inline, post_score
 from llm import cached_chat_models, chat, list_chat_models, message_to_dict
 from tools import ToolContext, build_openai_tools
 from native_chat import (
@@ -3670,6 +3671,26 @@ async def main(message: cl.Message):
             content,
             metadata=message_metadata,
         )
+
+        # Answer-quality scoring (off unless evaluation.enabled). Last on purpose:
+        # the answer is already sent and saved, so no judge call is in the user's
+        # way. The sibling branch below retrieves nothing, so it has no contexts to
+        # check an answer against and is left alone.
+        scores = await post_score(
+            question=message.content,
+            answer=content,
+            contexts=[r.text for r in last_results],
+            thread_id=session_id,
+            message_id=assistant_reply.id,
+        )
+        if get_config().evaluation.show_inline:
+            inline = format_inline(scores)
+            if inline:
+                # Appended to the sent message, not to `content` — the transcript
+                # row above must stay the model's answer, or a resumed chat would
+                # feed old scores back to the model as if it had written them.
+                assistant_reply.content = f"{assistant_reply.content}\n\n*{inline}*"
+                await assistant_reply.update()
     else:
         # No retrieval happened, so any marker here would be imitation (e.g. copied
         # from a resumed transcript) — strip defensively.
