@@ -52,3 +52,88 @@ a[href*="/sources/pdf/"]:hover {
 
 /* Fallback: matches the header logo by its URL, independent of classes. */
 img[src*="/logo"] { height: 96px !important; max-height: 96px !important; width: auto !important; }
+
+
+/* ---------------------------------------------------------------------------
+ * Evaluation badge above the chatbox, and its explanation panel.
+ * Behaviour lives in public/eval-badge.js; only the look is here, so it can be
+ * restyled without reading JavaScript. Colours come from Chainlit's own CSS
+ * variables, which makes the badge theme-correct by construction.
+ * --------------------------------------------------------------------------- */
+#rag-eval-badge {
+  display: none; align-items: center; gap: .5rem;
+  align-self: center; max-width: 100%;
+  padding: .2rem .7rem; margin: 0;
+  font-size: .78rem; line-height: 1.4;
+  border: 1px solid hsl(var(--border)); border-radius: 999px;
+  color: hsl(var(--muted-foreground)); background: transparent;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer; user-select: none;   /* it opens a panel on click */
+}
+#rag-eval-badge[data-show="1"] { display: inline-flex; }
+#rag-eval-badge:hover, #rag-eval-badge:focus-visible {
+  border-color: hsl(var(--ring)); color: hsl(var(--foreground));
+}
+#rag-eval-badge .reb-metric { font-variant-numeric: tabular-nums; }
+#rag-eval-badge .reb-value { color: hsl(var(--foreground)); font-weight: 600; }
+#rag-eval-badge .reb-sep { opacity: .45; }
+#rag-eval-badge .reb-trend { font-size: .9em; opacity: .8; }
+#rag-eval-badge .reb-count { opacity: .7; }
+
+/* Working state: a slow pulse, not a spinner. The wait is ~15s, and anything
+ * busier would be an irritation for that long. */
+#rag-eval-badge[data-pending="1"] { animation: reb-pulse 1.8s ease-in-out infinite; }
+@keyframes reb-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .55 } }
+@media (prefers-reduced-motion: reduce) {
+  #rag-eval-badge[data-pending="1"] { animation: none; opacity: .7; }
+}
+
+/* Fixed and body-mounted rather than absolute inside the badge: the composer's
+ * ancestors clip and scroll, so a positioned child was cut off. Capped in height
+ * because an answer with a dozen claims gets tall, and it opens upward from a
+ * badge already near the bottom of the window. */
+#rag-eval-badge-panel {
+  position: fixed; z-index: 90; display: none;
+  max-width: min(30rem, calc(100vw - 2rem));
+  max-height: min(60vh, 32rem); overflow-y: auto; overscroll-behavior: contain;
+  padding: .8rem .9rem; border-radius: .6rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background)); color: hsl(var(--foreground));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .28);
+  font-size: .78rem; line-height: 1.5; text-align: left;
+}
+#rag-eval-badge-panel[data-open="1"] { display: block; }
+#rag-eval-badge-panel h4 { margin: 0 0 .45rem; font-size: .8rem; font-weight: 600; }
+#rag-eval-badge-panel h4 + h4,
+#rag-eval-badge-panel .reb-claim + h4 {
+  margin-top: .8rem; padding-top: .6rem; border-top: 1px solid hsl(var(--border));
+}
+#rag-eval-badge-panel dl { margin: 0; }
+#rag-eval-badge-panel dt { margin-top: .55rem; font-weight: 600; }
+#rag-eval-badge-panel dd { margin: .1rem 0 0; color: hsl(var(--muted-foreground)); }
+#rag-eval-badge-panel .reb-formula {
+  display: block; margin: .25rem 0 0; padding: .3rem .45rem;
+  border-radius: .35rem; background: hsl(var(--muted)); color: hsl(var(--foreground));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem;
+  white-space: normal; overflow-wrap: anywhere;
+}
+#rag-eval-badge-panel .reb-claims-head { margin: 0 0 .4rem; }
+#rag-eval-badge-panel .reb-claim {
+  display: flex; gap: .45rem; margin: .3rem 0; color: hsl(var(--muted-foreground));
+}
+#rag-eval-badge-panel .reb-claim-mark { flex: 0 0 auto; font-weight: 700; }
+/* The only colour in the badge. It marks a per-claim yes/no, not a grade on a
+ * number, so it cannot be misread as a threshold. */
+#rag-eval-badge-panel .reb-claim[data-ok="1"] .reb-claim-mark { color: #48bb78; }
+#rag-eval-badge-panel .reb-claim[data-ok="0"] .reb-claim-mark { color: #fc8181; }
+#rag-eval-badge-panel .reb-claim-why { opacity: .75; font-size: .95em; }
+#rag-eval-badge-panel .reb-note,
+#rag-eval-badge-panel .reb-warn {
+  margin-top: .55rem; color: hsl(var(--muted-foreground));
+}
+#rag-eval-badge-panel .reb-note {
+  padding: .4rem .5rem; border-radius: .35rem; background: hsl(var(--muted));
+}
+#rag-eval-badge-panel .reb-warn {
+  padding-top: .55rem; border-top: 1px solid hsl(var(--border));
+}

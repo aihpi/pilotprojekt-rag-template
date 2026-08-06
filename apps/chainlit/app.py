@@ -352,16 +352,10 @@ _SCORING_THREADS: set[str] = set()
 
 def _forget_scoring_task(task: asyncio.Task) -> None:
     _SCORING_TASKS.discard(task)
-    _SCORING_THREADS.discard(getattr(task, "_eval_thread_id", "") or "")
     # A detached task swallows its exception unless somebody asks for it, and scoring
     # that fails in silence is exactly how a dropped task went unnoticed once already.
     if not task.cancelled() and task.exception() is not None:
         print(f"[WARN] evaluation_scoring_failed: {task.exception()!r}")
-
-
-def _pct(value: float | None) -> str:
-    """Whole-percent rendering, used only to build the badge's revision string."""
-    return "-" if value is None else str(round(value * 100))
 
 
 def _make_public_assets_revalidate() -> None:
@@ -2324,10 +2318,10 @@ async def on_app_startup() -> None:
             raise HTTPException(status_code=401, detail="Unauthorized")
         cfg = get_config()
         if not cfg.evaluation.enabled or not cfg.evaluation.show_badge:
-            return {"enabled": False, "revision": 0}
+            return {"enabled": False}
         pending = bool(thread_id) and thread_id in _SCORING_THREADS
         if not thread_id:
-            return {"enabled": True, "answers": 0, "revision": 0}
+            return {"enabled": True, "answers": 0}
 
         url = f"{cfg.evaluation.service_url.rstrip('/')}/api/thread/{thread_id}"
         try:
@@ -2339,7 +2333,7 @@ async def on_app_startup() -> None:
             # The eval service is optional; a badge that cannot reach it should go
             # quiet rather than turn into an error in the corner of the chat.
             print(f"[WARN] eval_status_unavailable: {exc.__class__.__name__}: {exc}")
-            return {"enabled": True, "answers": 0, "pending": pending, "revision": 0}
+            return {"enabled": True, "answers": 0, "pending": pending}
 
         faithfulness = summary.get("faithfulness")
         relevance = summary.get("relevance")
@@ -2362,10 +2356,6 @@ async def on_app_startup() -> None:
             "pending": pending,
             # Why the last scored answer got those numbers, for the panel.
             "detail": summary.get("last_detail"),
-            # Lets the badge skip a re-render when nothing moved, same trick as
-            # /ingest-status. Answer count plus the rounded means is enough: any
-            # change that is visible at whole-percent resolution changes this.
-            "revision": f"{answers}:{_pct(faithfulness)}:{_pct(relevance)}:{trend}:{trend_relevance}:{int(pending)}",
         }
 
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/pdf/{file_name:path}")
@@ -3829,22 +3819,24 @@ async def main(message: cl.Message):
             # trap the document watcher documents at its own create_task above. Dropped
             # it here first, and the symptom was silence: no scores, no request reaching
             # the service, and nothing in the log.
-            task = asyncio.create_task(
-                post_score(
-                    question=message.content,
-                    answer=content,
-                    # With the source line, not bare text: the answer ends by naming
-                    # its sources, and a judge that cannot see where a chunk came
-                    # from marks that sentence unsupported every single time.
-                    contexts=[context_with_source(r) for r in last_results],
-                    thread_id=session_id,
-                    message_id=assistant_reply.id,
-                )
-            )
-            task._eval_thread_id = session_id  # read back by the done callback
+            async def _score_and_forget() -> None:
+                try:
+                    await post_score(
+                        question=message.content,
+                        answer=content,
+                        # With the source line, not bare text: the answer ends by
+                        # naming its sources, and a judge that cannot see where a
+                        # chunk came from marks that sentence unsupported every time.
+                        contexts=[context_with_source(r) for r in last_results],
+                        thread_id=session_id,
+                        message_id=assistant_reply.id,
+                    )
+                finally:
+                    _SCORING_THREADS.discard(session_id)
+
+            _SCORING_THREADS.add(session_id)
+            task = asyncio.create_task(_score_and_forget())
             _SCORING_TASKS.add(task)
-            if session_id:
-                _SCORING_THREADS.add(session_id)
             task.add_done_callback(_forget_scoring_task)
     else:
         # No retrieval happened, so any marker here would be imitation (e.g. copied

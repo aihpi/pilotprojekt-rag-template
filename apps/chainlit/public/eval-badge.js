@@ -34,7 +34,7 @@
   var ID = "rag-eval-badge";
   var ANCHOR_ID = "message-composer";
 
-  var lastRevision = null;
+  var lastPayload = null;
   /* Held in a variable rather than looked up by id every time. The composer is
    * React-rendered and is often not present on the first poll, so the badge starts
    * life detached; getElementById would not find it and we would build a new orphan
@@ -52,102 +52,6 @@
     pollTimer = setTimeout(poll, ms);
   }
 
-  function styles() {
-    if (document.getElementById(ID + "-styles")) return;
-    var css = document.createElement("style");
-    css.id = ID + "-styles";
-    css.textContent = [
-      "#" + ID + " {",
-      "  display: none; align-items: center; gap: .5rem;",
-      "  align-self: center; max-width: 100%;",
-      "  padding: .2rem .7rem; margin: 0;",
-      "  font-size: .78rem; line-height: 1.4;",
-      "  border: 1px solid hsl(var(--border)); border-radius: 999px;",
-      "  color: hsl(var(--muted-foreground)); background: transparent;",
-      "  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
-      /* It opens a panel on click, so it has to look clickable. */
-      "  cursor: pointer; user-select: none;",
-      "}",
-      "#" + ID + ":hover, #" + ID + ":focus-visible {",
-      "  border-color: hsl(var(--ring)); color: hsl(var(--foreground));",
-      "}",
-      "#" + ID + '[data-show="1"] { display: inline-flex; }',
-      "#" + ID + " .reb-metric { font-variant-numeric: tabular-nums; }",
-      "#" + ID + " .reb-value { color: hsl(var(--foreground)); font-weight: 600; }",
-      "#" + ID + " .reb-sep { opacity: .45; }",
-      "#" + ID + " .reb-trend { font-size: .9em; opacity: .8; }",
-      "#" + ID + " .reb-count { opacity: .7; }",
-      /* Working state: a slow pulse, not a spinner. The wait is ~25s, so anything
-       * busier than this would be an irritation for half a minute. */
-      "#" + ID + '[data-pending="1"] { animation: reb-pulse 1.8s ease-in-out infinite; }',
-      "@keyframes reb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }",
-      "@media (prefers-reduced-motion: reduce) {",
-      "  #" + ID + '[data-pending="1"] { animation: none; opacity: .7; }',
-      "}",
-      /* Hover panel. Fixed and body-mounted rather than absolute inside the badge:
-       * the composer's ancestors clip and scroll, so a positioned child got cut off. */
-      "#" + ID + "-panel {",
-      "  position: fixed; z-index: 90; display: none;",
-      "  max-width: min(30rem, calc(100vw - 2rem));",
-      /* An answer with a dozen claims makes this tall fast, and the panel is
-       * positioned above a badge that already sits near the bottom of the window. */
-      "  max-height: min(60vh, 32rem); overflow-y: auto; overscroll-behavior: contain;",
-      "  padding: .8rem .9rem; border-radius: .6rem;",
-      "  border: 1px solid hsl(var(--border));",
-      "  background: hsl(var(--background)); color: hsl(var(--foreground));",
-      "  box-shadow: 0 8px 28px rgba(0,0,0,.28);",
-      "  font-size: .78rem; line-height: 1.5; text-align: left;",
-      "}",
-      "#" + ID + '-panel[data-open="1"] { display: block; }',
-      "#" + ID + "-panel h4 {",
-      "  margin: 0 0 .45rem; font-size: .8rem; font-weight: 600;",
-      "}",
-      "#" + ID + "-panel dl { margin: 0; }",
-      "#" + ID + "-panel dt {",
-      "  margin-top: .55rem; font-weight: 600;",
-      "}",
-      "#" + ID + "-panel dd { margin: .1rem 0 0; color: hsl(var(--muted-foreground)); }",
-      "#" + ID + "-panel .reb-formula {",
-      "  display: block; margin: .25rem 0 0; padding: .3rem .45rem;",
-      "  border-radius: .35rem; background: hsl(var(--muted));",
-      "  color: hsl(var(--foreground));",
-      "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem;",
-      "  white-space: normal; overflow-wrap: anywhere;",
-      "}",
-      "#" + ID + "-panel .reb-claims-head { margin: 0 0 .4rem; }",
-      "#" + ID + "-panel .reb-claim {",
-      "  display: flex; gap: .45rem; margin: .3rem 0;",
-      "  color: hsl(var(--muted-foreground));",
-      "}",
-      "#" + ID + "-panel .reb-claim-mark { flex: 0 0 auto; font-weight: 700; }",
-      /* The tick and cross are the only colour in the whole badge, and they mark a
-       * per-claim yes/no rather than grading a number, so they cannot be misread as
-       * a threshold. */
-      '#' + ID + '-panel .reb-claim[data-ok="1"] .reb-claim-mark { color: #48bb78; }',
-      '#' + ID + '-panel .reb-claim[data-ok="0"] .reb-claim-mark { color: #fc8181; }',
-      "#" + ID + "-panel .reb-claim-why { opacity: .75; font-size: .95em; }",
-      "#" + ID + "-panel .reb-note {",
-      "  margin: .55rem 0 0; padding: .4rem .5rem; border-radius: .35rem;",
-      "  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));",
-      "}",
-      "#" + ID + "-panel h4 + h4, #" + ID + "-panel .reb-claim + h4 {",
-      "  margin-top: .8rem; padding-top: .6rem;",
-      "  border-top: 1px solid hsl(var(--border));",
-      "}",
-      "#" + ID + "-panel .reb-warn {",
-      "  margin-top: .7rem; padding-top: .55rem;",
-      "  border-top: 1px solid hsl(var(--border));",
-      "  color: hsl(var(--muted-foreground));",
-      "}",
-      /* The border colour above resolves through Chainlit's CSS variables, which
-       * already differ per theme. This is only a safety net for the case where a
-       * theme has not defined them. */
-      "@media (prefers-color-scheme: dark) {",
-      "  #" + ID + " { border-color: rgba(255,255,255,.14); }",
-      "}",
-    ].join("\n");
-    document.head.appendChild(css);
-  }
 
   function panelElement() {
     if (panel) return panel;
@@ -257,11 +161,10 @@
     if (badge) return badge;
     badge = document.createElement("div");
     badge.id = ID;
-    badge.setAttribute("role", "status");
-    badge.setAttribute("aria-live", "polite");
-    badge.setAttribute("tabindex", "0");
     badge.setAttribute("role", "button");
+    badge.setAttribute("tabindex", "0");
     badge.setAttribute("aria-expanded", "false");
+    badge.setAttribute("aria-live", "polite");
 
     // Click to toggle, not hover. The panel scrolls when an answer has many claims,
     // and a hover panel cannot be scrolled: reaching for it moves the pointer off the
@@ -328,9 +231,9 @@
     if (badge) badge.removeAttribute("data-show");
     if (panel) panel.removeAttribute("data-open");
     lastStatus = null;
-    // Otherwise the revision short-circuit suppresses the re-render whenever the new
-    // conversation happens to round to the same numbers as the old one.
-    lastRevision = null;
+    // Otherwise the unchanged-payload check suppresses the re-render whenever the
+    // new conversation happens to report the same numbers as the old one.
+    lastPayload = null;
 
     poll();
     return true;
@@ -357,7 +260,6 @@
   }
 
   function render(status) {
-    styles();
     var el = element();
 
     if (!status || !status.enabled) {
@@ -438,14 +340,15 @@
           return;
         }
         lastStatus = status;
-        if (status.revision !== lastRevision) {
-          lastRevision = status.revision;
+        var payload = JSON.stringify(status);
+        if (payload !== lastPayload) {
+          lastPayload = payload;
           render(status);
         }
         // Faster only while a judge is actually running, so the number appears when
         // it lands instead of up to an idle interval later.
         schedule(status.pending ? PENDING_POLL_MS : POLL_MS);
-        // Outside the revision check on purpose. The numbers usually have not
+        // Outside the changed-payload check on purpose. The numbers usually have not
         // changed, but the badge may still need re-attaching, and skipping this is
         // exactly how it stayed invisible: the first poll ran before the composer
         // existed, and no later tick ever tried again.

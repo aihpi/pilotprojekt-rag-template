@@ -1,34 +1,18 @@
 """Metric computation. The metric library lives behind exactly one function.
 
-``score()`` is the entire public surface, so the library underneath is a
-one-file decision. That earned its keep immediately: this was written against
-DeepEval first and swapped to RAGAS without touching a caller.
+``score()`` is the entire public surface, so swapping the library underneath is a
+change to one file. That has already been used once, replacing DeepEval with RAGAS
+after DeepEval turned out unable to score against a self-hosted gateway at all.
 
-Why RAGAS, having initially picked DeepEval on dependency weight and release
-activity: DeepEval could not actually score an answer against a self-hosted
-OpenAI-compatible gateway. Faithfulness worked, but AnswerRelevancy hung inside
-``litellm.acompletion`` on its *second* call and died on DeepEval's internal
-88.5s per-attempt timeout, every time, on every model that was up. Traced it to
-one successful call followed by one that never returns, which is a connection-reuse
-hang in litellm's async client rather than anything about prompts or schemas: the
-prompts were ~350 tokens and the same schemas answered in 1.6s called directly.
-DeepEval's own timeout also ignored ``litellm.request_timeout``, so it could not be
-bounded from outside either.
-
-RAGAS takes an ``openai.AsyncOpenAI`` client directly, so it never goes through
-litellm and the whole failure mode disappears. Both metrics score on the first try.
-
-Both metrics are reference-free — they need no ground-truth answer — so they work
-on real conversations:
+Both metrics are reference-free — no ground-truth answer needed — so they work on real
+conversations:
 
 * **faithfulness** — are the answer's claims supported by the retrieved chunks?
-* **relevance** — does the answer address the question that was asked? Needs the
-  embedding model as well as the judge: it generates questions from the answer and
-  compares them to the real one.
+* **relevance** — does the answer address the question? Needs the embedding model as
+  well as the judge.
 
-Judge calls go to the same gateway the app uses, at ``temperature=0``. Determinism
-matters: these numbers are only meaningful as deltas between runs, and a sampling
-judge adds noise that swamps the signal.
+Judge calls go to the same gateway the app uses, at ``temperature=0``: these numbers
+are only meaningful as deltas, and a sampling judge adds noise that swamps the signal.
 """
 
 from __future__ import annotations
@@ -56,22 +40,9 @@ def openai_base_url(base_url: str) -> str:
     return trimmed if trimmed.endswith("/v1") else f"{trimmed}/v1"
 
 
-# Faithfulness returns one verdict *with a reason* per claim, so a long answer
-# produces a long structured response. Against the gateway's default budget that
-# truncates, the parse fails, and the metric is dropped with "The output is incomplete
-# due to a max_tokens length limit" — silently, apart from that log line. The answers
-# it hit were the detailed ones with many claims, exactly the ones worth checking.
-_MAX_TOKENS = 4096
-
-# How many per-claim verdict calls may be in flight at once. Bounded so a long answer
-# with dozens of claims does not open dozens of simultaneous requests at a shared
-# gateway; eight covers the typical answer without batching.
-_VERDICT_CONCURRENCY = 8
-
-# How many chunks each claim is checked against when there are more than this. Four was
-# measured: at two, one claim flipped from supported to unsupported, and at four and
-# eight the verdicts matched full-context checking exactly, including on an answer with
-# three invented claims among three real ones.
+# Chunks each claim is checked against when there are more than this. Measured: at two,
+# a supported claim flipped to unsupported; at four and eight the verdicts matched
+# full-context checking exactly.
 _ROUTED_CHUNKS = 4
 
 # Words long enough to carry meaning. Short ones ("der", "und", "was") match everything
@@ -85,25 +56,16 @@ def route_contexts(
 ) -> list[str]:
     """Pick the chunks each claim is worth checking against; one string per claim.
 
-    Checking every claim against every chunk is what a ``fetch_document`` answer makes
-    ruinous: measured on a real answer with 63 chunks and 12 claims, sending the whole
-    71 kB context with each claim cost 226,594 input tokens and 75.4s — slower and far
-    more expensive than not splitting at all. Routing first brought the same answer to
-    40,181 tokens and 12.8s, against 39.3s for RAGAS's single batched call.
+    Without this, checking claims individually is a pessimisation on any answer built
+    from ``fetch_document``, which can retrieve a whole paper: see the table in
+    docs/evaluation.md. Ranking is word overlap rather than embeddings because it is
+    free, where embedding every chunk would cost more than the split saves.
 
-    Ranking is word overlap, not embeddings, because it is free: 0.003s and no API call,
-    where embedding 63 chunks plus 12 claims took 11.4s and would have been half the
-    remaining time. Ties break toward the longer chunk, which is likelier to contain a
-    given detail.
-
-    ponytail: a lexical heuristic, so a claim paraphrased entirely in different words
-    could be routed away from the chunk that supports it and be marked unsupported —
-    a false negative, the dangerous direction for this metric. The ``budget`` of four is
-    the slack that makes that unlikely, and it was checked against full-context
-    verdicts on a mixed answer with no disagreement either way. If it ever does drift,
-    the upgrade is embedding the claims and chunks (accurate, ~11s) or passing the
-    vectors retrieval already computed through the score request (accurate and free,
-    but real plumbing).
+    ponytail: lexical, so a claim paraphrased entirely in different words could be
+    routed away from the chunk that supports it and marked unsupported — a false
+    negative, the dangerous direction here. ``budget`` is the slack against that, and
+    four was verified against full-context verdicts. Upgrade path is embeddings, or
+    passing the vectors retrieval already computed through the score request.
     """
     if len(contexts) <= budget:
         # Nothing to gain from choosing: every claim sees everything.
@@ -128,18 +90,12 @@ def route_contexts(
 def _direct_judge(client, model: str):
     """RAGAS's prompts and scoring, with its transport replaced.
 
-    RAGAS routes every call through instructor, and that wrapper costs about four
-    seconds per call on top of the request. Measured against the same model, prompt
-    and schema: ``llm.agenerate`` 5.5s, the client's own ``completions.parse`` 1.5s.
-    At three calls per scored answer that was most of the wall clock — and none of it
-    was the gateway, which answers a plain request in 0.6s, a structured one in 0.9s,
-    and three concurrent structured ones in 1.2s.
-
-    The two metrics only ever call ``agenerate`` (checked against their source), so
-    implementing that single method keeps everything worth having from RAGAS — the
-    claim decomposition, the prompts, the scoring — and drops the slow layer. The base
-    class must be subclassed rather than duck-typed, because ``BaseMetric`` runs an
-    ``isinstance`` check on it.
+    Everything RAGAS sends goes through instructor, which measured ~4s per call against
+    ~1.5s for the client's own ``completions.parse`` on the same prompt and schema.
+    The metrics only ever call ``agenerate``, so implementing that one method keeps
+    their claim decomposition, prompts and scoring while dropping the slow layer.
+    Subclassed rather than duck-typed because ``BaseMetric`` runs an ``isinstance``
+    check.
     """
     from ragas.llms.base import InstructorBaseRagasLLM
 
@@ -156,7 +112,10 @@ def _direct_judge(client, model: str):
                 # A sampling judge adds exactly the run-to-run noise the docs tell
                 # people to read through.
                 temperature=0.0,
-                max_tokens=_MAX_TOKENS,
+                # One verdict *and* a reason per claim, so a detailed answer needs
+                # room. Too small and the parse fails on a truncated response, which
+                # dropped the metric silently.
+                max_tokens=4096,
             )
             parsed = response.choices[0].message.parsed
             if parsed is None:
@@ -264,28 +223,15 @@ async def _faithfulness(
         # RAGAS returns NaN here. Nothing to report and nothing to average.
         return {}
 
-    # Each claim is checked against the chunks most likely to bear on it, rather than
-    # against all of them. Without this, splitting is a pessimisation on any answer
-    # built from fetch_document — see route_contexts for the measurements.
+    # One request per claim, concurrently, each against only the chunks routed to it.
+    # RAGAS batches all claims into one verdict call, and that call is the critical
+    # path because it generates a verdict *and* a written reason for every claim.
+    # Splitting is ~3x faster; routing is what keeps it from costing 8x the tokens.
+    # Still RAGAS's prompt either way — _create_verdicts takes a list, so a
+    # one-element list changes the batching and nothing else.
     routed = route_contexts(list(statements), contexts)
-
-    # One call per claim, concurrently, instead of one call carrying all of them.
-    #
-    # RAGAS batches every claim into a single verdict call, and that call is the whole
-    # critical path: it must generate a verdict *and* a written reason for each claim,
-    # so its cost is output length. Measured on a real 8-claim answer with 6.2 kB of
-    # context: 17.0s batched against 5.5s split.
-    #
-    # The context is resent with every call and that is close to free — 1 claim with
-    # the full 6.2 kB took 2.9s against 2.6s with 400 bytes, so prefill is not what
-    # costs. It is 8x the input tokens, which on a self-hosted gateway is compute
-    # rather than money.
-    #
-    # This is still RAGAS's prompt and RAGAS's scoring: _create_verdicts takes a list,
-    # so a one-element list changes the batching and nothing else. Verified on a
-    # deliberately mixed answer (4 of 7 claims supported) that batched and split return
-    # identical verdicts claim by claim, twice in a row.
-    limit = asyncio.Semaphore(_VERDICT_CONCURRENCY)
+    # Bounded so an answer with dozens of claims does not open dozens of requests.
+    limit = asyncio.Semaphore(8)
 
     async def verdict_for(statement: str, claim_context: str):
         async with limit:
