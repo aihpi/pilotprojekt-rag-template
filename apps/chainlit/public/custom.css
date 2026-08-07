@@ -108,7 +108,10 @@ img[src*="/logo"] { height: 96px !important; max-height: 96px !important; width:
  * own panel over this one. */
 #rag-eval-badge-panel {
   position: fixed; z-index: 2147483002; display: none;
-  max-width: min(38rem, calc(100vw - 2rem));
+  /* Wider than the composer it sits over, on purpose. The content is claim text
+   * with a judge's reason under each one, and at the old width every reason wrapped
+   * to three or four lines. */
+  max-width: min(52rem, calc(100vw - 2rem));
   max-height: min(72vh, 44rem); overflow-y: auto; overscroll-behavior: contain;
   padding: .8rem .9rem; border-radius: .6rem;
   border: 1px solid hsl(var(--border));
