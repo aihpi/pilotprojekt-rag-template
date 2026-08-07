@@ -2431,6 +2431,11 @@ async def on_feedback(feedback: cl.types.Feedback):
         step_id=feedback.forId,
         thread_id=getattr(feedback, "threadId", None) or cl.context.session.thread_id,
         comment=feedback.comment,
+        # The session's model, so the rating lands on the same signature its answer
+        # did. Approximate by construction: switching models and then rating an older
+        # answer files the thumb under the new one. Exact attribution needs the
+        # forId join described in evaluation.post_feedback.
+        chat_model=_session_chat_model(),
     )
 
 
@@ -3844,6 +3849,12 @@ async def main(message: cl.Message):
         # The sibling branch below retrieves nothing, so it has no chunks to check an
         # answer against and is deliberately left alone.
         if get_config().evaluation.enabled:
+            # Read here, not inside the task: cl.user_session is context-local, and by
+            # the time a detached judge runs there is no session to ask. Without it the
+            # score is filed under the *configured* model rather than the one the user
+            # switched to in the settings panel — a Gemma answer landing in the
+            # gpt-oss-120b row, which is the dashboard's own grouping key.
+            answered_by = _session_chat_model()
             # The reference must be held until the task finishes: asyncio keeps only a
             # weak one, so a bare create_task() can be collected mid-flight — the same
             # trap the document watcher documents at its own create_task above. Dropped
@@ -3860,6 +3871,7 @@ async def main(message: cl.Message):
                         contexts=[context_with_source(r) for r in last_results],
                         thread_id=session_id,
                         message_id=assistant_reply.id,
+                        chat_model=answered_by,
                     )
                 finally:
                     _SCORING_THREADS.discard(session_id)

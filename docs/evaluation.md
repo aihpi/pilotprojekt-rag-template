@@ -245,6 +245,13 @@ Scores are grouped by chat model, embedding model, chunking strategy, chunk size
 **and collection**. Two configurations that differ in any of those appear as
 separate rows.
 
+The chat model is the one that **actually answered**, not the one in the YAML: if
+you switch models in the ⚙️ settings panel, the scores follow you to a new row.
+The chunking is likewise the one a source really uses — a `data_sources[].chunking`
+override wins over the global block, which is what the shipped `papers` example
+does. Sources that disagree are reported as `semantic+heading`, since several
+sources can feed one collection and there is then no single answer to give.
+
 So to compare them properly, give each one its own collection and ingest into
 both. If you point two different chunking strategies at the same collection, the
 second ingest overwrites the first, and older rows in the dashboard end up

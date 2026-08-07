@@ -254,6 +254,13 @@ Die Werte werden nach Chat-Modell, Embedding-Modell, Chunking-Strategie,
 Chunk-Größe **und Collection** gruppiert. Zwei Konfigurationen, die sich in einem
 dieser Punkte unterscheiden, erscheinen als getrennte Zeilen.
 
+Das Chat-Modell ist das, das **tatsächlich geantwortet hat**, nicht das aus der
+YAML: Wechselst du im ⚙️-Panel das Modell, wandern die Werte in eine neue Zeile.
+Ebenso beim Chunking — ein `data_sources[].chunking` schlägt den globalen Block,
+und genau das macht das mitgelieferte `papers`-Beispiel. Widersprechen sich mehrere
+Quellen, steht dort `semantic+heading`: mehrere Quellen können eine Collection
+füllen, und dann gibt es keine einzelne richtige Antwort.
+
 Um sie sauber zu vergleichen, gib jeder ihre eigene Collection und importiere in
 beide. Wenn du zwei Chunking-Strategien auf dieselbe Collection richtest,
 überschreibt der zweite Import den ersten, und ältere Zeilen im Dashboard

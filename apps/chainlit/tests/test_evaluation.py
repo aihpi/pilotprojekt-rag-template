@@ -115,6 +115,59 @@ def test_the_signature_follows_the_chunking_strategy():
     assert evaluation.config_signature(a) != evaluation.config_signature(b)
 
 
+def _source(**chunking):
+    return {
+        "name": "papers",
+        "path": "data/documents",
+        "format": "pdf",
+        "chunking": chunking or None,
+    }
+
+
+def test_the_signature_reports_the_chunking_the_corpus_was_ingested_with():
+    """A source overriding the global chunking is the shipped example, not an edge.
+
+    ``examples/papers`` has no top-level ``chunking:`` block at all — it sets
+    ``semantic`` inside its data source — so reading the global one reported the
+    schema default ``fixed_size``, describing a corpus that was never built.
+    """
+    cfg = RagConfig(data_sources=[_source(strategy="semantic", max_chars=1500)])
+    assert cfg.chunking.strategy == "fixed_size", "the global one is still the default"
+
+    _, _, strategy, max_chars, _ = evaluation.config_signature(cfg).split("|")
+    assert (strategy, max_chars) == ("semantic", "1500")
+
+
+def test_a_source_without_an_override_still_reports_the_global_chunking():
+    cfg = RagConfig(chunking={"strategy": "heading"}, data_sources=[_source()])
+    assert evaluation.effective_chunking(cfg)[0] == "heading"
+
+
+def test_sources_that_disagree_are_reported_as_disagreeing():
+    # Several sources can feed one collection. Picking one of them would file every
+    # score under a chunking half the corpus never saw.
+    cfg = RagConfig(
+        data_sources=[
+            _source(strategy="semantic", max_chars=1500),
+            {**_source(strategy="heading", max_chars=3000), "name": "notes"},
+        ]
+    )
+    assert evaluation.effective_chunking(cfg) == ("heading+semantic", "1500+3000")
+
+
+def test_the_signature_names_the_model_that_answered_not_the_configured_one():
+    """The settings panel lets a user switch models, and that choice is persisted.
+
+    Without this the score is filed under ``models.chat_model``, so a Gemma answer
+    lands in the gpt-oss-120b row — wrong in the one field the dashboard groups by.
+    """
+    cfg = RagConfig(models={"chat_model": "gpt-oss-120b"})
+    assert evaluation.config_signature(cfg, "gemma-4-31b").startswith("gemma-4-31b|")
+    assert evaluation.config_signature(cfg, None).startswith("gpt-oss-120b|"), (
+        "no session model means the configured one, not an empty field"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Zero overhead while disabled
 # --------------------------------------------------------------------------- #
@@ -175,6 +228,18 @@ def test_an_explicit_judge_model_wins_over_the_chat_model(monkeypatch):
     calls = _install_client(monkeypatch)
     _post(_enabled(judge_model="gemma-4-31b"))
     assert calls[0][1]["judge_model"] == "gemma-4-31b"
+
+
+def test_the_session_model_reaches_both_the_signature_and_the_judge(monkeypatch):
+    # `judge_model: null` is documented as "the chat model", so it has to mean the
+    # one that answered — otherwise switching models silently changes who judges.
+    calls = _install_client(monkeypatch)
+    cfg = _enabled()
+    _post(cfg, chat_model="gemma-4-31b")
+
+    body = calls[0][1]
+    assert body["judge_model"] == "gemma-4-31b"
+    assert body["config_signature"].startswith("gemma-4-31b|")
 
 
 def test_a_trailing_slash_on_the_service_url_does_not_double_up(monkeypatch):

@@ -33,7 +33,28 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = httpx.Timeout(300.0, connect=3.0)
 
 
-def config_signature(cfg: "RagConfig") -> str:
+def effective_chunking(cfg: "RagConfig") -> tuple[str, str]:
+    """The chunking a collection was really ingested with, as ``(strategy, max_chars)``.
+
+    Not ``cfg.chunking``, which is only the fallback: every data source may override
+    it (``data_sources[].chunking``), and the shipped papers example does exactly
+    that — it has no top-level ``chunking:`` block at all, so reading the global one
+    returned the schema default ``fixed_size`` for a corpus ingested ``semantic``.
+
+    Sources that disagree are reported as they are rather than resolved to one of
+    them: several sources can feed one collection, and there is then no single true
+    answer to give.
+    """
+    used = {
+        ((s.chunking or cfg.chunking).strategy, (s.chunking or cfg.chunking).max_chars)
+        for s in cfg.data_sources
+    } or {(cfg.chunking.strategy, cfg.chunking.max_chars)}
+    strategies = sorted({s for s, _ in used})
+    sizes = sorted({str(m) for _, m in used})
+    return "+".join(strategies), "+".join(sizes)
+
+
+def config_signature(cfg: "RagConfig", chat_model: str | None = None) -> str:
     """Fingerprint the configuration an answer was produced under.
 
     Derived from the config object rather than the YAML file on purpose:
@@ -41,24 +62,31 @@ def config_signature(cfg: "RagConfig") -> str:
     ``QDRANT_COLLECTION`` / ``CHUNK_MAX_CHARS`` env overrides into it, so this
     describes what actually ran — the only thing worth grouping scores by.
 
+    ``chat_model`` is the model that actually answered, which is not always the
+    configured one: the settings panel lets a user switch models per session, and
+    that choice is persisted. Passing it is what keeps a Gemma answer from being
+    filed under gpt-oss-120b. Falls back to the configured model for callers with
+    no session to ask.
+
     ``collection`` is part of the signature because two configurations that differ
     only by collection would otherwise share one, silently pooling scores from
     different corpora.
 
-    Caveat worth knowing when reading old rows: ``chunking.strategy`` and
-    ``chunking.max_chars`` describe how the *collection was ingested*, not how
-    this query was served. Re-ingesting the same collection with different
-    chunking leaves historical rows describing a corpus that no longer exists.
+    Caveat worth knowing when reading old rows: the chunking fields describe how the
+    *collection was ingested*, not how this query was served. Re-ingesting the same
+    collection with different chunking leaves historical rows describing a corpus
+    that no longer exists.
     """
+    strategy, max_chars = effective_chunking(cfg)
     # "|" cannot occur in a gateway model name, in a chunking strategy (a Literal)
     # or in a Qdrant collection name, so the parts stay unambiguously splittable.
     return "|".join(
         str(part)
         for part in (
-            cfg.models.chat_model,
+            chat_model or cfg.models.chat_model,
             cfg.models.embed_model,
-            cfg.chunking.strategy,
-            cfg.chunking.max_chars,
+            strategy,
+            max_chars,
             cfg.vector_store.collection,
         )
     )
@@ -114,9 +142,13 @@ async def post_score(
     contexts: list[str],
     thread_id: str | None = None,
     message_id: str | None = None,
+    chat_model: str | None = None,
     cfg: "RagConfig | None" = None,
 ) -> dict[str, Any] | None:
     """POST one finished answer to the eval service and return its scores.
+
+    ``chat_model`` is the model that produced this answer, which the caller has to
+    supply because it can differ per session — see :func:`config_signature`.
 
     Returns ``None`` — and never raises — when evaluation is off, when there is
     nothing meaningful to score, or when the service cannot be reached.
@@ -139,9 +171,11 @@ async def post_score(
             "answer": answer,
             "contexts": contexts,
             "metrics": list(ev.metrics),
-            "judge_model": ev.judge_model or cfg.models.chat_model,
+            # `judge_model: null` is documented as "the chat model", so it follows
+            # the one that actually answered rather than the configured default.
+            "judge_model": ev.judge_model or chat_model or cfg.models.chat_model,
             "embed_model": cfg.models.embed_model,
-            "config_signature": config_signature(cfg),
+            "config_signature": config_signature(cfg, chat_model),
             "thread_id": thread_id,
             "message_id": message_id,
         },
@@ -154,6 +188,7 @@ async def post_feedback(
     step_id: str | None = None,
     thread_id: str | None = None,
     comment: str | None = None,
+    chat_model: str | None = None,
     cfg: "RagConfig | None" = None,
 ) -> None:
     """Record a thumbs click for the dashboard. Never raises.
@@ -183,7 +218,7 @@ async def post_feedback(
             "step_id": step_id,
             "thread_id": thread_id,
             "comment": comment,
-            "config_signature": config_signature(cfg),
-            "judge_model": ev.judge_model or cfg.models.chat_model,
+            "config_signature": config_signature(cfg, chat_model),
+            "judge_model": ev.judge_model or chat_model or cfg.models.chat_model,
         },
     )
