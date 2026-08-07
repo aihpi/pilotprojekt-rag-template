@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import quote
 
 import asyncpg
+import httpx
 import bcrypt
 import chainlit as cl
 from chainlit.auth import get_current_user
@@ -40,6 +41,7 @@ from chat_history import (
     update_chat_session_metadata,
     upsert_user_profile,
 )
+from evaluation import post_feedback, post_score, trend_sign
 from llm import cached_chat_models, chat, list_chat_models, message_to_dict
 from tools import ToolContext, build_openai_tools
 from native_chat import (
@@ -52,7 +54,7 @@ from native_chat import (
     upsert_feedback,
 )
 from config import get_config
-from rag_tool import build_context, extract_page, extract_source_file, retrieve
+from rag_tool import build_context, context_with_source, extract_page, extract_source_file, retrieve
 from figure_markers import (
     build_figure_candidates,
     figure_display_name,
@@ -78,7 +80,7 @@ from settings import (
     MAX_SOURCE_LINKS,
     PERSONALIZED_FOLLOWUPS_COUNT,
     PROFILE_MIN_MESSAGES,
-    STARTER_QUESTIONS,
+    starter_questions,
     SYSTEM_PROMPT_PATH,
     TOP_K,
 )
@@ -335,6 +337,75 @@ def _active_retrieval_filters() -> dict[str, Any]:
 TOOLS, TOOL_BY_FUNCTION_NAME = build_openai_tools(get_config())
 # The search tool's name, still used by the "call the tool first" retry nudge.
 TOOL_NAME: str = get_config().tool.name
+
+# Strong references to in-flight answer-scoring tasks. asyncio holds only a weak one,
+# so without this they are collectable and simply never run — the same trap the
+# document watcher documents at its own create_task.
+_SCORING_TASKS: set[asyncio.Task] = set()
+# Threads with a score in flight, so /eval-status can say "working on it" instead of
+# leaving the badge silent for the ~16s a judge takes. Measured: that cost is gateway
+# round-trip per structured-output call, not model size — ministral-3-14b, gemma-4-31b
+# and llama-3-3-70b all land within a second of each other — so it is a wait to
+# explain rather than one to optimise away.
+_SCORING_THREADS: set[str] = set()
+
+
+def _forget_scoring_task(task: asyncio.Task) -> None:
+    _SCORING_TASKS.discard(task)
+    # A detached task swallows its exception unless somebody asks for it, and scoring
+    # that fails in silence is exactly how a dropped task went unnoticed once already.
+    if not task.cancelled() and task.exception() is not None:
+        print(f"[WARN] evaluation_scoring_failed: {task.exception()!r}")
+
+
+def _make_public_assets_revalidate() -> None:
+    """Make browsers re-check ``/public/`` assets instead of guessing.
+
+    Chainlit serves that directory with ``ETag`` and ``Last-Modified`` but no
+    ``Cache-Control``. With no directive a browser falls back to *heuristic* caching
+    and may reuse a file without ever asking, so editing ``custom.css`` or one of the
+    badge scripts can silently do nothing until somebody thinks to hard-reload. In a
+    template whose whole point is that people customise those files, that is a trap —
+    and it cost a full round of "your fix changed nothing" here.
+
+    ``no-cache`` does not mean "do not store", it means "revalidate before reuse":
+    the browser keeps the file and gets a small 304 when nothing changed. The cost is
+    one conditional request per asset per load; the gain is that an edit always lands.
+
+    Registered at import time on purpose. Starlette refuses ``add_middleware`` once
+    the application has started, so doing this from the startup hook that registers
+    our routes raises "Cannot add middleware after an application has started" — it
+    is logged and swallowed by Chainlit, which is a silent no-op.
+    """
+    from chainlit.server import app as _app
+
+    @_app.middleware("http")
+    async def _revalidate_public_assets(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/public/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+try:
+    _make_public_assets_revalidate()
+except Exception as exc:  # noqa: BLE001 — a stale asset is not worth a dead app
+    print(f"[WARN] public_asset_revalidation_unavailable: {exc.__class__.__name__}: {exc}")
+
+
+def _forced_ui_language() -> str | None:
+    """The language ``[UI] language`` pins everyone to, or ``None`` to follow the browser.
+
+    Chainlit resolves its own interface strings from ``navigator.language`` unless that
+    key is set, and it ships no language picker — so the browser *is* the setting. Our
+    two badges are static files under ``/public`` and cannot read ``config.toml``, so
+    they ask here and fall back to ``navigator.language`` themselves. That keeps our
+    strings agreeing with Chainlit's chrome whichever way the language was decided,
+    which a switch of our own could not do.
+    """
+    from chainlit.config import config as chainlit_config
+
+    return chainlit_config.ui.language or None
 
 
 def _utc_stamp() -> str:
@@ -2190,14 +2261,19 @@ async def on_app_startup() -> None:
         The watcher is a background task with no Chainlit session, so it cannot push
         anything to a user. The browser polls this instead. Behind auth like every
         other route here, because the messages name your documents.
+
+        ``lang`` rides along because the badge wording is chosen in the browser: one
+        watcher serves every open tab, so a status built in one language would be
+        wrong for half of them.
         """
         if current_user is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
+        lang = _forced_ui_language()
         if not DOCUMENT_WATCH:
-            return {"state": "off", "message": "", "revision": 0}
+            return {"state": "off", "message": "", "revision": 0, "lang": lang}
         from document_watch import get_status
 
-        return get_status()
+        return {**get_status(), "lang": lang}
 
     # Registration endpoint for self-registration
     @chainlit_fastapi_app.post("/auth/register")
@@ -2242,6 +2318,70 @@ async def on_app_startup() -> None:
             filename=csv_file.name,
         )
 
+    @chainlit_fastapi_app.get("/eval-status")
+    async def eval_status(thread_id: str | None = None, current_user=Depends(get_current_user)):
+        """Running answer-quality numbers for the badge above the chatbox.
+
+        Scoring happens in a background task with no live session, so it cannot push
+        anything to a browser; the badge polls this instead, exactly like
+        ``/ingest-status`` above. Behind auth like every other route here, because
+        the numbers describe someone's own conversation.
+
+        ``thread_id`` comes from the browser, which reads it out of a ``/thread/<uuid>``
+        URL. It is required rather than guessed: without it there is nothing to
+        report, and answering with the user's most recent conversation instead would
+        put the previous chat's numbers above an empty composer. Chainlit routes to
+        ``/thread/<uuid>`` as soon as the first message is sent, so a real
+        conversation always has one.
+        """
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        cfg = get_config()
+        if not cfg.evaluation.enabled or not cfg.evaluation.show_badge:
+            return {"enabled": False}
+        # Which language to write the badge in. Carried on every enabled response
+        # because the badge renders text on more than one of them.
+        lang = _forced_ui_language()
+        if not thread_id:
+            return {"enabled": True, "answers": 0, "lang": lang}
+        pending = thread_id in _SCORING_THREADS
+
+        url = f"{cfg.evaluation.service_url.rstrip('/')}/api/thread/{thread_id}"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                summary = response.json()
+        except Exception as exc:
+            # The eval service is optional; a badge that cannot reach it should go
+            # quiet rather than turn into an error in the corner of the chat.
+            print(f"[WARN] eval_status_unavailable: {exc.__class__.__name__}: {exc}")
+            return {"enabled": True, "answers": 0, "pending": pending, "lang": lang}
+
+        faithfulness = summary.get("faithfulness")
+        relevance = summary.get("relevance")
+        answers = summary.get("answers", 0)
+        # One per metric. Both are running means over the same conversation, so a
+        # trend on only one of them is a UI inconsistency rather than a statement
+        # about the metrics.
+        trend = trend_sign(faithfulness, summary.get("last_faithfulness"), answers)
+        trend_relevance = trend_sign(relevance, summary.get("last_relevance"), answers)
+
+        return {
+            "enabled": True,
+            "answers": answers,
+            "faithfulness": faithfulness,
+            "relevance": relevance,
+            "trend": trend,
+            "trend_relevance": trend_relevance,
+            # A judge is working right now, so the badge can say so rather than
+            # sitting silent for ~16s and looking broken.
+            "pending": pending,
+            # Why the last scored answer got those numbers, for the panel.
+            "detail": summary.get("last_detail"),
+            "lang": lang,
+        }
+
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/pdf/{file_name:path}")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/figure/{file_name:path}")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/citations/{step_id}")
@@ -2249,6 +2389,7 @@ async def on_app_startup() -> None:
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/export/feedback")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/auth/register")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/ingest-status")
+    _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-status")
 
     _patch_cookie_security_openapi_model()
 
@@ -2272,14 +2413,29 @@ async def on_app_startup() -> None:
 
 @cl.on_feedback
 async def on_feedback(feedback: cl.types.Feedback):
-    if not DATABASE_URL:
-        return
-    await upsert_feedback(
-        DATABASE_URL,
-        feedback_id=feedback.id or str(__import__("uuid").uuid4()),
+    if DATABASE_URL:
+        await upsert_feedback(
+            DATABASE_URL,
+            feedback_id=feedback.id or str(__import__("uuid").uuid4()),
+            step_id=feedback.forId,
+            value=float(feedback.value),
+            comment=feedback.comment,
+        )
+    # Also record it against the active configuration, which is what the evaluation
+    # dashboard groups by. Outside the DATABASE_URL branch on purpose: the eval
+    # store is a separate service, so thumbs stay measurable without Postgres.
+    # Chainlit's own comment box supplies feedback.comment — nothing here prompts
+    # for it — and classifying it happens in the eval service, not on this click.
+    await post_feedback(
+        rating="up" if feedback.value else "down",
         step_id=feedback.forId,
-        value=float(feedback.value),
+        thread_id=getattr(feedback, "threadId", None) or cl.context.session.thread_id,
         comment=feedback.comment,
+        # The session's model, so the rating lands on the same signature its answer
+        # did. Approximate by construction: switching models and then rating an older
+        # answer files the thumb under the new one. Exact attribution needs the
+        # forId join described in evaluation.post_feedback.
+        chat_model=_session_chat_model(),
     )
 
 
@@ -2969,14 +3125,21 @@ async def regenerate_keywords_action(action: cl.Action):
 
 
 @cl.set_starters
-async def set_starters() -> list[Starter]:
+async def set_starters(user=None, language: str | None = None) -> list[Starter]:
+    """Welcome-screen suggestions, in the language the rest of the screen is in.
+
+    Chainlit passes the resolved interface language here — the browser's, or
+    ``[UI] language`` where an instance forces one. Both parameters are positional
+    as far as Chainlit is concerned (it zips them onto the signature), so the names
+    are ours; ``user`` is unused but has to be first.
+    """
     starter_icons = [
         "/public/icons/shield.svg",
         "/public/icons/search.svg",
         "/public/icons/book.svg",
     ]
     starters: list[Starter] = []
-    for i, q in enumerate(STARTER_QUESTIONS[:6]):
+    for i, q in enumerate(starter_questions(language)[:6]):
         starters.append(
             Starter(
                 label=q if len(q) <= 70 else q[:67].rstrip() + "...",
@@ -3670,6 +3833,53 @@ async def main(message: cl.Message):
             content,
             metadata=message_metadata,
         )
+
+        # Answer-quality scoring (off unless evaluation.enabled). Detached on purpose:
+        # a judge takes tens of seconds, and awaiting it here would leave the session
+        # busy and unable to take the next question for the whole time. Nothing in the
+        # UI is waiting on the result either — the badge above the chatbox polls
+        # /eval-status, so a score that lands after the socket closed still counts and
+        # still shows up on the next page load.
+        #
+        # This deliberately does NOT touch the sent message. Appending to it from here
+        # was the original design and it never worked: Message.update() emits over the
+        # session websocket, and by the time a ~16s judge returns the handler is gone
+        # and the emit silently goes nowhere.
+        #
+        # The sibling branch below retrieves nothing, so it has no chunks to check an
+        # answer against and is deliberately left alone.
+        if get_config().evaluation.enabled:
+            # Read here, not inside the task: cl.user_session is context-local, and by
+            # the time a detached judge runs there is no session to ask. Without it the
+            # score is filed under the *configured* model rather than the one the user
+            # switched to in the settings panel — a Gemma answer landing in the
+            # gpt-oss-120b row, which is the dashboard's own grouping key.
+            answered_by = _session_chat_model()
+            # The reference must be held until the task finishes: asyncio keeps only a
+            # weak one, so a bare create_task() can be collected mid-flight — the same
+            # trap the document watcher documents at its own create_task above. Dropped
+            # it here first, and the symptom was silence: no scores, no request reaching
+            # the service, and nothing in the log.
+            async def _score_and_forget() -> None:
+                try:
+                    await post_score(
+                        question=message.content,
+                        answer=content,
+                        # With the source line, not bare text: the answer ends by
+                        # naming its sources, and a judge that cannot see where a
+                        # chunk came from marks that sentence unsupported every time.
+                        contexts=[context_with_source(r) for r in last_results],
+                        thread_id=session_id,
+                        message_id=assistant_reply.id,
+                        chat_model=answered_by,
+                    )
+                finally:
+                    _SCORING_THREADS.discard(session_id)
+
+            _SCORING_THREADS.add(session_id)
+            task = asyncio.create_task(_score_and_forget())
+            _SCORING_TASKS.add(task)
+            task.add_done_callback(_forget_scoring_task)
     else:
         # No retrieval happened, so any marker here would be imitation (e.g. copied
         # from a resumed transcript) — strip defensively.

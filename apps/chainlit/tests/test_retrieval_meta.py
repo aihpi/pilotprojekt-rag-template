@@ -117,3 +117,38 @@ def test_the_unfiltered_fallback_also_excludes_meta(patched, monkeypatch):
     assert fallback is not None, "the fallback must not drop the meta exclusion"
     assert any(c.key == "_meta" for c in fallback.must_not or [])
     assert not any(r.metadata.get("_meta") for r in results)
+
+
+# --------------------------------------------------------------------------- #
+# The judge must be scored against what the model was actually given
+# --------------------------------------------------------------------------- #
+
+
+def test_a_chunk_carries_its_source_line_for_both_the_model_and_the_judge():
+    """``context_with_source`` is what ``build_context`` renders per chunk.
+
+    Answer scoring used to send bare ``result.text``, so a judge never saw which
+    document a chunk came from — and the closing "Die Informationen stammen aus der
+    Quelle X (Seite 1-2)" of every cited answer was unverifiable by construction.
+    Faithfulness docked it on essentially every answer, splitting it into a source
+    claim and a page claim and failing both, with the reason "the context does not
+    mention the source ... as the source of the information": true only because we
+    had stripped it.
+
+    Pinning that the two renderings share one implementation, so the text a judge
+    scores against cannot silently drift from the text the model saw again.
+    """
+    result = rag_tool.RagResult(
+        text="Die Adhäsionsrate lag bei 62%.",
+        score=0.9,
+        metadata={"source_file": "Kage_2018_SciReports.pdf", "page": 4},
+    )
+
+    entry = rag_tool.context_with_source(result)
+    assert result.text in entry
+    assert "Kage_2018_SciReports.pdf" in entry, "the judge must be able to see the source"
+    assert "4" in entry, "and the page, since answers cite page numbers too"
+
+    # The model's numbered context is the same string with an index in front. If this
+    # ever fails, the two have drifted and the judge is scoring against the wrong text.
+    assert rag_tool.build_context([result], figure_markers=False) == f"[1] {entry}"

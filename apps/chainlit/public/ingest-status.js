@@ -41,6 +41,106 @@
   var calmTimer = null;
   var startedAt = Date.now();
 
+  /* German and English, chosen the way Chainlit chooses its own interface strings:
+   * the server sends `[UI] language` when an instance forces one, otherwise the
+   * browser decides. Anything not German falls back to English, Chainlit's default.
+   *
+   * The status sentence is composed here rather than server-side, from the counts
+   * /ingest-status already carries. One watcher serves every open tab, so there is
+   * no single language it could be written in back there. `status.message` remains
+   * the English fallback if a payload arrives without counts. */
+  var T = {
+    de: {
+      titleWorking: "Wird gerade indexiert",
+      titleDone: "Letzte Änderung",
+      titleError: "Etwas ist schiefgelaufen",
+      titleIdle: "Ihre Dokumente werden beobachtet",
+      nothingYet: "Noch keine Änderungen.",
+      hint: "Dokumente werden automatisch aus dem Ordner übernommen.",
+      upToDate: "Dokumente sind aktuell",
+      watching: "Ihre Dokumente werden beobachtet",
+      errorMsg: "Indexierung fehlgeschlagen. Details stehen im App-Log.",
+      actions: { new: "neu", changed: "geändert", removed: "entfernt" },
+      andMore: "und {n} weitere",
+      working: "Änderung erkannt: {parts}…",
+      workingPlain: "Änderung erkannt. Wird indexiert…",
+      docNew: ["{n} neues Dokument", "{n} neue Dokumente"],
+      docChanged: ["{n} geändertes Dokument", "{n} geänderte Dokumente"],
+      docRemoving: ["{n} Dokument wird entfernt", "{n} Dokumente werden entfernt"],
+      done: "Fertig: {parts}",
+      donePlain: "Fertig. Nichts zu ändern.",
+      passIndexed: ["{n} Textstelle indexiert", "{n} Textstellen indexiert"],
+      passRemoved: ["{n} Textstelle entfernt", "{n} Textstellen entfernt"],
+    },
+    en: {
+      titleWorking: "Indexing right now",
+      titleDone: "Last change",
+      titleError: "Something went wrong",
+      titleIdle: "Watching your documents",
+      nothingYet: "No changes yet.",
+      hint: "Documents are picked up from the folder automatically.",
+      upToDate: "Documents up to date",
+      watching: "Watching your documents",
+      errorMsg: "Indexing failed. See the app log for details.",
+      actions: { new: "new", changed: "changed", removed: "removed" },
+      andMore: "and {n} more",
+      working: "Change detected: {parts}...",
+      workingPlain: "Change detected. Indexing...",
+      docNew: ["{n} new document", "{n} new documents"],
+      docChanged: ["{n} changed document", "{n} changed documents"],
+      docRemoving: ["removing {n} document", "removing {n} documents"],
+      done: "Done: {parts}",
+      donePlain: "Done. Nothing to change.",
+      passIndexed: ["{n} passage indexed", "{n} passages indexed"],
+      passRemoved: ["{n} passage removed", "{n} passages removed"],
+    },
+  };
+
+  var strings = T.en;
+
+  function setLang(forced) {
+    var tag = String(forced || navigator.language || "en").toLowerCase();
+    strings = tag.indexOf("de") === 0 ? T.de : T.en;
+  }
+
+  function fill(template, values) {
+    return template.replace(/\{(\w+)\}/g, function (_, key) {
+      return values[key];
+    });
+  }
+
+  function count(pair, n) {
+    return fill(pair[n === 1 ? 0 : 1], { n: n });
+  }
+
+  /* The sentence under the badge. Built from the counts when they are there, so it
+   * follows the reader's language; falls back to whatever the server wrote.
+   *
+   * Keyed on which counts a payload carries, not on `state`: the two sets are
+   * disjoint (a working status has added/edited/removed, a finished one has
+   * indexed/removed_passages), and the hold timer re-renders a finished status with
+   * `state` rewritten to "idle" while keeping its numbers. */
+  function messageFor(status) {
+    if (status.state === "error") return strings.errorMsg;
+    var parts = [];
+    if (typeof status.added === "number") {
+      if (status.added) parts.push(count(strings.docNew, status.added));
+      if (status.edited) parts.push(count(strings.docChanged, status.edited));
+      if (status.removed) parts.push(count(strings.docRemoving, status.removed));
+      return parts.length
+        ? fill(strings.working, { parts: parts.join(", ") })
+        : strings.workingPlain;
+    }
+    if (typeof status.indexed === "number") {
+      if (status.indexed) parts.push(count(strings.passIndexed, status.indexed));
+      if (status.removed_passages) {
+        parts.push(count(strings.passRemoved, status.removed_passages));
+      }
+      return parts.length ? fill(strings.done, { parts: parts.join(", ") }) : strings.donePlain;
+    }
+    return status.message || "";
+  }
+
   function styles() {
     if (document.getElementById(ID + "-styles")) return;
     var css = document.createElement("style");
@@ -203,27 +303,28 @@
 
   function panelHtml(status) {
     var title;
-    if (status.state === "working") title = "Indexing right now";
-    else if (status.state === "done") title = "Last change";
-    else if (status.state === "error") title = "Something went wrong";
-    else title = lastPayload ? "Last change" : "Watching your documents";
+    if (status.state === "working") title = strings.titleWorking;
+    else if (status.state === "done") title = strings.titleDone;
+    else if (status.state === "error") title = strings.titleError;
+    else title = lastPayload ? strings.titleDone : strings.titleIdle;
 
     var html = '<div class="ris-panel-title">' + escapeHtml(title) + "</div>";
-    var message = status.message || (lastPayload && lastPayload.message) || "";
-    html += "<div>" + escapeHtml(message || "No changes yet.") + "</div>";
+    var message = messageFor(status) || (lastPayload && messageFor(lastPayload)) || "";
+    html += "<div>" + escapeHtml(message || strings.nothingYet) + "</div>";
 
     var files = status.files || (lastPayload && lastPayload.files) || [];
     for (var i = 0; i < files.length; i++) {
+      // The overflow row carries only a count; the sentence around it is written
+      // here, where the language is known.
+      var more = files[i].action === "more";
       html +=
         '<div class="ris-file"><span class="ris-file-action">' +
-        escapeHtml(files[i].action === "more" ? "" : files[i].action) +
+        escapeHtml(more ? "" : strings.actions[files[i].action] || files[i].action) +
         '</span><span>' +
-        escapeHtml(files[i].name) +
+        escapeHtml(more ? fill(strings.andMore, { n: files[i].name }) : files[i].name) +
         "</span></div>";
     }
-    html +=
-      '<div class="ris-hint">Documents are picked up from the folder automatically.' +
-      "</div>";
+    html += '<div class="ris-hint">' + escapeHtml(strings.hint) + "</div>";
     return html;
   }
 
@@ -243,9 +344,9 @@
       icon.innerHTML = '<span class="ris-dot"></span>';
     }
 
-    var label = status.message || "";
+    var label = messageFor(status);
     if (status.state === "idle") {
-      label = lastPayload ? "Documents up to date" : "Watching your documents";
+      label = lastPayload ? strings.upToDate : strings.watching;
     }
     el.querySelector(".ris-label").textContent = label;
     el.setAttribute("title", label);
@@ -260,6 +361,9 @@
 
   function apply(status) {
     if (!status || typeof status.revision !== "number") return;
+    // Before any rendering: `status.lang` carries `[UI] language` when an instance
+    // forces one, and null means "let the browser decide".
+    setLang(status.lang);
 
     if (status.state === "off") {
       var existing = document.getElementById(ID);

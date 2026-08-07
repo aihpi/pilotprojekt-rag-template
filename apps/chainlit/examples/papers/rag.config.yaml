@@ -105,15 +105,41 @@ images:
   max_attach_images: 3              # only used by mode: attach
   vision_capable_models: [gemma-4-31b]
 
+# Automatic answer scoring. Off by default because every scored answer costs two
+# judge calls plus one embedding call, and because it needs the separate `eval`
+# service running (`docker compose up eval`). With this off the app behaves exactly
+# as it would without this block.
+#
+# Read the numbers as deltas, not as grades: 0.87 on its own says very little,
+# 0.87 -> 0.71 after a chunking change says a lot. The dashboard on :8001 groups
+# scores by configuration so that comparison is the easy thing to do.
+evaluation:
+  enabled: false
+  metrics: [faithfulness, relevance]
+  # faithfulness = are the answer's claims backed by the retrieved chunks
+  # relevance    = does the answer address the question that was asked
+  judge_model: null                 # null = models.chat_model; prefer a different
+                                    # model here, self-judging inflates the scores
+  show_badge: true                  # false still records scores for the dashboard
+
 prompt:
   # No system_prompt_path -> the app generates one at startup from the template
   # and a sample of the indexed chunks, then caches it (see docs/prompts.md).
   auto_generate: true
+  # One list per interface language. Chainlit picks by the browser's language (or by
+  # [UI] language in .chainlit/config.toml); anything that is not German gets the
+  # English list. A plain list works too, and every language then sees it.
   starter_questions:
-    - "Welche Paper sind in der Wissensbasis enthalten?"
-    - "Fasse die zentralen Ergebnisse des Kage-2018-Papers zusammen."
-    - "Welche Methoden verwenden diese Paper?"
-    - "Was sagen die Paper über die Grenzen ihres Ansatzes?"
+    de:
+      - "Welche Paper sind in der Wissensbasis enthalten?"
+      - "Fasse die zentralen Ergebnisse des Kage-2018-Papers zusammen."
+      - "Welche Methoden verwenden diese Paper?"
+      - "Was sagen die Paper über die Grenzen ihres Ansatzes?"
+    en:
+      - "Which papers are in the knowledge base?"
+      - "Summarize the main findings of the Kage 2018 paper."
+      - "Which methods do these papers use?"
+      - "What do the papers say about the limits of their approach?"
 
 # Optional roles: each scopes the prompt and (via retrieval_filters) retrieval.
 # profiles:

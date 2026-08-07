@@ -50,3 +50,4 @@ Nutzerfrage ─► Retrieval (top_k, optionale Filter) ◄───────�
 - **[Field-Mapping-DSL](field-mapping.md)**: JSON/CSV in Text umwandeln (technisch).
 - **[Erweitern](extending.md)**: ein neues Dateiformat unterstützen (mit Python).
 - **[Feedback-Export](feedback-export.md)**: Nutzerbewertungen sammeln und herunterladen.
+- **[Antwortqualität prüfen](evaluation.md)**: Antworten bewerten und Konfigurationen vergleichen.

@@ -202,6 +202,7 @@ Alles steht in einer Einstellungsdatei. Das sind ihre Abschnitte:
 | `images` | was mit Bildern und Diagrammen in den PDFs passiert → [mehr](docs/images.de.md) |
 | `citation` | wie eine Quellenangabe unter einer Antwort aussieht |
 | `prompt` | die Anweisungen für den Assistenten und die Beispielfragen → [mehr](docs/prompts.de.md) |
+| `evaluation` | Antworten automatisch bewerten, um Konfigurationen zu vergleichen (standardmäßig aus) → [mehr](docs/evaluation.de.md) |
 | `app` | Aussehen und Verhalten des Chat-Fensters |
 
 Jede einzelne Option steht in der [Konfiguration](docs/configuration.de.md).

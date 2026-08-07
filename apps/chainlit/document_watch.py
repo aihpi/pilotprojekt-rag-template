@@ -125,7 +125,9 @@ def _file_labels(added: list[str], changed: list[str], gone: list[str]) -> list[
     if len(labels) > _MAX_LISTED_FILES:
         remaining = len(labels) - _MAX_LISTED_FILES
         labels = labels[:_MAX_LISTED_FILES]
-        labels.append({"name": f"and {remaining} more", "action": "more"})
+        # The count alone, not "and N more": the browser writes that sentence,
+        # because it is the only side that knows which language to write it in.
+        labels.append({"name": str(remaining), "action": "more"})
     return labels
 
 
@@ -134,6 +136,11 @@ def _working_message(added: int, edited: int, removed: int) -> str:
 
     Deleting is called out separately: it is the one action people worry about, so
     "removing" should never be hidden behind a generic "indexing".
+
+    The browser normally writes this sentence itself, from the counts sent alongside
+    it — one watcher serves every open tab, so a sentence built here would be in the
+    wrong language for half of them. This stays as the English fallback for a client
+    that finds no counts, and as the human-readable field of ``/ingest-status``.
     """
     parts = []
     if added:

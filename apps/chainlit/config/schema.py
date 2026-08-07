@@ -281,7 +281,10 @@ class PromptConfig(BaseModel):
 
     system_prompt_path: str | None = None
     """Path to a markdown system prompt (env ``SYSTEM_PROMPT_PATH`` overrides)."""
-    starter_questions: list[str] = Field(default_factory=list)
+    starter_questions: list[str] | dict[str, list[str]] = Field(default_factory=list)
+    """Questions offered on the welcome screen. Either one list, or one list per
+    interface language (``{de: [...], en: [...]}``) for an instance whose users do not
+    all read the same one. Resolve with ``settings.starter_questions(language)``."""
     starter_icons: list[str] = Field(default_factory=list)
     auto_generate: bool = True
     """When no system prompt is configured/loaded, generate one at startup with
@@ -440,6 +443,56 @@ class UiTextConfig(BaseModel):
     )
 
 
+class EvaluationConfig(BaseModel):
+    """Automatic answer-quality scoring (off by default).
+
+    Scoring does NOT run in this process. It runs in the separate ``eval_app``
+    service, which owns the metric library and the eval database; this app only
+    POSTs ``(question, answer, contexts)`` after an answer is sent and renders the
+    numbers that come back. Two reasons: the metric library drags in a dependency
+    chain that has no business in the Chainlit image, and a judge call must never
+    sit between the user and their answer.
+
+    Both metrics are *reference-free* — they need no ground-truth answer, so they
+    work on real chats — but each costs a judge call, and ``relevance``
+    additionally costs one embedding call. That is why this is opt-in.
+
+    Treat the numbers as deltas, not absolutes: a faithfulness of 0.87 means
+    little on its own, while 0.87 → 0.71 after a chunking change means something.
+    """
+
+    enabled: bool = False
+    """Master switch. While false, nothing is imported, posted or rendered, and
+    the app behaves exactly as it does without this section."""
+    metrics: list[Literal["faithfulness", "relevance"]] = Field(
+        default_factory=lambda: ["faithfulness", "relevance"]
+    )
+    """Which scores to compute. ``faithfulness`` = are the answer's claims actually
+    supported by the retrieved chunks (catches hallucination); ``relevance`` = does
+    the answer address the question that was asked."""
+    judge_model: str | None = None
+    """Model that grades the answer. ``None`` → ``models.chat_model``. Judging a
+    model with itself inflates the scores, so prefer naming a different model here
+    if anyone is going to read the absolute values."""
+    show_badge: bool = True
+    """Show the running conversation score in a badge above the chatbox. ``false``
+    still records everything for the dashboard, which is what you want when you would
+    rather not put a number in front of workshop participants."""
+    service_url: str = "http://eval:8001"
+    """Base URL of the ``eval_app`` service. The default resolves on the compose
+    network; running locally with ``uv run`` it is ``http://localhost:8001``."""
+
+    @model_validator(mode="after")
+    def _check(self) -> "EvaluationConfig":
+        if self.enabled and not self.metrics:
+            raise ValueError(
+                "evaluation.enabled is true but evaluation.metrics is empty, so "
+                "nothing would be scored. List at least one metric, or set "
+                "evaluation.enabled: false."
+            )
+        return self
+
+
 class RagConfig(BaseModel):
     """Top-level configuration for a RAG instance."""
 
@@ -456,6 +509,7 @@ class RagConfig(BaseModel):
     tool: ToolConfig = Field(default_factory=ToolConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     images: ImagesConfig = Field(default_factory=ImagesConfig)
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     profiles: list[ProfileConfig] = Field(default_factory=list)
     profiles_path: str | None = None
     """Optional path to a JSON profiles file (used when ``profiles`` is empty)."""

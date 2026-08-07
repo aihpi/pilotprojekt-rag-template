@@ -139,11 +139,12 @@ custom_css = "/public/custom.css"
 
 # Specify a JavaScript file that can be used to customize the user interface.
 # The JavaScript file can be served from the public directory.
-# Shows a toast in the top right while the document watcher is indexing. Only ONE
-# custom_js can be set, which is why this is its own file: public/custom.js holds
-# older, never-enabled code, and switching that on as a side effect would surprise
-# people.
-custom_js = "/public/ingest-status.js"
+# A loader for the two badges: the document-watcher status in the header, and the
+# evaluation score above the chatbox. Only ONE custom_js can be set, hence the
+# loader rather than two entries. Deliberately not public/custom.js, which holds
+# older, never-enabled code that would surprise people if switched on as a side
+# effect of adding a badge.
+custom_js = "/public/badges.js"
 
 # The style of alert boxes. Can be "classic" or "modern".
 alert_style = "classic"
@@ -182,6 +183,19 @@ default_avatar_file_url = ""
 #     icon_url = "https://avatars.githubusercontent.com/u/128686189?s=200&v=4"
 #     url = "https://github.com/Chainlit/chainlit/issues"
 #     target = "_blank" (default)  # Optional: "_self", "_parent", "_top".
+
+# Link to the evaluation dashboard. Commented out because the eval service is
+# opt-in (`docker compose --profile eval up -d`), and a header link that 404s is
+# worse than no link at all. Uncomment once you are running it.
+#
+# The URL is the one YOUR BROWSER needs, not the one the app container uses:
+# http://eval:8001 only resolves inside the compose network, so this stays
+# localhost even under Docker. Adjust the port if you set EVAL_PORT.
+# [[UI.header_links]]
+#     name = "Evaluation"
+#     display_name = "Evaluation"
+#     icon_url = "/public/icons/evaluation.svg"
+#     url = "http://localhost:8001"
 
 [meta]
 generated_by = "2.9.6"

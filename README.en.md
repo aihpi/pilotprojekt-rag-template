@@ -193,6 +193,7 @@ Everything lives in one settings file. These are its sections:
 | `images` | what happens with pictures and charts in your PDFs → [more](docs/images.md) |
 | `citation` | how a source reference looks under an answer |
 | `prompt` | the instructions the assistant follows, and the example questions → [more](docs/prompts.md) |
+| `evaluation` | score answers automatically to compare configurations (off by default) → [more](docs/evaluation.md) |
 | `app` | appearance and behaviour of the chat window |
 
 Every single option is listed in [Configuration](docs/configuration.md).

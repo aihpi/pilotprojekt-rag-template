@@ -73,6 +73,12 @@ services:
       RAG_CONFIG: ${RAG_CONFIG:-examples/papers/rag.config.yaml}
       # IMPORTANT: inside Docker network, use service DNS name (not localhost)
       QDRANT_URL: http://qdrant:6333
+      # Answer scoring. Empty means "leave the YAML alone", so this is off unless
+      # you either set EVALUATION_ENABLED=true or turn it on in rag.config.yaml.
+      # Also start the service: docker compose --profile eval up -d
+      EVALUATION_ENABLED: ${EVALUATION_ENABLED:-}
+      EVALUATION_SERVICE_URL: ${EVALUATION_SERVICE_URL:-http://eval:8001}
+      EVALUATION_JUDGE_MODEL: ${EVALUATION_JUDGE_MODEL:-}
     volumes:
       # Documents (and generated figures) live under ./data/documents, which is
       # already covered by the `.:/app` mount below.
@@ -150,8 +156,41 @@ services:
           $$( [ "$$INGEST_RECREATE" = "true" ] && echo "--recreate" );
     restart: "no"
 
+  # Answer-quality scoring and the evaluation dashboard on :8001.
+  #
+  # Behind a compose profile, so a plain `docker compose up` neither builds nor runs
+  # it: this image installs ragas and its langchain chain, which is a build
+  # nobody should pay for while evaluation.enabled is false (the default). Start it
+  # with
+  #
+  #     docker compose --profile eval up -d
+  #
+  # and set `evaluation: {enabled: true}` in your rag.config.yaml. Both switches are
+  # needed; with the service down the app just records no scores and says nothing.
+  eval:
+    profiles: ["eval"]
+    build:
+      context: .
+      dockerfile: eval_app/Dockerfile
+    container_name: rag-eval
+    env_file:
+      - .env
+    environment:
+      # Same gateway and credentials the app and ingest use — judge calls are
+      # ordinary LiteLLM calls.
+      LITELLM_BASE_URL: ${LITELLM_BASE_URL}
+      LITELLM_API_KEY: ${LITELLM_API_KEY}
+      EVAL_DB_PATH: ${DOCKER_EVAL_DB_PATH:-/app/.evaldb/eval.sqlite3}
+    volumes:
+      # A named volume, not a bind mount: this is SQLite in WAL mode and needs real
+      # POSIX locking, exactly as described for chat_db above.
+      - eval_db:/app/.evaldb
+    ports:
+      - "${EVAL_PORT:-8001}:8001"
+
 volumes:
   postgres_data:
   qdrant_data:
   model_cache:
   chat_db:
+  eval_db:
