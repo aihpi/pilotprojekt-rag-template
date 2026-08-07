@@ -80,7 +80,7 @@ from settings import (
     MAX_SOURCE_LINKS,
     PERSONALIZED_FOLLOWUPS_COUNT,
     PROFILE_MIN_MESSAGES,
-    STARTER_QUESTIONS,
+    starter_questions,
     SYSTEM_PROMPT_PATH,
     TOP_K,
 )
@@ -391,6 +391,21 @@ try:
     _make_public_assets_revalidate()
 except Exception as exc:  # noqa: BLE001 — a stale asset is not worth a dead app
     print(f"[WARN] public_asset_revalidation_unavailable: {exc.__class__.__name__}: {exc}")
+
+
+def _forced_ui_language() -> str | None:
+    """The language ``[UI] language`` pins everyone to, or ``None`` to follow the browser.
+
+    Chainlit resolves its own interface strings from ``navigator.language`` unless that
+    key is set, and it ships no language picker — so the browser *is* the setting. Our
+    two badges are static files under ``/public`` and cannot read ``config.toml``, so
+    they ask here and fall back to ``navigator.language`` themselves. That keeps our
+    strings agreeing with Chainlit's chrome whichever way the language was decided,
+    which a switch of our own could not do.
+    """
+    from chainlit.config import config as chainlit_config
+
+    return chainlit_config.ui.language or None
 
 
 def _utc_stamp() -> str:
@@ -2246,14 +2261,19 @@ async def on_app_startup() -> None:
         The watcher is a background task with no Chainlit session, so it cannot push
         anything to a user. The browser polls this instead. Behind auth like every
         other route here, because the messages name your documents.
+
+        ``lang`` rides along because the badge wording is chosen in the browser: one
+        watcher serves every open tab, so a status built in one language would be
+        wrong for half of them.
         """
         if current_user is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
+        lang = _forced_ui_language()
         if not DOCUMENT_WATCH:
-            return {"state": "off", "message": "", "revision": 0}
+            return {"state": "off", "message": "", "revision": 0, "lang": lang}
         from document_watch import get_status
 
-        return get_status()
+        return {**get_status(), "lang": lang}
 
     # Registration endpoint for self-registration
     @chainlit_fastapi_app.post("/auth/register")
@@ -2319,8 +2339,11 @@ async def on_app_startup() -> None:
         cfg = get_config()
         if not cfg.evaluation.enabled or not cfg.evaluation.show_badge:
             return {"enabled": False}
+        # Which language to write the badge in. Carried on every enabled response
+        # because the badge renders text on more than one of them.
+        lang = _forced_ui_language()
         if not thread_id:
-            return {"enabled": True, "answers": 0}
+            return {"enabled": True, "answers": 0, "lang": lang}
         pending = thread_id in _SCORING_THREADS
 
         url = f"{cfg.evaluation.service_url.rstrip('/')}/api/thread/{thread_id}"
@@ -2333,7 +2356,7 @@ async def on_app_startup() -> None:
             # The eval service is optional; a badge that cannot reach it should go
             # quiet rather than turn into an error in the corner of the chat.
             print(f"[WARN] eval_status_unavailable: {exc.__class__.__name__}: {exc}")
-            return {"enabled": True, "answers": 0, "pending": pending}
+            return {"enabled": True, "answers": 0, "pending": pending, "lang": lang}
 
         faithfulness = summary.get("faithfulness")
         relevance = summary.get("relevance")
@@ -2356,6 +2379,7 @@ async def on_app_startup() -> None:
             "pending": pending,
             # Why the last scored answer got those numbers, for the panel.
             "detail": summary.get("last_detail"),
+            "lang": lang,
         }
 
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/pdf/{file_name:path}")
@@ -3096,14 +3120,21 @@ async def regenerate_keywords_action(action: cl.Action):
 
 
 @cl.set_starters
-async def set_starters() -> list[Starter]:
+async def set_starters(user=None, language: str | None = None) -> list[Starter]:
+    """Welcome-screen suggestions, in the language the rest of the screen is in.
+
+    Chainlit passes the resolved interface language here — the browser's, or
+    ``[UI] language`` where an instance forces one. Both parameters are positional
+    as far as Chainlit is concerned (it zips them onto the signature), so the names
+    are ours; ``user`` is unused but has to be first.
+    """
     starter_icons = [
         "/public/icons/shield.svg",
         "/public/icons/search.svg",
         "/public/icons/book.svg",
     ]
     starters: list[Starter] = []
-    for i, q in enumerate(STARTER_QUESTIONS[:6]):
+    for i, q in enumerate(starter_questions(language)[:6]):
         starters.append(
             Starter(
                 label=q if len(q) <= 70 else q[:67].rstrip() + "...",

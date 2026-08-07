@@ -34,6 +34,102 @@
   var ID = "rag-eval-badge";
   var ANCHOR_ID = "message-composer";
 
+  /* German and English, chosen the way Chainlit chooses its own interface strings:
+   * the server sends `[UI] language` when an instance forces one, otherwise the
+   * browser decides. Anything that is not German falls back to English, which is
+   * Chainlit's own default — so the badge always agrees with the chrome around it.
+   *
+   * Strings are raw HTML (the panel is built by concatenation, not escaped), which
+   * is why entities and the ⌀/ᵢ/↗ characters can appear inline. Values that come
+   * from outside — claim text, judge reasons — go through escapeHtml instead. */
+  var T = {
+    de: {
+      scoring: "Bewertung läuft…",
+      pendingScore: "Bewertung ausstehend",
+      faithfulness: "Treue",
+      relevance: "Relevanz",
+      answers: ["Antwort", "Antworten"],
+      lastAnswer: "Letzte bewertete Antwort",
+      claims: ["Aussage", "Aussagen"],
+      claimsHead: "{ok} von {n} {claimWord} durch die Quellen gedeckt",
+      declined:
+        "Relevanz 0%: die Antwort hat sich enthalten (etwa „steht nicht in den " +
+        "Dokumenten“). Das ist keine schlechte Antwort, sondern eine verweigerte — " +
+        "die Kennzahl wird in diesem Fall auf 0 gesetzt.",
+      quality: "Antwortqualität in diesem Gespräch",
+      faithDesc: "Wie viele Aussagen der Antwort von den abgerufenen Textstellen gedeckt sind.",
+      faithFormula: "Treue = gedeckte Aussagen / alle Aussagen",
+      relDesc:
+        "Wie gut die Antwort zur Frage passt. Aus der Antwort werden Fragen erzeugt " +
+        "und mit der echten Frage verglichen.",
+      relFormula: "Relevanz = ⌀ cos( E(erzeugte Frageᵢ) , E(echte Frage) )",
+      shown: "Angezeigter Wert",
+      shownDesc:
+        "Laufender Mittelwert über die bewerteten Antworten dieses Gesprächs " +
+        "(n&nbsp;=&nbsp;{n}).",
+      shownFormula: "⌀ = (1/n) · Σ Wertᵢ",
+      arrow: "Pfeil",
+      arrowDesc:
+        "Vergleicht die letzte Antwort mit diesem Mittelwert: ↗ besser, ↘ schlechter. " +
+        "Erscheint erst ab zwei Antworten.",
+      caveat:
+        "Beide Werte stammen von einem Sprachmodell, das ein anderes bewertet, und " +
+        "tragen dessen Meinung und Rauschen mit. Einzelwerte sagen wenig, " +
+        "Veränderungen sagen etwas.",
+    },
+    en: {
+      scoring: "Scoring…",
+      pendingScore: "Score pending",
+      faithfulness: "Faithfulness",
+      relevance: "Relevance",
+      answers: ["answer", "answers"],
+      lastAnswer: "Last scored answer",
+      claims: ["claim", "claims"],
+      claimsHead: "{ok} of {n} {claimWord} backed by the sources",
+      declined:
+        "Relevance 0%: the answer declined (along the lines of “that is not in the " +
+        "documents”). That is not a bad answer but a withheld one — the metric is " +
+        "set to 0 in that case.",
+      quality: "Answer quality in this conversation",
+      faithDesc: "How many of the answer's claims are backed by the retrieved passages.",
+      faithFormula: "Faithfulness = backed claims / all claims",
+      relDesc:
+        "How well the answer fits the question. Questions are generated from the " +
+        "answer and compared with the real one.",
+      relFormula: "Relevance = ⌀ cos( E(generated questionᵢ) , E(real question) )",
+      shown: "Displayed value",
+      shownDesc:
+        "Running mean over the scored answers in this conversation (n&nbsp;=&nbsp;{n}).",
+      shownFormula: "⌀ = (1/n) · Σ valueᵢ",
+      arrow: "Arrow",
+      arrowDesc:
+        "Compares the last answer with that mean: ↗ better, ↘ worse. Appears from " +
+        "two answers on.",
+      caveat:
+        "Both values come from one language model judging another, and carry its " +
+        "opinion and its noise. Single values say little, changes say something.",
+    },
+  };
+
+  var strings = T.en;
+  var langCode = "en";
+
+  function setLang(forced) {
+    var tag = String(forced || navigator.language || "en").toLowerCase();
+    langCode = tag.indexOf("de") === 0 ? "de" : "en";
+    strings = T[langCode];
+  }
+
+  function fill(template, values) {
+    return template.replace(/\{(\w+)\}/g, function (_, key) {
+      return values[key];
+    });
+  }
+
+  function plural(pair, n) {
+    return pair[n === 1 ? 0 : 1];
+  }
+
   var lastPayload = null;
   /* Held in a variable rather than looked up by id every time. The composer is
    * React-rendered and is often not present on the first poll, so the badge starts
@@ -93,16 +189,19 @@
   function detailHtml(status) {
     var d = status.detail;
     if (!d) return "";
-    var out = ["<h4>Letzte bewertete Antwort</h4>"];
+    var out = ["<h4>" + strings.lastAnswer + "</h4>"];
 
     var claims = d.faithfulness_claims || [];
     if (claims.length) {
       var ok = claims.filter(function (c) { return c.ok; }).length;
       out.push(
         '<div class="reb-claims-head">' +
-          ok + " von " + claims.length +
-          (claims.length === 1 ? " Aussage" : " Aussagen") +
-          " durch die Quellen gedeckt</div>"
+          fill(strings.claimsHead, {
+            ok: ok,
+            n: claims.length,
+            claimWord: plural(strings.claims, claims.length),
+          }) +
+          "</div>"
       );
       claims.forEach(function (c) {
         out.push(
@@ -116,45 +215,34 @@
     }
 
     if (d.relevance_declined) {
-      out.push(
-        '<div class="reb-note">Relevanz 0%: die Antwort hat sich enthalten ' +
-          "(etwa &bdquo;steht nicht in den Dokumenten&ldquo;). Das ist keine " +
-          "schlechte Antwort, sondern eine verweigerte &mdash; die Kennzahl wird " +
-          "in diesem Fall auf 0 gesetzt.</div>"
-      );
+      out.push('<div class="reb-note">' + strings.declined + "</div>");
     }
     return out.join("");
   }
 
   function panelHtml(status) {
-    var n = status.answers;
-    return [detailHtml(status)].concat([
-      "<h4>Antwortqualität in diesem Gespräch</h4>",
+    return [
+      detailHtml(status),
+      "<h4>" + strings.quality + "</h4>",
       "<dl>",
-      "<dt>Treue</dt><dd>",
-      "Wie viele Aussagen der Antwort von den abgerufenen Textstellen gedeckt sind.",
-      '<code class="reb-formula">Treue = gedeckte Aussagen / alle Aussagen</code>',
+      "<dt>" + strings.faithfulness + "</dt><dd>",
+      strings.faithDesc,
+      '<code class="reb-formula">' + strings.faithFormula + "</code>",
       "</dd>",
-      "<dt>Relevanz</dt><dd>",
-      "Wie gut die Antwort zur Frage passt. Aus der Antwort werden Fragen erzeugt und ",
-      "mit der echten Frage verglichen.",
-      '<code class="reb-formula">Relevanz = ⌀ cos( E(erzeugte Frageᵢ) , E(echte Frage) )</code>',
+      "<dt>" + strings.relevance + "</dt><dd>",
+      strings.relDesc,
+      '<code class="reb-formula">' + strings.relFormula + "</code>",
       "</dd>",
-      "<dt>Angezeigter Wert</dt><dd>",
-      "Laufender Mittelwert über die bewerteten Antworten dieses Gesprächs",
-      " (n&nbsp;=&nbsp;" + n + ").",
-      '<code class="reb-formula">⌀ = (1/n) · Σ Wertᵢ</code>',
+      "<dt>" + strings.shown + "</dt><dd>",
+      fill(strings.shownDesc, { n: status.answers }),
+      '<code class="reb-formula">' + strings.shownFormula + "</code>",
       "</dd>",
-      "<dt>Pfeil</dt><dd>",
-      "Vergleicht die letzte Antwort mit diesem Mittelwert: ↗ besser, ↘ schlechter. ",
-      "Erscheint erst ab zwei Antworten.",
+      "<dt>" + strings.arrow + "</dt><dd>",
+      strings.arrowDesc,
       "</dd>",
       "</dl>",
-      '<div class="reb-warn">',
-      "Beide Werte stammen von einem Sprachmodell, das ein anderes bewertet, und tragen ",
-      "dessen Meinung und Rauschen mit. Einzelwerte sagen wenig, Veränderungen sagen etwas.",
-      "</div>",
-    ]).join("");
+      '<div class="reb-warn">' + strings.caveat + "</div>",
+    ].join("");
   }
 
   function element() {
@@ -275,7 +363,7 @@
         el.removeAttribute("data-show");
         return;
       }
-      el.innerHTML = '<span class="reb-count">Bewertung läuft…</span>';
+      el.innerHTML = '<span class="reb-count">' + strings.scoring + "</span>";
       el.setAttribute("data-show", "1");
       el.setAttribute("data-pending", "1");
       return;
@@ -287,20 +375,21 @@
     }
 
     var parts = [];
-    var faith = metric("Treue", status.faithfulness, status.trend);
+    var faith = metric(strings.faithfulness, status.faithfulness, status.trend);
     if (faith) parts.push(faith);
-    var rel = metric("Relevanz", status.relevance, status.trend_relevance);
+    var rel = metric(strings.relevance, status.relevance, status.trend_relevance);
     if (rel) parts.push(rel);
 
     // Nothing scored yet in a conversation that has scored attempts: say so rather
     // than showing an empty pill, so "on but quiet" is distinguishable from "off".
     if (!parts.length) {
-      parts.push('<span class="reb-count">Bewertung ausstehend</span>');
+      parts.push('<span class="reb-count">' + strings.pendingScore + "</span>");
     } else {
       parts.push(
         '<span class="reb-count">' +
           status.answers +
-          (status.answers === 1 ? " Antwort" : " Antworten") +
+          " " +
+          plural(strings.answers, status.answers) +
           "</span>"
       );
     }
@@ -337,7 +426,13 @@
           return;
         }
         lastStatus = status;
-        var payload = JSON.stringify(status);
+        // Before any rendering: `status.lang` carries `[UI] language` when an
+        // instance forces one, and null means "let the browser decide".
+        setLang(status.lang);
+        // The language is part of the key, not just the numbers: what is on screen
+        // depends on both, and re-rendering only when a score moves would leave the
+        // badge in the previous language until one did.
+        var payload = langCode + JSON.stringify(status);
         if (payload !== lastPayload) {
           lastPayload = payload;
           render(status);

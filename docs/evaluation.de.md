@@ -141,6 +141,12 @@ Das Abzeichen gehört zu einem Gespräch und erscheint deshalb erst, wenn darin 
 Antwort bewertet wurde. Auf der Startseite steht nichts, statt der Zahlen von dem,
 was du zuletzt gemacht hast.
 
+Abzeichen und Panel erscheinen auf Deutsch oder Englisch und folgen demselben Signal
+wie der Rest der Oberfläche, siehe
+[Sprache der Oberfläche](configuration.md#sprache-der-oberflache). Ausnahme sind die
+Begründungen des Judges je Aussage: die stammen aus den englischen Prompts von RAGAS
+und bleiben so oder so englisch.
+
 Wenn du die Zahlen sammeln willst, ohne sie jemandem vor die Nase zu setzen, setze
 `show_badge: false`. Das Dashboard füllt sich weiterhin.
 

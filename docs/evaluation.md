@@ -110,7 +110,7 @@ evaluation:
 Restart the app and ask a question. A small badge appears above the chatbox:
 
 ```
-Treue 67% ↗ · Relevanz 88% · 3 Antworten
+Faithfulness 67% ↗ · Relevance 88% · 3 answers
 ```
 
 That is the conversation so far, not the last answer: a running average over every
@@ -122,7 +122,7 @@ claim, which is why the badge always shows it.
 **Each metric gets its own arrow, comparing the last answer to that metric's
 average.** ↗ means the latest answer scored better than the conversation's average,
 ↘ worse, and no arrow means it landed about where the average already was. The two
-move independently — `Treue 58% ↘ · Relevanz 17% ↗` is a normal reading, and a useful
+move independently — `Faithfulness 58% ↘ · Relevance 17% ↗` is a normal reading, and a useful
 one. An arrow needs at least two answers to mean anything, so it does not appear
 before then.
 
@@ -135,6 +135,12 @@ to this page for it.
 The badge belongs to one conversation, so it appears only once that conversation has
 a scored answer. The start page shows nothing, rather than the numbers from whatever
 you were doing last.
+
+Badge and panel are written in German or English, following the same signal as the
+rest of the interface — see
+[Interface language](configuration.md#interface-language). The judge's per-claim
+reasons are the exception: those come from RAGAS's English prompts and stay English
+either way.
 
 If you would rather collect the numbers without putting them in front of anyone,
 set `show_badge: false`. The dashboard still fills up.
@@ -197,7 +203,7 @@ If scoring seems to take many minutes rather than tens of seconds, the judge mod
 is probably failing rather than thinking. Check that the model you named is
 actually answering.
 
-While a judge is running the badge says `Bewertung läuft…`, so a missing number
+While a judge is running the badge says `Scoring…`, so a missing number
 means either that it has not started or that it failed — never that you should keep
 waiting.
 

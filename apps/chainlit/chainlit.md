@@ -27,5 +27,6 @@ Developed at the **KI-Servicezentrum Berlin-Brandenburg**, funded by the German
 Federal Ministry of Research, Technology and Space (grant 01IS22092).
 
 *This screen is `apps/chainlit/chainlit.md` — replace it with your own welcome
-text and swap the logos in `public/`. The instance itself is configured in a
-`rag.config.yaml`; see the project documentation.*
+text and swap the logos in `public/`. It is also the fallback for every language
+without its own file; the German one is `chainlit_de-DE.md`. The instance itself
+is configured in a `rag.config.yaml`; see the project documentation.*

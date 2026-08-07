@@ -61,34 +61,105 @@
 </style>
 
 <main>
-  <h1>RAG Evaluation</h1>
-  <p class="sub">
-    Answer quality per configuration. Read these as deltas, not as grades: a
-    faithfulness of 0.87 says little on its own, 0.87&nbsp;&rarr;&nbsp;0.71 after a
-    chunking change says a lot.
-  </p>
-  <div id="body">Loading&hellip;</div>
-  <p class="note">
-    Faithfulness asks whether the answer's claims are supported by the retrieved
-    chunks. Relevance asks whether the answer addresses the question. Both are
-    judged by an LLM, so they carry its opinion and its noise &mdash; compare runs,
-    do not trust absolute values.
-  </p>
+  <h1 id="title"></h1>
+  <p class="sub" id="sub"></p>
+  <div id="body"></div>
+  <p class="note" id="note"></p>
 </main>
 
 <script>
+/*
+  German and English, on the same rule the badges in the chat app use: anything
+  that is not German gets English. Only navigator.language here - this page is
+  served by the eval container, which has no access to the app's config.toml, so
+  the `[UI] language` force does not reach it.
+*/
+const T = {
+  de: {
+    title: 'RAG-Evaluation',
+    sub: 'Antwortqualität je Konfiguration. Als Veränderung lesen, nicht als Note: eine Treue von 0,87 sagt für sich genommen wenig, 0,87&nbsp;&rarr;&nbsp;0,71 nach einer Chunking-Änderung sagt viel.',
+    note: 'Treue fragt, ob die Aussagen der Antwort von den abgerufenen Textstellen gedeckt sind. Relevanz fragt, ob die Antwort zur Frage passt. Beide werden von einem Sprachmodell bewertet und tragen dessen Meinung und Rauschen mit &mdash; Läufe vergleichen, Absolutwerten nicht trauen.',
+    loading: 'Wird geladen&hellip;',
+    notScored: 'nicht bewertet',
+    unknownConfig: 'unbekannte Konfiguration',
+    colConfig: 'Konfiguration',
+    colAnswers: 'Antworten',
+    colFaithfulness: 'Treue',
+    colRelevance: 'Relevanz',
+    colThumbs: 'Daumen',
+    failures: 'Gemeldete Fehler',
+    failuresSub: 'Klassifizierte Kommentare zu Daumen runter. Der Anteil bezieht sich auf die Meldungen dieser Konfiguration.',
+    colCategory: 'Kategorie',
+    colCount: 'Anzahl',
+    colShare: 'Anteil',
+    categories: {
+      hallucination: 'Halluzination',
+      wrong_document: 'falsches Dokument',
+      incomplete: 'unvollständig',
+      irrelevant: 'unpassend',
+    },
+    emptyTitle: 'Noch keine Bewertungen aufgezeichnet.',
+    emptyBody: 'Schalten Sie die Evaluation in Ihrer <code>rag.config.yaml</code> ein und stellen Sie dem Assistenten eine Frage:',
+    emptyWhy: 'Bewertung ist standardmäßig aus, weil jede Antwort zwei Judge-Aufrufe plus einen Embedding-Aufruf kostet. Um zwei Konfigurationen zu vergleichen, ingestieren Sie jede in ihre eigene Collection &mdash; gruppiert wird nach Modell, Embedding-Modell, Chunking und Collection.',
+    loadError: 'Statistiken konnten nicht geladen werden.',
+  },
+  en: {
+    title: 'RAG Evaluation',
+    sub: 'Answer quality per configuration. Read these as deltas, not as grades: a faithfulness of 0.87 says little on its own, 0.87&nbsp;&rarr;&nbsp;0.71 after a chunking change says a lot.',
+    note: 'Faithfulness asks whether the answer\'s claims are supported by the retrieved chunks. Relevance asks whether the answer addresses the question. Both are judged by an LLM, so they carry its opinion and its noise &mdash; compare runs, do not trust absolute values.',
+    loading: 'Loading&hellip;',
+    notScored: 'not scored',
+    unknownConfig: 'unknown configuration',
+    colConfig: 'Configuration',
+    colAnswers: 'Answers',
+    colFaithfulness: 'Faithfulness',
+    colRelevance: 'Relevance',
+    colThumbs: 'Thumbs',
+    failures: 'Reported failures',
+    failuresSub: 'Thumbs-down comments, classified. Share is of that configuration\'s own complaints.',
+    colCategory: 'Category',
+    colCount: 'Count',
+    colShare: 'Share',
+    categories: {
+      hallucination: 'hallucination',
+      wrong_document: 'wrong document',
+      incomplete: 'incomplete',
+      irrelevant: 'irrelevant',
+    },
+    emptyTitle: 'No scores recorded yet.',
+    emptyBody: 'Turn evaluation on in your <code>rag.config.yaml</code> and ask the assistant a question:',
+    emptyWhy: 'Scoring is off by default because each answer costs two judge calls plus one embedding call. To compare two configurations, ingest each into its own collection &mdash; they are grouped by model, embedding model, chunking and collection.',
+    loadError: 'Could not load statistics.',
+  },
+};
+
+const LANG = (navigator.language || 'en').toLowerCase().indexOf('de') === 0 ? 'de' : 'en';
+const S = T[LANG];
+document.documentElement.lang = LANG;
+document.title = S.title;
+document.getElementById('title').textContent = S.title;
+document.getElementById('sub').innerHTML = S.sub;
+document.getElementById('note').innerHTML = S.note;
+document.getElementById('body').innerHTML = S.loading;
+
+// Everything below interpolates values that come out of the database, so they are
+// escaped rather than spliced into innerHTML raw. A config signature is written by
+// whoever runs the instance, not by a chat user, but the cost of being careful here
+// is one function.
+const esc = s => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+
 const pct = v => v == null ? null : Math.round(v * 100);
 
 function bar(value) {
   const p = pct(value);
-  if (p === null) return '<span class="none">not scored</span>';
+  if (p === null) return `<span class="none">${S.notScored}</span>`;
   return `<div class="metric"><div class="track"><div class="fill" style="width:${p}%"></div></div><span>${p}%</span></div>`;
 }
 
 function config(signature) {
   // {chat_model}|{embed_model}|{strategy}|{max_chars}|{collection}
-  if (!signature) return '<span class="none">unknown configuration</span>';
-  const [chat, embed, strategy, chunk, collection] = signature.split('|');
+  if (!signature) return `<span class="none">${S.unknownConfig}</span>`;
+  const [chat, embed, strategy, chunk, collection] = signature.split('|').map(esc);
   return `<div class="cfg"><b>${chat}</b><small>${embed} &middot; ${strategy} @ ${chunk} &middot; <code>${collection}</code></small></div>`;
 }
 
@@ -100,8 +171,8 @@ function thumbs(up, down) {
 function configTable(rows) {
   return `<div class="scroll"><table>
     <thead><tr>
-      <th>Configuration</th><th class="num">Answers</th>
-      <th>Faithfulness</th><th>Relevance</th><th class="num">Thumbs</th>
+      <th>${S.colConfig}</th><th class="num">${S.colAnswers}</th>
+      <th>${S.colFaithfulness}</th><th>${S.colRelevance}</th><th class="num">${S.colThumbs}</th>
     </tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td>${config(r.config_signature)}</td>
@@ -122,15 +193,13 @@ function failureTable(failures) {
   for (const f of failures) {
     totals[f.config_signature] = (totals[f.config_signature] || 0) + f.n;
   }
-  return `<h2>Reported failures</h2>
-  <p class="sub" style="margin:-.4rem 0 .75rem">
-    Thumbs-down comments, classified. Share is of that configuration's own complaints.
-  </p>
+  return `<h2>${S.failures}</h2>
+  <p class="sub" style="margin:-.4rem 0 .75rem">${S.failuresSub}</p>
   <div class="scroll"><table>
-    <thead><tr><th>Configuration</th><th>Category</th><th class="num">Count</th><th>Share</th></tr></thead>
+    <thead><tr><th>${S.colConfig}</th><th>${S.colCategory}</th><th class="num">${S.colCount}</th><th>${S.colShare}</th></tr></thead>
     <tbody>${failures.map(f => `<tr>
       <td>${config(f.config_signature)}</td>
-      <td>${f.failure_category.replace(/_/g, ' ')}</td>
+      <td>${esc(S.categories[f.failure_category] || f.failure_category)}</td>
       <td class="num">${f.n}</td>
       <td>${bar(f.n / totals[f.config_signature])}</td>
     </tr>`).join('')}</tbody>
@@ -138,14 +207,10 @@ function failureTable(failures) {
 }
 
 const EMPTY = `<div class="empty">
-  <p><strong>No scores recorded yet.</strong> Turn evaluation on in your
-  <code>rag.config.yaml</code> and ask the assistant a question:</p>
+  <p><strong>${S.emptyTitle}</strong> ${S.emptyBody}</p>
   <pre>evaluation:
   enabled: true</pre>
-  <p style="margin:.75rem 0 0">Scoring is off by default because each answer costs
-  two judge calls plus one embedding call. To compare two configurations, ingest
-  each into its own collection &mdash; they are grouped by model, embedding model,
-  chunking and collection.</p>
+  <p style="margin:.75rem 0 0">${S.emptyWhy}</p>
 </div>`;
 
 fetch('api/stats')
@@ -157,6 +222,6 @@ fetch('api/stats')
   })
   .catch(err => {
     document.getElementById('body').innerHTML =
-      `<div class="empty"><p><strong>Could not load statistics.</strong></p><pre>${err}</pre></div>`;
+      `<div class="empty"><p><strong>${S.loadError}</strong></p><pre>${esc(err)}</pre></div>`;
   });
 </script>

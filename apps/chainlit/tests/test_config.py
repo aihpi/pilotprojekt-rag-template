@@ -104,4 +104,4 @@ def test_settings_shim_exports_expected_constants():
     assert settings.MAX_TOP_K == settings.TOP_K
     assert settings.CHUNK_MAX_CHARS > 0
     assert settings.SYSTEM_PROMPT_PATH.is_file()
-    assert isinstance(settings.STARTER_QUESTIONS, list)
+    assert isinstance(settings.starter_questions(), list)

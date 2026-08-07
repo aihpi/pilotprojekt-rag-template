@@ -281,7 +281,10 @@ class PromptConfig(BaseModel):
 
     system_prompt_path: str | None = None
     """Path to a markdown system prompt (env ``SYSTEM_PROMPT_PATH`` overrides)."""
-    starter_questions: list[str] = Field(default_factory=list)
+    starter_questions: list[str] | dict[str, list[str]] = Field(default_factory=list)
+    """Questions offered on the welcome screen. Either one list, or one list per
+    interface language (``{de: [...], en: [...]}``) for an instance whose users do not
+    all read the same one. Resolve with ``settings.starter_questions(language)``."""
     starter_icons: list[str] = Field(default_factory=list)
     auto_generate: bool = True
     """When no system prompt is configured/loaded, generate one at startup with

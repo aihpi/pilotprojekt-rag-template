@@ -126,11 +126,20 @@ prompt:
   # No system_prompt_path -> the app generates one at startup from the template
   # and a sample of the indexed chunks, then caches it (see docs/prompts.md).
   auto_generate: true
+  # One list per interface language. Chainlit picks by the browser's language (or by
+  # [UI] language in .chainlit/config.toml); anything that is not German gets the
+  # English list. A plain list works too, and every language then sees it.
   starter_questions:
-    - "Welche Paper sind in der Wissensbasis enthalten?"
-    - "Fasse die zentralen Ergebnisse des Kage-2018-Papers zusammen."
-    - "Welche Methoden verwenden diese Paper?"
-    - "Was sagen die Paper über die Grenzen ihres Ansatzes?"
+    de:
+      - "Welche Paper sind in der Wissensbasis enthalten?"
+      - "Fasse die zentralen Ergebnisse des Kage-2018-Papers zusammen."
+      - "Welche Methoden verwenden diese Paper?"
+      - "Was sagen die Paper über die Grenzen ihres Ansatzes?"
+    en:
+      - "Which papers are in the knowledge base?"
+      - "Summarize the main findings of the Kage 2018 paper."
+      - "Which methods do these papers use?"
+      - "What do the papers say about the limits of their approach?"
 
 # Optional roles: each scopes the prompt and (via retrieval_filters) retrieval.
 # profiles:
