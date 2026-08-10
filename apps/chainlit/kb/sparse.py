@@ -40,8 +40,9 @@ def _token_id(token: str) -> int:
     # ponytail: crc32 hashing instead of a persisted vocabulary — nothing to
     # store, nothing to migrate, and ids stay stable across processes. Swap in a
     # real vocabulary if the corpus ever reaches millions of distinct terms and
-    # collisions start costing precision.
-    return zlib.crc32(token.encode("utf-8")) & 0x7FFFFFFF
+    # collisions start costing precision. Qdrant's sparse indices are u32, which
+    # is exactly crc32's range — no masking, masking would double collisions.
+    return zlib.crc32(token.encode("utf-8"))
 
 
 def sparse_vector(text: str) -> "SparseVector":

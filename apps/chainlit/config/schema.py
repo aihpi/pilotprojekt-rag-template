@@ -222,8 +222,9 @@ class RetrievalConfig(BaseModel):
     distribution-normalized scores. RRF is the safer default; DBSF can win when
     one of the two retrievers is clearly stronger. Measure before switching."""
     prefetch_limit: int = Field(default=30, ge=1)
-    """``hybrid`` only: candidates each leg retrieves before fusion. Must exceed
-    ``top_k`` or fusion has nothing to reorder."""
+    """``hybrid`` only: candidates each leg retrieves before fusion. Must be at
+    least ``max_top_k`` (enforced) — below it, two legs returning the same
+    candidates can fuse to fewer than ``top_k`` results."""
     payload_indexes: list[str] = Field(default_factory=list)
     """Metadata fields to build Qdrant keyword indexes on."""
     filterable_fields: list[str] = Field(default_factory=list)
@@ -236,6 +237,12 @@ class RetrievalConfig(BaseModel):
         elif self.max_top_k < self.top_k:
             raise ValueError(
                 f"retrieval.max_top_k ({self.max_top_k}) must be >= top_k ({self.top_k})"
+            )
+        if self.prefetch_limit < self.max_top_k:
+            raise ValueError(
+                f"retrieval.prefetch_limit ({self.prefetch_limit}) must be >= "
+                f"max_top_k ({self.max_top_k}); a smaller candidate pool can fuse "
+                f"to fewer than top_k results"
             )
         return self
 

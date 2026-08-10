@@ -212,6 +212,13 @@ class FakeClient:
         self.collections.add(collection_name)
         self.sparse_config = sparse_vectors_config
 
+    def get_collection(self, name):
+        # Collections seeded via the constructor mimic legacy dense-only ones;
+        # those created through create_collection report what was configured.
+        sparse = getattr(self, "sparse_config", None)
+        params = type("P", (), {"sparse_vectors": dict(sparse) if sparse else None})()
+        return type("I", (), {"config": type("Cfg", (), {"params": params})()})()
+
     def delete_collection(self, collection_name, timeout=None):
         self.collections.discard(collection_name)
         self.points.clear()

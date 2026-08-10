@@ -145,12 +145,14 @@ def _supports_sparse(client, name: str) -> bool:
     Collections created before sparse vectors existed are dense-only, and Qdrant
     rejects a point carrying a vector name the collection does not declare — so
     incremental ingest into an old collection must keep writing plain dense.
+
+    A lookup failure propagates deliberately: guessing "legacy" on error would
+    write dense-only points into a sparse-capable collection, leaving permanent
+    silent gaps in the lexical index. The collection exists at every call site
+    (``_ensure_collection`` ran first), so a failure here is a real fault.
     """
-    try:
-        params = client.get_collection(name).config.params
-        return SPARSE_VECTOR in (params.sparse_vectors or {})
-    except Exception:  # noqa: BLE001 — treat unknown as legacy dense-only
-        return False
+    params = client.get_collection(name).config.params
+    return SPARSE_VECTOR in (params.sparse_vectors or {})
 
 
 def _ensure_payload_indexes(client, name: str, fields: list[str]) -> None:

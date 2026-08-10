@@ -153,6 +153,18 @@ def test_new_collections_always_get_the_sparse_vector(monkeypatch):
         assert point.vector[SPARSE_VECTOR].indices, "lexical vector must not be empty"
 
 
+def test_prefetch_limit_below_max_top_k_is_rejected():
+    """A pool smaller than the largest permitted top_k can fuse to fewer than
+    top_k results — silently short answers, so it fails at config load instead."""
+    from pydantic import ValidationError
+
+    from config.schema import RetrievalConfig
+
+    with pytest.raises(ValidationError, match="prefetch_limit"):
+        RetrievalConfig(top_k=5, max_top_k=50, prefetch_limit=30)
+    RetrievalConfig(top_k=5, max_top_k=30, prefetch_limit=30)  # equality is legal
+
+
 def test_legacy_dense_only_collections_keep_getting_plain_vectors(monkeypatch):
     """Qdrant rejects a vector name the collection does not declare — incremental
     ingest into a pre-sparse collection must not start failing."""

@@ -61,8 +61,10 @@ merge. The data underneath is the same either way.
   when scores are poorly spread. Try both and measure; do not switch on principle.
 
 **`prefetch_limit`** — how many candidates each search contributes before merging.
-It must be larger than `top_k` or there is nothing to reorder. 30 into 5 is a
-reasonable start; raising it costs a little query time and nothing else.
+It must be at least `max_top_k` — the config loader enforces this, because a smaller
+pool whose two legs return the same candidates can fuse to fewer than `top_k`
+results. 30 into 5 is a reasonable start; raising it costs a little query time and
+nothing else.
 
 ## What this costs
 

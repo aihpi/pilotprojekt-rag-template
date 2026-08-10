@@ -65,9 +65,10 @@ dann das Zusammenführen. Die Daten darunter sind in beiden Fällen dieselben.
   nicht aus Prinzip umstellen.
 
 **`prefetch_limit`** — wie viele Kandidaten jede Suche vor dem Zusammenführen
-beisteuert. Der Wert muss größer sein als `top_k`, sonst gibt es nichts umzusortieren.
-30 auf 5 ist ein vernünftiger Anfang; ein höherer Wert kostet etwas Anfragezeit und
-sonst nichts.
+beisteuert. Der Wert muss mindestens `max_top_k` betragen — das erzwingt der
+Config-Loader, denn ein kleinerer Pool, dessen beide Zweige dieselben Kandidaten
+liefern, kann auf weniger als `top_k` Ergebnisse zusammenschmelzen. 30 auf 5 ist
+ein vernünftiger Anfang; ein höherer Wert kostet etwas Anfragezeit und sonst nichts.
 
 ## Was das kostet
 
