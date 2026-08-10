@@ -88,6 +88,85 @@ def test_empty_text_yields_an_empty_vector_rather_than_raising():
 
 
 # --------------------------------------------------------------------------- #
+# ingest — sparse is always written where the collection supports it
+# --------------------------------------------------------------------------- #
+class _IngestClient:
+    """Minimal client for ingest_chunks: records creations and upserts."""
+
+    def __init__(self, existing_sparse: bool | None = None):
+        # None -> collection does not exist yet; bool -> exists with/without sparse
+        self._sparse = existing_sparse
+        self.upserted: list = []
+
+    def get_collections(self):
+        cols = [] if self._sparse is None else [type("C", (), {"name": "kb"})]
+        return type("R", (), {"collections": cols})()
+
+    def create_collection(self, collection_name, vectors_config=None, sparse_vectors_config=None):
+        self._sparse = sparse_vectors_config is not None
+
+    def get_collection(self, name):
+        sparse = {"text": object()} if self._sparse else None
+        params = type("P", (), {"sparse_vectors": sparse})()
+        return type("I", (), {"config": type("Cfg", (), {"params": params})()})()
+
+    def create_payload_index(self, **kw):
+        pass
+
+    def query_points(self, **kw):  # sentinel read during the model guard
+        return type("R", (), {"points": []})()
+
+    def scroll(self, *a, **kw):
+        return [], None
+
+    def upsert(self, collection_name, points):
+        self.upserted.extend(points)
+
+
+def _run_ingest(client, monkeypatch, texts=("BSI-Standard 200-2 gilt.",)):
+    import llm
+    from kb.chunkers.base import Chunk
+    from kb import ingestion_pipeline as pipeline
+
+    async def fake_embed(batch):
+        return [[0.1] * 4 for _ in batch]
+
+    monkeypatch.setattr(llm, "embed", fake_embed)
+    monkeypatch.setattr(pipeline, "get_client", lambda: client)
+    chunks = [Chunk(text=t, metadata={"source_file": "d.md"}, doc_id=f"d:{i}") for i, t in enumerate(texts)]
+    return asyncio.run(pipeline.ingest_chunks(chunks, collection="kb", embed_model="m"))
+
+
+def test_new_collections_always_get_the_sparse_vector(monkeypatch):
+    """`retrieval.hybrid` must be a pure query-time switch: the data written
+    today has to support the flag being flipped tomorrow without a re-ingest."""
+    client = _IngestClient(existing_sparse=None)
+    _run_ingest(client, monkeypatch)
+
+    assert client._sparse is True, "new collections must declare the sparse vector"
+    chunk_points = [p for p in client.upserted if not (p.payload or {}).get("_meta")]
+    assert chunk_points, "expected at least one chunk point"
+    for point in chunk_points:
+        assert isinstance(point.vector, dict) and SPARSE_VECTOR in point.vector, (
+            "chunk written without its lexical vector"
+        )
+        assert point.vector[SPARSE_VECTOR].indices, "lexical vector must not be empty"
+
+
+def test_legacy_dense_only_collections_keep_getting_plain_vectors(monkeypatch):
+    """Qdrant rejects a vector name the collection does not declare — incremental
+    ingest into a pre-sparse collection must not start failing."""
+    client = _IngestClient(existing_sparse=False)
+    _run_ingest(client, monkeypatch)
+
+    chunk_points = [p for p in client.upserted if not (p.payload or {}).get("_meta")]
+    for point in chunk_points:
+        assert not isinstance(point.vector, dict), (
+            "legacy collection got a named vector it cannot accept"
+        )
+
+
+# --------------------------------------------------------------------------- #
 # retrieve() — the fused query
 # --------------------------------------------------------------------------- #
 class _Point:

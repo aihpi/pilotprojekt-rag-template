@@ -119,9 +119,7 @@ def _distance(name: str):
     return {"cosine": Distance.COSINE, "dot": Distance.DOT, "euclid": Distance.EUCLID}[name]
 
 
-def _ensure_collection(
-    client, name: str, size: int, distance: str, recreate: bool, hybrid: bool
-) -> None:
+def _ensure_collection(client, name: str, size: int, distance: str, recreate: bool) -> None:
     from qdrant_client.models import Modifier, SparseVectorParams, VectorParams
 
     if recreate and collection_exists(client, name):
@@ -130,13 +128,29 @@ def _ensure_collection(
         client.create_collection(
             collection_name=name,
             vectors_config=VectorParams(size=size, distance=_distance(distance)),
-            # The dense vector stays unnamed, so a non-hybrid collection is
-            # byte-identical to before. IDF is applied server-side, which is why
-            # the client only ever sends term frequencies (see kb/sparse.py).
-            sparse_vectors_config=(
-                {SPARSE_VECTOR: SparseVectorParams(modifier=Modifier.IDF)} if hybrid else None
-            ),
+            # Every new collection gets the sparse (lexical) vector, whether or
+            # not hybrid search is on: the vector is a locally computed word
+            # count, so writing it costs nothing, and its presence makes
+            # `retrieval.hybrid` a pure query-time switch — no re-ingest to turn
+            # it on later, and one collection can A/B dense vs. fused retrieval.
+            # IDF is applied server-side, which is why the client only ever
+            # sends term frequencies (see kb/sparse.py).
+            sparse_vectors_config={SPARSE_VECTOR: SparseVectorParams(modifier=Modifier.IDF)},
         )
+
+
+def _supports_sparse(client, name: str) -> bool:
+    """Whether the collection declares our sparse vector.
+
+    Collections created before sparse vectors existed are dense-only, and Qdrant
+    rejects a point carrying a vector name the collection does not declare — so
+    incremental ingest into an old collection must keep writing plain dense.
+    """
+    try:
+        params = client.get_collection(name).config.params
+        return SPARSE_VECTOR in (params.sparse_vectors or {})
+    except Exception:  # noqa: BLE001 — treat unknown as legacy dense-only
+        return False
 
 
 def _ensure_payload_indexes(client, name: str, fields: list[str]) -> None:
@@ -252,18 +266,11 @@ async def ingest_chunks(
     batch_size: int | None = None,
     max_batch_chars: int | None = None,
     embed_model: str | None = None,
-    hybrid: bool = False,
     progress: ProgressCallback | None = None,
 ) -> int:
     from qdrant_client.models import PointStruct
 
     from llm import embed
-
-    def _vector(dense: list[float], text: str):
-        """Dense alone, or dense + the lexical vector when hybrid is on."""
-        if not hybrid:
-            return dense
-        return {"": dense, SPARSE_VECTOR: sparse_vector(text)}
 
     if not chunks:
         logger.info("ingest: no chunks to ingest")
@@ -286,9 +293,18 @@ async def ingest_chunks(
             )
 
     first_vec = (await embed([chunks[0].text]))[0]
-    _ensure_collection(client, collection, len(first_vec), distance, recreate, hybrid)
+    _ensure_collection(client, collection, len(first_vec), distance, recreate)
     _ensure_payload_indexes(client, collection, payload_indexes or [])
     _write_sentinel(client, collection, embed_model, len(first_vec), first_vec)
+
+    # Legacy dense-only collections (created before sparse vectors) reject named
+    # vectors, so attach the lexical vector only where the schema declares it.
+    has_sparse = _supports_sparse(client, collection)
+
+    def _vector(dense: list[float], text: str):
+        if not has_sparse:
+            return dense
+        return {"": dense, SPARSE_VECTOR: sparse_vector(text)}
 
     client.upsert(
         collection_name=collection,
@@ -568,7 +584,6 @@ async def ingest_all(
             payload_indexes=config.retrieval.payload_indexes,
             recreate=recreate,
             embed_model=config.models.embed_model,
-            hybrid=config.retrieval.hybrid,
             progress=progress,
         )
     elif gate.skipped and not removed:

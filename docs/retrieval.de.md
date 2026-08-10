@@ -35,23 +35,24 @@ retrieval:
   prefetch_limit: 30 # Kandidaten pro Zweig vor dem Zusammenführen
 ```
 
-!!! warning "Bestehende Collections müssen neu indexiert werden"
-    Der lexikalische Vektor entsteht **beim Ingest**. Punkte, die vor dem Einschalten
-    von `hybrid` indexiert wurden, haben keinen — die lexikalische Hälfte der Suche
-    findet dann stillschweigend nichts, und du bekommst Dense-Verhalten mit
-    Zusatzaufwand. Also neu indexieren mit `--recreate`:
+Der Ingest schreibt den lexikalischen Vektor **immer** — er ist eine lokal
+berechnete Wortzählung und kostet nichts. `hybrid` ist damit ein reiner
+Anfrage-Schalter: umlegen, neu starten, vergleichen, zurücklegen. Kein erneuter
+Ingest, und eine einzige Collection taugt für ein Dense-gegen-Hybrid-A/B.
+
+!!! warning "Collections von vor diesem Feature brauchen einmalig einen Neuaufbau"
+    Eine Collection, die vor den lexikalischen Vektoren angelegt wurde, ist rein
+    dense — ihre Punkte können nachträglich keinen bekommen. Mit `hybrid: false`
+    funktioniert sie unverändert; für Hybrid einmal neu indexieren:
 
     ```bash
     docker compose run --rm ingest python -m kb.ingest --recreate
     ```
 
-    Es warnt dich nichts davor, denn eine Collection mit halb gefülltem
-    lexikalischem Index sieht von außen völlig gesund aus.
-
 ## Die drei Einstellungen
 
-**`hybrid`** — standardmäßig aus. Einschalten ändert sowohl den Ingest (ein zweiter
-Vektor pro Chunk) als auch die Anfrage (zwei Suchen, dann Zusammenführen).
+**`hybrid`** — standardmäßig aus. Wirkt nur auf die Anfrage: zwei Suchen statt einer,
+dann das Zusammenführen. Die Daten darunter sind in beiden Fällen dieselben.
 
 **`fusion`** — wie aus zwei Ranglisten eine wird.
 
@@ -120,7 +121,6 @@ Gewinns aus und steht in `apps/chainlit/kb/sparse.py`, falls dein Korpus anders
 tokenisiert werden muss.
 
 Bei der Anfrage wird die Frage genauso tokenisiert, beide Suchen laufen mit je
-`prefetch_limit` Treffern, und Qdrant führt sie auf `top_k` zusammen.
-
-Der dense Vektor bleibt unbenannt. Eine Collection mit `hybrid: false` ist damit
-Byte für Byte identisch mit einer, die vor diesem Feature gebaut wurde.
+`prefetch_limit` Treffern, und Qdrant führt sie auf `top_k` zusammen. Mit
+`hybrid: false` bleibt die Anfrage die gewohnte einzelne Dense-Suche — der
+lexikalische Vektor liegt dann ungenutzt bereit, bis der Schalter umgelegt wird.

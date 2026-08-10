@@ -33,23 +33,23 @@ retrieval:
   prefetch_limit: 30 # candidates per leg before merging
 ```
 
-!!! warning "Existing collections need a re-ingest"
-    The lexical vector is written **at ingest time**. Points indexed before you
-    enabled `hybrid` do not have one, so the lexical half of the search silently
-    finds nothing and you get dense behaviour with extra steps. Re-ingest with
-    `--recreate`:
+Ingest **always** writes the lexical vector — it is a locally computed word count and
+costs nothing — so `hybrid` is a pure query-time switch: flip it, restart, compare,
+flip it back. No re-ingest, and one collection can serve a dense-vs-hybrid A/B.
+
+!!! warning "Collections from before this feature need one re-ingest"
+    A collection created before lexical vectors existed is dense-only, and its
+    points cannot carry one retroactively. It keeps working fine with
+    `hybrid: false`; to turn hybrid on, re-ingest once with `--recreate`:
 
     ```bash
     docker compose run --rm ingest python -m kb.ingest --recreate
     ```
 
-    Nothing warns you about this, because a collection with a half-populated
-    lexical index looks perfectly healthy from the outside.
-
 ## The three settings
 
-**`hybrid`** — off by default. Turning it on changes both ingest (a second vector per
-chunk) and query (two searches, then a merge).
+**`hybrid`** — off by default. Query-time only: two searches instead of one, then a
+merge. The data underneath is the same either way.
 
 **`fusion`** — how the two rankings become one.
 
@@ -113,7 +113,6 @@ common words — that detail is most of the win, and it lives in
 `apps/chainlit/kb/sparse.py` if your corpus needs different tokenizing.
 
 At query time the question is tokenized the same way, both searches run with
-`prefetch_limit` results each, and Qdrant fuses them down to `top_k`.
-
-The dense vector stays unnamed, so a collection with `hybrid: false` is byte-identical
-to one built before this feature existed.
+`prefetch_limit` results each, and Qdrant fuses them down to `top_k`. With
+`hybrid: false` the query is the same single dense search as always — the lexical
+vector just sits unused until you flip the switch.
