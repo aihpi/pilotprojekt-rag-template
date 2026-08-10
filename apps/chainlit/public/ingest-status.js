@@ -435,3 +435,182 @@
     start();
   }
 })();
+
+/*
+ * A second chip: the active configuration, next to the watcher badge.
+ *
+ * Answers "which config is this container actually running?" from the browser —
+ * instance name in the chip, the details (models, collection, chunking,
+ * retrieval switches) in a hover panel. Lives in this file because Chainlit
+ * loads exactly one custom_js (see the header comment above).
+ *
+ * Unlike the watcher badge this is static for the process lifetime, so there is
+ * no polling: fetch until the first success (401 before login is normal), then
+ * render once and stop.
+ */
+(function () {
+  "use strict";
+
+  var ENDPOINT = "/config-info";
+  var RETRY_MS = 5000;
+  var ID = "rag-config-info";
+  var ANCHOR_IDS = ["rag-ingest-status", "readme-button"];
+
+  var info = null;
+
+  function styles() {
+    if (document.getElementById(ID + "-styles")) return;
+    var css = document.createElement("style");
+    css.id = ID + "-styles";
+    css.textContent = [
+      /* Same furniture as the watcher badge, permanently in its neutral look. */
+      "#" + ID + "{display:inline-flex;align-items:center;gap:7px;",
+      "box-sizing:border-box;vertical-align:middle;margin-left:6px;",
+      "height:30px;padding:0 11px;border-radius:15px;",
+      "font-size:12.5px;font-weight:500;line-height:1;font-family:inherit;",
+      "max-width:min(260px,32vw);border:1px solid rgba(148,163,184,.34);",
+      "background:rgba(148,163,184,.18);color:#475569;cursor:default;",
+      "user-select:none}",
+      "html.dark #" + ID + ",.dark #" + ID + "{background:rgba(148,163,184,.26);",
+      "color:#e2e8f0;border-color:rgba(148,163,184,.42)}",
+      "#" + ID + " .rci-label{white-space:nowrap;overflow:hidden;",
+      "text-overflow:ellipsis}",
+      "#" + ID + " .rci-gear{font-size:12px;line-height:1;opacity:.85}",
+
+      "#" + ID + "-panel{position:fixed;z-index:2147483001;",
+      "min-width:250px;max-width:min(380px,calc(100vw - 24px));",
+      "padding:10px 12px;border-radius:12px;font-size:12px;font-weight:400;",
+      "line-height:1.5;text-align:left;color:#0f172a;background:#fff;",
+      "border:1px solid #e2e8f0;box-shadow:0 10px 28px rgba(15,23,42,.16);",
+      "opacity:0;visibility:hidden;transform:translateY(-4px);pointer-events:none;",
+      "transition:opacity .15s ease,transform .15s ease,visibility .15s}",
+      "html.dark #" + ID + "-panel,.dark #" + ID + "-panel{color:#e8eef8;",
+      "background:#111826;border-color:#2b3648;box-shadow:0 10px 28px rgba(0,0,0,.5)}",
+      "#" + ID + "-panel[data-open='1']{opacity:1;visibility:visible;transform:translateY(0)}",
+      "#" + ID + "-panel .rci-title{font-weight:600;margin-bottom:6px}",
+      "#" + ID + "-panel .rci-row{display:flex;gap:8px;margin-top:2px}",
+      "#" + ID + "-panel .rci-key{flex:0 0 92px;opacity:.7}",
+      "#" + ID + "-panel .rci-val{word-break:break-word}",
+      "#" + ID + "-panel .rci-hint{margin-top:8px;opacity:.7}",
+      "@media (max-width:560px){#" + ID + "{max-width:38vw}",
+      "#" + ID + " .rci-label{display:none}}",
+    ].join("");
+    document.head.appendChild(css);
+  }
+
+  function esc(text) {
+    var d = document.createElement("div");
+    d.textContent = text == null ? "" : String(text);
+    return d.innerHTML;
+  }
+
+  function row(key, value) {
+    return (
+      '<div class="rci-row"><span class="rci-key">' + esc(key) +
+      '</span><span class="rci-val">' + esc(value) + "</span></div>"
+    );
+  }
+
+  function panelHtml() {
+    var r = info.retrieval || {};
+    var retrieval = r.hybrid
+      ? "hybrid (" + r.fusion + ", " + r.prefetch_limit + "→" + r.top_k + ")"
+      : "dense, top_k " + r.top_k;
+    var chunking = (info.sources || [])
+      .map(function (s) { return s.name + ": " + s.chunking; })
+      .join(" · ");
+    var html = '<div class="rci-title">Active configuration</div>';
+    html += row("config", info.name + " (" + info.config_path + ")");
+    html += row("collection", info.collection);
+    html += row("chat model", info.chat_model + " (default)");
+    html += row("embedding", info.embed_model);
+    if (chunking) html += row("chunking", chunking);
+    html += row("retrieval", retrieval);
+    html += row("images", info.images_mode);
+    html += row("tools", (info.tools || []).join(", "));
+    html += '<div class="rci-hint">Set via RAG_CONFIG — restart to change.</div>';
+    return html;
+  }
+
+  function panelElement() {
+    var panel = document.getElementById(ID + "-panel");
+    if (panel) return panel;
+    panel = document.createElement("div");
+    panel.id = ID + "-panel";
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  function positionPanel() {
+    var el = document.getElementById(ID);
+    var panel = document.getElementById(ID + "-panel");
+    if (!el || !panel) return;
+    var r = el.getBoundingClientRect();
+    panel.style.left = "0px";
+    panel.style.top = r.bottom + 8 + "px";
+    var w = panel.offsetWidth;
+    panel.style.left =
+      Math.min(
+        Math.max(8, r.left + r.width / 2 - w / 2),
+        Math.max(8, window.innerWidth - w - 8)
+      ) + "px";
+  }
+
+  function place(el) {
+    for (var i = 0; i < ANCHOR_IDS.length; i++) {
+      var anchor = document.getElementById(ANCHOR_IDS[i]);
+      if (anchor && anchor.parentNode) {
+        if (el.previousElementSibling !== anchor) {
+          anchor.parentNode.insertBefore(el, anchor.nextSibling);
+        }
+        return;
+      }
+    }
+    if (!el.parentNode) document.body.appendChild(el);
+  }
+
+  function render() {
+    styles();
+    var el = document.getElementById(ID);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = ID;
+      el.innerHTML =
+        '<span class="rci-gear">⚙</span><span class="rci-label"></span>';
+      el.addEventListener("mouseenter", function () {
+        panelElement().setAttribute("data-open", "1");
+        positionPanel();
+      });
+      el.addEventListener("mouseleave", function () {
+        panelElement().removeAttribute("data-open");
+      });
+    }
+    el.querySelector(".rci-label").textContent = info.name;
+    el.setAttribute("title", info.name);
+    panelElement().innerHTML = panelHtml();
+    place(el);
+  }
+
+  function fetchOnce() {
+    fetch(ENDPOINT, { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return setTimeout(fetchOnce, RETRY_MS);
+        info = data;
+        render();
+        // The header is React-rendered; put the chip back after re-renders.
+        new MutationObserver(function () {
+          var el = document.getElementById(ID);
+          if (el) place(el);
+        }).observe(document.documentElement, { childList: true, subtree: true });
+        window.addEventListener("resize", positionPanel);
+      })
+      .catch(function () { setTimeout(fetchOnce, RETRY_MS); });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", fetchOnce);
+  } else {
+    fetchOnce();
+  }
+})();

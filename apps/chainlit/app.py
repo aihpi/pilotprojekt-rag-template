@@ -2145,6 +2145,37 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+def _config_info_payload(cfg) -> dict:
+    """What the ``/config-info`` header chip shows. Pure so it is testable
+    without booting Chainlit. ``chat_model`` is the instance default — users
+    may override it per-user in the settings panel."""
+    return {
+        "name": cfg.name,
+        "config_path": os.getenv("RAG_CONFIG", "config/default.yaml"),
+        "language": cfg.language,
+        "collection": cfg.vector_store.collection,
+        "chat_model": cfg.models.chat_model,
+        "embed_model": cfg.models.embed_model,
+        "sources": [
+            {
+                "name": src.name,
+                "format": src.format,
+                "chunking": (src.chunking or cfg.chunking).strategy,
+            }
+            for src in cfg.data_sources
+        ],
+        "retrieval": {
+            "top_k": cfg.retrieval.top_k,
+            "hybrid": cfg.retrieval.hybrid,
+            "fusion": cfg.retrieval.fusion,
+            "prefetch_limit": cfg.retrieval.prefetch_limit,
+            "score_threshold": cfg.retrieval.score_threshold,
+        },
+        "images_mode": cfg.images.mode,
+        "tools": list(cfg.tools.enabled) or ["search"],
+    }
+
+
 @cl.on_app_startup
 async def on_app_startup() -> None:
     global SYSTEM_PROMPT
@@ -2281,6 +2312,19 @@ async def on_app_startup() -> None:
         from document_watch import get_status
 
         return {**get_status(), "lang": lang}
+
+    @chainlit_fastapi_app.get("/config-info")
+    async def config_info(current_user=Depends(get_current_user)):
+        """The active instance configuration, for the header chip in the browser.
+
+        Answers "which config is this container actually running?" without shell
+        access: instance name, models, collection and the retrieval switches.
+        Behind auth like every other route here — the values name your models,
+        collection and document folders.
+        """
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return _config_info_payload(get_config())
 
     # Registration endpoint for self-registration
     @chainlit_fastapi_app.post("/auth/register")
@@ -2466,6 +2510,7 @@ async def on_app_startup() -> None:
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-status")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-stats")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-gold")
+    _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/config-info")
 
     _patch_cookie_security_openapi_model()
 
