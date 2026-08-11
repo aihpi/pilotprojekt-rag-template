@@ -104,7 +104,10 @@ def test_the_dashboard_page_is_served(client):
 def test_stats_are_empty_on_a_fresh_database(client):
     # The page keys its "turn evaluation on" panel off an empty configs list, so
     # empty must mean empty rather than an error.
-    assert client.get("/api/stats").json() == {"configs": [], "failures": []}
+    body = client.get("/api/stats").json()
+    assert body["configs"] == [] and body["failures"] == []
+    assert body["gold"] == [] and body["jobs"] == []
+    assert body["benchmark"] == {"gold_turns_total": 0, "runs": []}
 
 
 def test_stats_report_scores_and_failures_together(client, monkeypatch):
@@ -137,3 +140,90 @@ def test_the_reason_strings_are_returned_but_not_stored(client, monkeypatch):
     assert response.json()["faithfulness_reason"] == "claim 2 unsupported"
     (row,) = _rows(main.DB_PATH)
     assert "faithfulness_reason" not in row
+
+
+# --------------------------------------------------------------------------- #
+# Gold, ratings and benchmark jobs
+# --------------------------------------------------------------------------- #
+
+GOLD_TURNS = [
+    {"user": "Welche Paper gibt es?", "assistant": "Drei Paper. Quelle 1"},
+    {"user": "Fasse das erste zusammen.", "assistant": "Es zeigt X. Quelle 1"},
+]
+
+
+def _gold_body(**kw):
+    return {"turns": GOLD_TURNS, "config_signature": SIG, "message_id": "m-1", **kw}
+
+
+def test_a_replay_score_carries_its_provenance_and_reference(client, monkeypatch):
+    captured = {}
+
+    async def fake(question, answer, contexts, **kwargs):
+        captured.update(kwargs)
+        return {"faithfulness": 1.0, "similarity": 0.8}
+
+    monkeypatch.setattr(main.metrics, "score", fake)
+    client.post("/api/score", json=_body(
+        metrics=["faithfulness", "similarity"],
+        reference="Die Gold-Antwort.",
+        source="replay", run_label="run-1", gold_id="g-1", gold_turn=2,
+    ))
+
+    assert captured["reference"] == "Die Gold-Antwort.", "the metric must see the gold answer"
+    (row,) = _rows(main.DB_PATH)
+    assert (row["source"], row["run_label"], row["gold_id"], row["gold_turn"]) == (
+        "replay", "run-1", "g-1", 2
+    )
+    assert row["similarity"] == 0.8
+
+
+def test_gold_round_trips_and_marking_twice_is_idempotent(client):
+    first = client.post("/api/gold", json=_gold_body()).json()
+    second = client.post("/api/gold", json=_gold_body(turns=GOLD_TURNS[:1])).json()
+    assert first["gold_id"] == second["gold_id"]
+
+    (entry,) = client.get("/api/gold").json()["gold"]
+    assert entry["turns"] == GOLD_TURNS, "the first marking wins; the retry changes nothing"
+
+
+def test_a_rating_outside_the_scale_is_a_422(client):
+    assert client.post("/api/rating", json={"stars": 6}).status_code == 422
+    assert client.post("/api/rating", json={"stars": 0}).status_code == 422
+    assert client.post("/api/rating", json={"stars": 4, "config_signature": SIG}).status_code == 200
+
+
+def test_a_benchmark_without_gold_is_refused(client):
+    response = client.post("/api/benchmark", json={"chat_model": "gemma-4-31b"})
+    assert response.status_code == 409, "a run over nothing would report itself as a benchmark"
+
+
+def test_the_job_lifecycle_create_claim_progress_done(client):
+    client.post("/api/gold", json=_gold_body())
+    queued = client.post("/api/benchmark", json={"chat_model": "gemma-4-31b"}).json()
+    assert queued["status"] == "queued"
+
+    job = client.get("/api/benchmark/next").json()
+    assert job["chat_model"] == "gemma-4-31b"
+    assert client.get("/api/benchmark/next").json() == {}, "claimed means gone"
+
+    client.post(f"/api/benchmark/{job['id']}", json={"total_turns": 2})
+    client.post(f"/api/benchmark/{job['id']}", json={"done_turns": 2, "status": "done"})
+
+    (listed,) = client.get("/api/stats").json()["jobs"]
+    assert (listed["status"], listed["done_turns"], listed["total_turns"]) == ("done", 2, 2)
+
+
+def test_stats_keep_replay_rows_out_of_configs_but_in_benchmark(client, monkeypatch):
+    _fake_score(monkeypatch, {"faithfulness": 1.0, "similarity": 0.9})
+    client.post("/api/gold", json=_gold_body())
+    client.post("/api/score", json=_body(
+        metrics=["faithfulness", "similarity"], reference="ref",
+        source="replay", run_label="run-1", gold_id="g-1", gold_turn=1,
+    ))
+
+    payload = client.get("/api/stats").json()
+    assert payload["configs"] == [], "replay rows must not appear as live usage"
+    (run,) = payload["benchmark"]["runs"]
+    assert run["run_label"] == "run-1" and run["similarity"] == 0.9
+    assert payload["benchmark"]["gold_turns_total"] == 2

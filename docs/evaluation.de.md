@@ -23,6 +23,9 @@ Thema vorbeigehen.
 
 Keine der beiden braucht eine von Hand geschriebene „richtige Antwort". Genau
 deshalb funktionieren sie auf den echten Gesprächen, die sowieso schon stattfinden.
+(Eine dritte Kennzahl, **Ähnlichkeit**, vergleicht sehr wohl gegen eine gespeicherte
+Referenzantwort — sie taucht nur in Benchmark-Wiederholungen auf, siehe
+[Gold-Datensatz & Benchmarks](#gold-datensatz-benchmarks).)
 
 ### Wie sie berechnet werden
 
@@ -276,6 +279,59 @@ Ein praktischer Durchlauf:
 
 Dass es *dieselben* Fragen sind, ist wichtig. Andere Fragen ergeben andere Werte,
 ganz unabhängig von der Konfiguration.
+
+## Gold-Datensatz & Benchmarks
+
+Live-Werte sagen dir, wie jede Konfiguration mit dem umging, *was die Leute zufällig
+gefragt haben*. Ein Benchmark stellt jeder Konfiguration *dieselben Fragen* — und
+die kommen von dir.
+
+**Gold markieren.** Unter jeder Antwort gibt es (bei eingeschalteter Evaluation)
+zwei zusätzliche Knöpfe. „Als Gold speichern" friert das Gespräch bis zu dieser
+Antwort ein — jede Frage und jede Antwort, in Reihenfolge — als Referenz. Markiere
+eine Antwort, wenn der ganze Austausch dorthin gut war; ein einzelnes
+Frage-Antwort-Paar ist einfach ein Gespräch mit einer Runde. Zweimal markieren
+ändert nichts. „Bewerten" speichert eine Bewertung mit 1-5 Sternen, die je
+Konfiguration im Dashboard erscheint — ein menschliches Gegengewicht zu den Zahlen
+des Judges.
+
+**Benchmark starten.** Sobald mindestens ein Gold-Gespräch existiert, bekommt jede
+Zeile der Vergleichstabelle im Dashboard einen Play-Knopf (▶). Ein Klick stellt den
+gesamten Gold-Datensatz mit dem Chat-Modell dieser Zeile erneut: Runde für Runde,
+mit den *eigenen* vorherigen Antworten des wiederholenden Modells als
+Gesprächsverlauf — eine falsche Antwort in Runde 1 verändert also die Prämisse von
+Runde 2, genau wie bei einem echten Nutzer. Diese Drift ist das, was ein
+Gesprächs-Benchmark misst. Jede Runde wird auf Treue, Relevanz und **Ähnlichkeit**
+bewertet — Embedding-Kosinus gegen die Gold-Antwort dieser Runde.
+
+Drei Regeln halten die Zahlen ehrlich:
+
+- **Der Judge ist je Lauf fest** — `evaluation.judge_model`, sonst das konfigurierte
+  Chat-Modell — und folgt nie dem wiederholten Modell. Ein Modell, das sich selbst
+  benotet, ist kein Vergleich.
+- **Replay-Zeilen landen nie in der Live-Tabelle.** Sie aggregieren in ihrem
+  eigenen Abschnitt „Gold-Benchmark". Wiederholte Antworten überspringen die
+  Zitat-Link- und Abbildungs-Nachbearbeitung der App — vergleiche also Läufe mit
+  Läufen, nicht mit Live-Zeilen.
+- **Die Abdeckung steht als `n/alle Runden` dabei.** Macht ein neu ingestierter
+  Korpus Gold-Fragen unbeantwortbar, zeigt sich die Lücke, statt sich zu verstecken.
+
+Es gibt auch eine Kommandozeile, praktisch für mehrere Modelle in einem Rutsch:
+
+```bash
+docker compose exec chainlit python benchmark.py --models gemma-4-31b gpt-oss-120b
+```
+
+`--judge MODELL` setzt einen anderen Judge; `--label NAME` benennt den Lauf. Wer
+zwei *Läufe* vergleicht, braucht auch denselben Judge — das Label trägt einen
+Zeitstempel, damit Läufe unterscheidbar bleiben.
+
+**Ein Gold-Gespräch stilllegen** hat noch keine Oberfläche; es ist eine Zeile gegen
+die Eval-Datenbank (die Zeile bleibt erhalten, sie verlässt nur den aktiven Satz):
+
+```bash
+docker compose exec eval python -c "import sqlite3; c=sqlite3.connect('/app/.evaldb/eval.sqlite3'); c.execute(\"UPDATE gold_answers SET active=0 WHERE id='<gold-id>'\"); c.commit()"
+```
 
 ## Wenn jemand „nicht hilfreich" klickt
 

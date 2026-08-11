@@ -4,12 +4,16 @@
 change to one file. That has already been used once, replacing DeepEval with RAGAS
 after DeepEval turned out unable to score against a self-hosted gateway at all.
 
-Both metrics are reference-free — no ground-truth answer needed — so they work on real
-conversations:
+The two live metrics are reference-free — no ground-truth answer needed — so they
+work on real conversations:
 
 * **faithfulness** — are the answer's claims supported by the retrieved chunks?
 * **relevance** — does the answer address the question? Needs the embedding model as
   well as the judge.
+
+**similarity** is the exception: embedding cosine against a known-good reference
+answer. It only runs on benchmark replays, where a gold answer exists to compare
+against, which is why it is not in ``SUPPORTED_METRICS`` (the live default).
 
 Judge calls go to the same gateway the app uses, at ``temperature=0``: these numbers
 are only meaningful as deltas, and a sampling judge adds noise that swamps the signal.
@@ -24,7 +28,9 @@ from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
-MetricName = Literal["faithfulness", "relevance"]
+MetricName = Literal["faithfulness", "relevance", "similarity"]
+# The live-path default. similarity is deliberately absent: it needs a reference
+# answer, which only benchmark replays have — those name it explicitly.
 SUPPORTED_METRICS: tuple[MetricName, ...] = ("faithfulness", "relevance")
 
 
@@ -151,6 +157,7 @@ async def _score_one(
     contexts: list[str],
     llm: Any,
     embeddings: Any,
+    reference: str | None = None,
 ) -> dict[str, Any]:
     """Run a single metric. Returns ``{}`` if it failed rather than raising.
 
@@ -159,11 +166,24 @@ async def _score_one(
     than no row. A failure is recorded as absent, never as 0.0 — which matters
     especially here, because 0.0 is itself a meaningful faithfulness score.
     """
-    from ragas.metrics.collections import AnswerRelevancy
-
     try:
         if name == "faithfulness":
             return await _faithfulness(question, answer, contexts, llm)
+        if name == "similarity":
+            # Requested without a reference to compare against: absent, not 0.0 —
+            # the same rule as a failed metric, because "could not measure" and
+            # "measured as totally dissimilar" are different claims. Guard before
+            # the import, so the guard is testable where ragas is not installed.
+            if not reference:
+                return {}
+            from ragas.metrics.collections import SemanticSimilarity
+
+            result = await SemanticSimilarity(embeddings=embeddings).ascore(
+                reference=reference, response=answer
+            )
+            return {"similarity": float(result.value)}
+        from ragas.metrics.collections import AnswerRelevancy
+
         # AnswerRelevancy takes no contexts by design: it asks whether the answer
         # fits the question, which is answerable without them.
         # strictness=1 rather than RAGAS's default 3. The parameter regenerates the
@@ -272,8 +292,12 @@ async def score(
     embed_model: str,
     base_url: str | None = None,
     api_key: str | None = None,
+    reference: str | None = None,
 ) -> dict[str, Any]:
     """Grade one answer. Returns ``{metric: float, metric_reason: str}``.
+
+    ``reference`` is a known-good answer to the same question; only the
+    ``similarity`` metric reads it.
 
     Metrics run concurrently, so the wall clock is the slowest metric rather than
     the sum. Natively async, with no worker threads: RAGAS is async throughout, and
@@ -283,7 +307,7 @@ async def score(
     llm, embeddings = _judge_and_embeddings(judge_model, embed_model, base_url, api_key)
     parts = await asyncio.gather(
         *(
-            _score_one(name, question, answer, contexts, llm, embeddings)
+            _score_one(name, question, answer, contexts, llm, embeddings, reference)
             for name in metrics
         )
     )

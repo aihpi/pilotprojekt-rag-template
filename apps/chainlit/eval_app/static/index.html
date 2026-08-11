@@ -31,6 +31,7 @@
     --track: #eceae2;
     --faithfulness: #2a78d6;
     --relevance: #eb6834;
+    --similarity: #1baf7a;
     --good: #0ca30c;
     --critical: #d03b3b;
     --ring: rgba(11, 11, 11, .10);
@@ -47,6 +48,7 @@
       --track: #2c2c2a;
       --faithfulness: #3987e5;
       --relevance: #d95926;
+      --similarity: #199e70;
       --ring: rgba(255, 255, 255, .10);
     }
   }
@@ -112,6 +114,8 @@
   .fill { height: 100%; border-radius: 0 4px 4px 0; }
   .fill.f { background: var(--faithfulness); }
   .fill.r { background: var(--relevance); }
+  .fill.s { background: var(--similarity); }
+  .swatch.s { background: var(--similarity); }
   .metric b { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 3ch; text-align: right; }
   .none { color: var(--ink-muted); }
 
@@ -123,6 +127,34 @@
   .up { color: var(--good); }
   .down { color: var(--critical); }
   .thumbs { display: inline-flex; gap: .6rem; font-variant-numeric: tabular-nums; }
+
+  /* The play button on a configuration row. A real button, not a link: it queues
+   * work. Disabled + pulsing while that model's run is still going. */
+  .play {
+    border: 1px solid var(--line); background: transparent; color: var(--ink-2);
+    border-radius: 6px; width: 28px; height: 24px; cursor: pointer;
+    font-size: .7rem; line-height: 1;
+  }
+  .play:hover:not(:disabled) { border-color: var(--ink-muted); color: var(--ink); }
+  .play:disabled { cursor: default; animation: pulse 1.8s ease-in-out infinite; }
+  .play[data-error="1"] { color: var(--critical); animation: none; }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .4 } }
+  @media (prefers-reduced-motion: reduce) { .play:disabled { animation: none; opacity: .5; } }
+
+  /* One gold conversation, expandable. */
+  details.gold { border-bottom: 1px solid var(--line); padding: .45rem 0; }
+  details.gold summary {
+    cursor: pointer; display: flex; gap: .75rem; align-items: baseline;
+    list-style: none; flex-wrap: wrap;
+  }
+  details.gold summary::-webkit-details-marker { display: none; }
+  details.gold summary::before { content: "▸"; color: var(--ink-muted); font-size: .7rem; }
+  details.gold[open] summary::before { content: "▾"; }
+  details.gold .meta { color: var(--ink-muted); font-size: .78rem; white-space: nowrap; }
+  .turn { margin: .5rem 0 .5rem 1.1rem; font-size: .85rem; }
+  .turn .who { font-weight: 600; color: var(--ink-2); font-size: .72rem;
+               text-transform: uppercase; letter-spacing: .04em; }
+  .turn p { margin: .15rem 0 0; white-space: pre-wrap; }
 
   .empty { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 1.75rem; margin-top: 1.75rem; }
   .empty p { margin: 0 0 .75rem; }
@@ -185,6 +217,21 @@ const T = {
     emptyBody: 'Schalten Sie die Evaluation in Ihrer <code>rag.config.yaml</code> ein und stellen Sie dem Assistenten eine Frage:',
     emptyWhy: 'Bewertung ist standardmäßig aus, weil jede Antwort zwei Judge-Aufrufe plus einen Embedding-Aufruf kostet. Um zwei Konfigurationen zu vergleichen, ingestieren Sie jede in ihre eigene Collection &mdash; gruppiert wird nach Modell, Embedding-Modell, Chunking und Collection.',
     loadError: 'Statistiken konnten nicht geladen werden.',
+    colStars: 'Sterne',
+    colRun: 'Lauf',
+    runBenchmark: 'Benchmark starten',
+    benchRunning: 'Benchmark läuft…',
+    benchFailed: 'Letzter Lauf fehlgeschlagen: ',
+    benchTitle: 'Gold-Benchmark',
+    benchSub: 'Wiederholungen des Gold-Datensatzes, Runde für Runde bewertet. Ähnlichkeit vergleicht jede Antwort mit der Gold-Referenz; der Judge ist je Lauf fest, damit kein Modell sich selbst benotet. Nur Läufe untereinander vergleichen, nicht mit der Live-Tabelle.',
+    colCoverage: 'Runden',
+    colSimilarity: 'Ähnlichkeit',
+    goldTitle: 'Gold-Datensatz',
+    goldSub: 'Eingefrorene Referenz-Gespräche, gespeichert über „Als Gold speichern" unter einer Antwort im Chat. Benchmarks stellen genau diese Fragen erneut.',
+    goldTurns: ['Runde', 'Runden'],
+    goldEmptyHint: 'Noch keine Gold-Gespräche. Markieren Sie eine gute Antwort im Chat mit „Als Gold speichern", dann erscheint hier der Play-Knopf je Konfiguration.',
+    turnUser: 'Frage',
+    turnAssistant: 'Referenzantwort',
   },
   en: {
     title: 'RAG Evaluation',
@@ -222,6 +269,21 @@ const T = {
     emptyBody: 'Turn evaluation on in your <code>rag.config.yaml</code> and ask the assistant a question:',
     emptyWhy: 'Scoring is off by default because each answer costs two judge calls plus one embedding call. To compare two configurations, ingest each into its own collection &mdash; they are grouped by model, embedding model, chunking and collection.',
     loadError: 'Could not load statistics.',
+    colStars: 'Stars',
+    colRun: 'Run',
+    runBenchmark: 'Run Benchmark',
+    benchRunning: 'Benchmark running…',
+    benchFailed: 'Last run failed: ',
+    benchTitle: 'Gold benchmark',
+    benchSub: 'Replays of the gold dataset, scored turn by turn. Similarity compares each answer with the gold reference; the judge is pinned per run so no model grades itself. Compare runs with each other, not with the live table.',
+    colCoverage: 'Turns',
+    colSimilarity: 'Similarity',
+    goldTitle: 'Gold dataset',
+    goldSub: 'Frozen reference conversations, saved via "Als Gold speichern" under an answer in the chat. Benchmarks re-ask exactly these questions.',
+    goldTurns: ['turn', 'turns'],
+    goldEmptyHint: 'No gold conversations yet. Mark a good answer in the chat with "Als Gold speichern" and the per-configuration play button appears here.',
+    turnUser: 'Question',
+    turnAssistant: 'Reference answer',
   },
 };
 
@@ -277,6 +339,45 @@ function thumbs(up, down) {
   return `<span class="thumbs">${parts.join('')}</span>`;
 }
 
+function starCell(mean, n) {
+  if (!n) return '<span class="none">&ndash;</span>';
+  return `&#9733;&nbsp;${(Math.round(mean * 10) / 10).toLocaleString(LANG === 'de' ? 'de-DE' : 'en-GB')} <span class="none">(${n})</span>`;
+}
+
+/*
+  The play button queues a replay of the gold set with this row's chat model.
+  Disabled while nothing can run (no gold) or while a job for that model is
+  already pending/running — one benchmark at a time is the deliberate pace.
+*/
+function playCell(signature, jobs, hasGold) {
+  if (!hasGold || !signature) return '';
+  const chatModel = signature.split('|')[0];
+  const active = jobs.find(j => j.chat_model === chatModel &&
+    (j.status === 'pending' || j.status === 'running'));
+  const lastError = jobs.find(j => j.chat_model === chatModel && j.status === 'error');
+  if (active) {
+    const progress = active.total_turns ? ` ${active.done_turns}/${active.total_turns}` : '';
+    return `<button class="play" disabled title="${esc(S.benchRunning)}${progress}">&#9654;</button>`;
+  }
+  const errorTip = lastError ? ` &mdash; ${esc(S.benchFailed)}${esc(lastError.error || '')}` : '';
+  return `<button class="play" ${lastError ? 'data-error="1"' : ''}
+    title="${esc(S.runBenchmark)}${errorTip}"
+    onclick="startBenchmark('${esc(chatModel)}', this)">&#9654;</button>`;
+}
+
+async function startBenchmark(chatModel, button) {
+  button.disabled = true;
+  try {
+    await fetch('api/benchmark', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_model: chatModel }),
+    });
+  } finally {
+    load();
+  }
+}
+
 function kpi(label, value, unit, foot) {
   return `<div class="kpi">
     <div class="kpi-label">${label}</div>
@@ -312,7 +413,7 @@ function kpiRow(rows) {
   ].join('');
 }
 
-function configTable(rows) {
+function configTable(rows, jobs, hasGold) {
   return `<section class="card">
     <h2>${S.comparison}
       <span class="legend">
@@ -324,16 +425,76 @@ function configTable(rows) {
     <div class="scroll"><table>
       <thead><tr>
         <th>${S.colConfig}</th><th class="num">${S.colAnswers}</th>
-        <th>${S.colFaithfulness}</th><th>${S.colRelevance}</th><th class="num">${S.colThumbs}</th>
+        <th>${S.colFaithfulness}</th><th>${S.colRelevance}</th>
+        <th class="num">${S.colStars}</th><th class="num">${S.colThumbs}</th>
+        ${hasGold ? '<th></th>' : ''}
       </tr></thead>
       <tbody>${rows.map(r => `<tr>
         <td>${config(r.config_signature)}</td>
         <td class="num">${num(r.answers)}</td>
         <td>${bar(r.faithfulness, 'f', S.colFaithfulness)}</td>
         <td>${bar(r.relevance, 'r', S.colRelevance)}</td>
+        <td class="num">${starCell(r.stars, r.stars_n)}</td>
         <td class="num">${thumbs(r.thumbs_up, r.thumbs_down)}</td>
+        ${hasGold ? `<td class="num">${playCell(r.config_signature, jobs, hasGold)}</td>` : ''}
       </tr>`).join('')}</tbody>
     </table></div>
+  </section>`;
+}
+
+function benchmarkTable(benchmark) {
+  const runs = (benchmark && benchmark.runs) || [];
+  if (!runs.length) return '';
+  const total = benchmark.gold_turns_total || 0;
+  return `<section class="card">
+    <h2>${S.benchTitle}
+      <span class="legend">
+        <span><i class="swatch s"></i>${S.colSimilarity}</span>
+        <span><i class="swatch f"></i>${S.colFaithfulness}</span>
+        <span><i class="swatch r"></i>${S.colRelevance}</span>
+      </span>
+    </h2>
+    <p class="sub">${S.benchSub}</p>
+    <div class="scroll"><table>
+      <thead><tr>
+        <th>${S.colRun}</th><th>${S.colConfig}</th><th class="num">${S.colCoverage}</th>
+        <th>${S.colSimilarity}</th><th>${S.colFaithfulness}</th><th>${S.colRelevance}</th>
+      </tr></thead>
+      <tbody>${runs.map(r => `<tr>
+        <td>${esc(r.run_label)}</td>
+        <td>${config(r.config_signature)}</td>
+        <td class="num">${num(r.n)}${total ? `<span class="none">/${num(total)}</span>` : ''}</td>
+        <td>${bar(r.similarity, 's', S.colSimilarity)}</td>
+        <td>${bar(r.faithfulness, 'f', S.colFaithfulness)}</td>
+        <td>${bar(r.relevance, 'r', S.colRelevance)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </section>`;
+}
+
+function goldSection(gold) {
+  const body = gold.length
+    ? gold.map(g => {
+        const first = (g.turns[0] || {}).user || '';
+        const title = first.length > 90 ? first.slice(0, 87) + '…' : first;
+        const n = g.turns.length;
+        return `<details class="gold">
+          <summary><b>${esc(title)}</b>
+            <span class="meta">${n} ${n === 1 ? S.goldTurns[0] : S.goldTurns[1]}
+              &middot; ${esc((g.created_at || '').slice(0, 10))}</span>
+          </summary>
+          ${g.turns.map(t => `
+            <div class="turn"><span class="who">${S.turnUser}</span><p>${esc(t.user)}</p></div>
+            <div class="turn"><span class="who">${S.turnAssistant}</span><p>${esc(t.assistant)}</p></div>
+          `).join('')}
+          <div class="turn"><span class="meta">${config(g.config_signature)}</span></div>
+        </details>`;
+      }).join('')
+    : `<p class="sub" style="margin:0">${S.goldEmptyHint}</p>`;
+  return `<section class="card">
+    <h2>${S.goldTitle}</h2>
+    <p class="sub">${S.goldSub}</p>
+    ${body}
   </section>`;
 }
 
@@ -368,24 +529,37 @@ const EMPTY = `<div class="empty">
   <p style="margin:.75rem 0 0">${S.emptyWhy}</p>
 </div>`;
 
-fetch('api/stats')
-  .then(r => r.json())
-  .then(({ configs, failures }) => {
-    if (!configs.length) {
-      document.getElementById('body').innerHTML = EMPTY;
-      return;
-    }
-    // Most-evidenced first. Sorting changes the order, never the colours - those
-    // belong to the metric, not to the row.
-    const rows = configs.slice().sort((a, b) => b.answers - a.answers ||
-      String(a.config_signature).localeCompare(String(b.config_signature)));
-    const kpis = document.getElementById('kpis');
-    kpis.innerHTML = kpiRow(rows);
-    kpis.hidden = false;
-    document.getElementById('body').innerHTML = configTable(rows) + failureTable(failures);
-  })
-  .catch(err => {
-    document.getElementById('body').innerHTML =
-      `<div class="empty"><p><strong>${S.loadError}</strong></p><pre>${esc(err)}</pre></div>`;
-  });
+let pollTimer = null;
+
+function load() {
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  fetch('api/stats')
+    .then(r => r.json())
+    .then(({ configs, failures, gold, benchmark, jobs }) => {
+      gold = gold || []; jobs = jobs || [];
+      // Most-evidenced first. Sorting changes the order, never the colours - those
+      // belong to the metric, not to the row.
+      const rows = configs.slice().sort((a, b) => b.answers - a.answers ||
+        String(a.config_signature).localeCompare(String(b.config_signature)));
+      const kpis = document.getElementById('kpis');
+      kpis.innerHTML = kpiRow(rows);
+      kpis.hidden = !rows.length;
+      document.getElementById('body').innerHTML =
+        (rows.length ? configTable(rows, jobs, gold.length > 0) : EMPTY) +
+        benchmarkTable(benchmark) +
+        goldSection(gold) +
+        failureTable(failures);
+      // A run in flight updates its progress server-side; keep the page current
+      // until every job has settled, then stop asking.
+      if (jobs.some(j => j.status === 'pending' || j.status === 'running')) {
+        pollTimer = setTimeout(load, 5000);
+      }
+    })
+    .catch(err => {
+      document.getElementById('body').innerHTML =
+        `<div class="empty"><p><strong>${S.loadError}</strong></p><pre>${esc(err)}</pre></div>`;
+    });
+}
+
+load();
 </script>

@@ -260,3 +260,156 @@ def test_every_claim_gets_its_own_context():
     routed = metrics.route_contexts(["fibronektin", "photonen"], chunks, budget=1)
     assert "fibronektin" in routed[0] and "photonen" in routed[1]
     assert routed[0] != routed[1], "routing must not collapse to one shared context"
+
+
+# --------------------------------------------------------------------------- #
+# Similarity guard (the full metric needs ragas, which the app venv does not
+# carry — its real path was verified against the eval image directly)
+# --------------------------------------------------------------------------- #
+
+
+def test_similarity_without_a_reference_is_absent_not_zero():
+    import asyncio
+
+    result = asyncio.run(
+        metrics._score_one("similarity", "q", "a", [], llm=None, embeddings=None)
+    )
+    assert result == {}, "no reference means 'could not measure', never 0.0"
+
+
+# --------------------------------------------------------------------------- #
+# Star ratings
+# --------------------------------------------------------------------------- #
+
+
+def test_a_rating_outside_one_to_five_is_refused(db):
+    for stars in (0, 6):
+        with pytest.raises(sqlite3.IntegrityError):
+            storage.add_rating(db, stars=stars, config_signature=SIG_A)
+
+
+def test_ratings_average_into_the_config_stats(db):
+    _score(db, faithfulness=0.9)
+    storage.add_rating(db, stars=5, config_signature=SIG_A)
+    storage.add_rating(db, stars=2, config_signature=SIG_A)
+    row = _stats(db)[SIG_A]
+    assert row["stars"] == pytest.approx(3.5)
+    assert row["stars_n"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# Gold conversations
+# --------------------------------------------------------------------------- #
+
+TURNS = [
+    {"user": "Welche Paper gibt es?", "assistant": "Drei Paper. Quelle 1"},
+    {"user": "Fasse das erste zusammen.", "assistant": "Es zeigt X. Quelle 1"},
+]
+
+
+def test_a_gold_conversation_round_trips_with_its_turns(db):
+    gold_id = storage.add_gold(db, turns=TURNS, config_signature=SIG_A, message_id="m-1")
+    (entry,) = storage.list_gold(db)
+    assert entry["id"] == gold_id
+    assert entry["turns"] == TURNS, "turns come back parsed, not as a JSON string"
+
+
+def test_marking_the_same_answer_twice_is_one_row_with_one_id(db):
+    first = storage.add_gold(db, turns=TURNS, config_signature=SIG_A, message_id="m-1")
+    second = storage.add_gold(db, turns=TURNS[:1], config_signature=SIG_B, message_id="m-1")
+    assert first == second, "the second click must not mint a new reference"
+    assert len(storage.list_gold(db)) == 1
+
+
+def test_a_retired_gold_row_leaves_the_active_set(db):
+    storage.add_gold(db, turns=TURNS, config_signature=SIG_A, message_id="m-1")
+    with storage.connect(db) as conn:
+        conn.execute("UPDATE gold_answers SET active = 0")
+    assert storage.list_gold(db) == []
+    assert len(storage.list_gold(db, active_only=False)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Replay provenance and benchmark aggregation
+# --------------------------------------------------------------------------- #
+
+
+def test_replay_rows_stay_out_of_the_live_table(db):
+    # One click of the play button must not rewrite what real usage looked like.
+    _score(db, faithfulness=1.0)
+    _score(db, faithfulness=0.0, source="replay", run_label="run-1", similarity=0.9)
+    row = _stats(db)[SIG_A]
+    assert row["answers"] == 1
+    assert row["faithfulness"] == pytest.approx(1.0), "the replay 0.0 must not drag it"
+
+
+def test_benchmark_stats_group_by_run_and_report_coverage(db):
+    storage.add_gold(db, turns=TURNS, config_signature=SIG_A, message_id="m-1")
+    for turn, sim in ((1, 0.8), (2, 0.6)):
+        _score(db, source="replay", run_label="run-1", gold_id="g", gold_turn=turn,
+               similarity=sim, faithfulness=1.0)
+    _score(db, sig=SIG_B, source="replay", run_label="run-2", similarity=1.0)
+
+    stats = storage.benchmark_stats(db)
+    assert stats["gold_turns_total"] == 2, "coverage denominator is active gold turns"
+    by_run = {(r["run_label"], r["config_signature"]): r for r in stats["runs"]}
+    assert by_run[("run-1", SIG_A)]["n"] == 2
+    assert by_run[("run-1", SIG_A)]["similarity"] == pytest.approx(0.7)
+    assert by_run[("run-2", SIG_B)]["n"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Benchmark jobs
+# --------------------------------------------------------------------------- #
+
+
+def test_jobs_are_claimed_oldest_first_and_exactly_once(db):
+    first = storage.create_job(db, chat_model="a", run_label="r-a")
+    second = storage.create_job(db, chat_model="b", run_label="r-b")
+
+    assert storage.claim_pending_job(db)["id"] == first
+    assert storage.claim_pending_job(db)["id"] == second
+    assert storage.claim_pending_job(db) is None, "a claimed job is never handed out again"
+
+
+def test_job_progress_updates_only_what_was_sent(db):
+    job_id = storage.create_job(db, chat_model="a", run_label="r")
+    storage.update_job(db, job_id, total_turns=4)
+    storage.update_job(db, job_id, done_turns=2)
+    storage.update_job(db, job_id, status="done")
+    (job,) = storage.list_jobs(db)
+    assert (job["status"], job["done_turns"], job["total_turns"]) == ("done", 2, 4)
+
+
+# --------------------------------------------------------------------------- #
+# Migration: a database from before these features
+# --------------------------------------------------------------------------- #
+
+
+def test_an_old_database_gains_the_new_columns_and_tables(tmp_path):
+    """The upgrade path is a container restart, nothing else.
+
+    Recreate the pre-benchmark schema by hand, then run init_db over it — every
+    new column must arrive via ALTER and old rows must land in the live stats.
+    """
+    path = tmp_path / "old.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """CREATE TABLE eval_scores (
+                id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, message_id TEXT,
+                thread_id TEXT, question TEXT NOT NULL, answer TEXT NOT NULL,
+                contexts TEXT NOT NULL DEFAULT '[]', config_signature TEXT NOT NULL,
+                faithfulness REAL, relevance REAL, detail TEXT)"""
+        )
+        conn.execute(
+            "INSERT INTO eval_scores (id, timestamp, question, answer, config_signature,"
+            " faithfulness) VALUES ('x', '2026-01-01', 'q', 'a', ?, 0.5)",
+            (SIG_A,),
+        )
+
+    storage.init_db(path)
+
+    row = {r["config_signature"]: r for r in storage.stats_by_config(path)}[SIG_A]
+    assert row["answers"] == 1, "pre-migration rows default to source='live'"
+    storage.add_gold(path, turns=TURNS, config_signature=SIG_A)
+    assert storage.claim_pending_job(path) is None, "jobs table exists and is empty"

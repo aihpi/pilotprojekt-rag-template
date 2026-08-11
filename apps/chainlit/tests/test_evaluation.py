@@ -312,3 +312,52 @@ def test_an_unreachable_service_does_not_break_a_thumbs_click(monkeypatch):
 )
 def test_the_trend_is_a_sign_and_needs_two_answers(mean, last, answers, expected):
     assert evaluation.trend_sign(mean, last, answers) == expected
+
+
+# --------------------------------------------------------------------------- #
+# Star ratings and gold marking (the two action-backed posters)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_rating_posts_stars_with_the_exact_message_id(monkeypatch):
+    calls = _install_client(monkeypatch)
+    asyncio.run(evaluation.post_rating(
+        stars=4, message_id="m-1", thread_id="t-1",
+        chat_model="gemma-4-31b", cfg=_enabled(),
+    ))
+    url, body = calls[0]
+    assert url.endswith("/api/rating")
+    assert body["stars"] == 4 and body["message_id"] == "m-1"
+    assert body["config_signature"].startswith("gemma-4-31b|"), (
+        "the rating files under the model that answered, like the scores do"
+    )
+
+
+def test_rating_while_disabled_never_opens_a_connection(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", _ExplodingClient)
+    asyncio.run(evaluation.post_rating(stars=5, cfg=RagConfig()))
+
+
+def test_gold_posts_the_turns_and_reports_the_service_reply(monkeypatch):
+    calls = _install_client(monkeypatch, payload={"status": "ok", "gold_id": "g-1"})
+    turns = [{"user": "Frage?", "assistant": "Antwort. Quelle 1"}]
+    reply = asyncio.run(evaluation.post_gold(
+        turns=turns, message_id="m-1", cfg=_enabled(),
+    ))
+    assert reply == {"status": "ok", "gold_id": "g-1"}
+    url, body = calls[0]
+    assert url.endswith("/api/gold") and body["turns"] == turns
+
+
+def test_gold_returns_none_when_the_service_is_down(monkeypatch):
+    # The caller tells the user; a swallowed gold marking would betray a click.
+    _install_client(monkeypatch, raises=ConnectionError("down"))
+    reply = asyncio.run(evaluation.post_gold(
+        turns=[{"user": "q", "assistant": "a"}], cfg=_enabled(),
+    ))
+    assert reply is None
+
+
+def test_gold_with_no_turns_posts_nothing(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", _ExplodingClient)
+    assert asyncio.run(evaluation.post_gold(turns=[], cfg=_enabled())) is None

@@ -41,7 +41,7 @@ from chat_history import (
     update_chat_session_metadata,
     upsert_user_profile,
 )
-from evaluation import post_feedback, post_score, trend_sign
+from evaluation import post_feedback, post_gold, post_rating, post_score, trend_sign
 from llm import cached_chat_models, chat, list_chat_models, message_to_dict
 from tools import ToolContext, build_openai_tools
 from native_chat import (
@@ -1979,6 +1979,7 @@ def _build_chat_actions(
     source_step_id: str,
     citation_panel_content: str | None = None,
     citation_source_rows: list[dict[str, Any]] | None = None,
+    turn_index: int | None = None,
 ) -> list[cl.Action]:
     normalized_followups = _sanitize_followup_questions(followup_questions)
     base_payload: dict[str, Any] = {
@@ -2014,6 +2015,33 @@ def _build_chat_actions(
                     **base_payload,
                     "question": question,
                 },
+            )
+        )
+    if get_config().evaluation.enabled:
+        # source_step_id is the assistant message id — the same key the eval store
+        # files scores under — so both payloads join exactly, without the forId
+        # ambiguity that keeps thumbs from finding their score row.
+        actions.append(
+            cl.Action(
+                name="rate_answer",
+                label="Bewerten",
+                tooltip="Antwort mit 1-5 Sternen bewerten",
+                icon="star",
+                payload={"message_id": source_step_id},
+            )
+        )
+        actions.append(
+            cl.Action(
+                name="mark_gold",
+                label="Als Gold speichern",
+                tooltip="Gespräch bis hier als Referenz für Benchmarks einfrieren",
+                icon="bookmark",
+                # turn_index says how many user turns the conversation had when this
+                # answer was produced, so marking an OLDER answer freezes only the
+                # turns up to it. ponytail: absent on actions restored after a
+                # resume — the callback then freezes the whole conversation and its
+                # confirmation says how many turns that was.
+                payload={"message_id": source_step_id, "turn_index": turn_index},
             )
         )
     return actions
@@ -2409,6 +2437,50 @@ async def on_app_startup() -> None:
         print("[STARTUP] watching the document folders for changes")
     else:
         print("[STARTUP] document watching is off (DOCUMENT_WATCH=false)")
+
+    if get_config().evaluation.enabled:
+        # Benchmark jobs queued by the dashboard's play button. Polling rather than
+        # an inbound endpoint keeps the dependency edge one-way: the eval service
+        # never calls the app. Held on app state for the same weak-reference reason
+        # as the watcher task above.
+        chainlit_fastapi_app.state.benchmark_poll_task = asyncio.create_task(
+            _poll_benchmark_jobs()
+        )
+        print("[STARTUP] polling the eval service for benchmark jobs")
+
+
+async def _poll_benchmark_jobs() -> None:
+    """Claim and run queued benchmark jobs, one at a time, forever.
+
+    A replay takes minutes (turns × ~16s of judging each), so there is nothing to
+    gain from concurrency — and the gateway is shared with live chats, which
+    should not have to queue behind a benchmark burst.
+    """
+    import benchmark
+
+    service_url = get_config().evaluation.service_url
+    url = f"{service_url.rstrip('/')}/api/benchmark/next"
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                job = response.json()
+            if job.get("id"):
+                print(f"[benchmark] claimed job {job['id']} ({job['chat_model']})")
+                try:
+                    await benchmark.run_job(job, service_url=service_url)
+                except Exception as exc:  # noqa: BLE001 — a failed run must not kill the poller
+                    print(f"[WARN] benchmark_job_failed: {exc.__class__.__name__}: {exc}")
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+                        await client.post(
+                            f"{service_url.rstrip('/')}/api/benchmark/{job['id']}",
+                            json={"status": "error", "error": str(exc)[:500]},
+                        )
+                continue  # check straight away — there may be more queued
+        except Exception:  # noqa: BLE001 — the eval service being down is the normal case
+            pass
+        await asyncio.sleep(10)
 
 
 @cl.on_feedback
@@ -3229,6 +3301,90 @@ async def ask_followup(action: cl.Action):
         await main(cl.Message(content=question))
 
 
+def _conversation_turns(
+    messages: list[dict[str, Any]], turn_index: int | None = None
+) -> list[dict[str, str]]:
+    """The session history as completed ``{"user", "assistant"}`` pairs.
+
+    Tool and system messages fall out; an assistant message only counts once a
+    user question precedes it (the paired shape is what a benchmark replays).
+    ``turn_index`` truncates to the first N pairs, so marking an older answer as
+    gold does not freeze the turns that came after it.
+    """
+    turns: list[dict[str, str]] = []
+    pending_user: str | None = None
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        if role == "user":
+            pending_user = content
+        elif role == "assistant" and pending_user is not None:
+            turns.append({"user": pending_user, "assistant": content})
+            pending_user = None
+    if turn_index is not None:
+        turns = turns[: max(0, turn_index)]
+    return turns
+
+
+@cl.action_callback("rate_answer")
+async def rate_answer_action(action: cl.Action):
+    """1-5 stars via a picker message — Chainlit's own thumbs are binary and
+    cannot be widened (``Feedback.value: Literal[0, 1]``)."""
+    picked = await cl.AskActionMessage(
+        content="Wie gut war diese Antwort?",
+        actions=[
+            cl.Action(name="stars", label="★" * n, payload={"stars": n})
+            for n in range(1, 6)
+        ],
+        timeout=90,
+        author="System",
+    ).send()
+    stars = ((picked or {}).get("payload") or {}).get("stars")
+    if not stars:
+        return  # timed out or dismissed; nothing to record
+    await post_rating(
+        stars=int(stars),
+        message_id=(action.payload or {}).get("message_id"),
+        thread_id=cl.context.session.thread_id,
+        chat_model=_session_chat_model(),
+    )
+    await cl.Message(
+        content=f"Danke — {'★' * int(stars)} gespeichert.", author="System"
+    ).send()
+
+
+@cl.action_callback("mark_gold")
+async def mark_gold_action(action: cl.Action):
+    """Freeze the conversation up to this answer as a gold benchmark reference."""
+    payload = action.payload or {}
+    turns = _conversation_turns(
+        cl.user_session.get("messages") or [], payload.get("turn_index")
+    )
+    if not turns:
+        await cl.Message(
+            content="Kein abgeschlossenes Frage-Antwort-Paar zum Speichern gefunden.",
+            author="System",
+        ).send()
+        return
+    response = await post_gold(
+        turns=turns,
+        message_id=payload.get("message_id"),
+        thread_id=cl.context.session.thread_id,
+        chat_model=_session_chat_model(),
+    )
+    if response is None:
+        text = "Eval-Dienst nicht erreichbar — bitte später erneut versuchen."
+    else:
+        n = len(turns)
+        text = (
+            f"Als Gold-Referenz gespeichert ({n} {'Runde' if n == 1 else 'Runden'}). "
+            "Benchmarks laufen über das Dashboard auf Port 8001."
+        )
+    await cl.Message(content=text, author="System").send()
+
+
 @cl.on_message
 async def main(message: cl.Message):
     if await _handle_control_message(message):
@@ -3775,6 +3931,7 @@ async def main(message: cl.Message):
             source_step_id=assistant_reply.id,
             citation_panel_content=citation_panel_content,
             citation_source_rows=source_rows_for_session,
+            turn_index=sum(1 for m in messages if m.get("role") == "user"),
         )
         assistant_reply.actions = actions
         print("[DEBUG] followup_actions=", len(followup_questions), "total_actions=", len(actions))
@@ -3892,6 +4049,7 @@ async def main(message: cl.Message):
             followup_questions=followup_questions,
             has_citations_panel=False,
             source_step_id=assistant_reply.id,
+            turn_index=sum(1 for m in messages if m.get("role") == "user"),
         )
         assistant_reply.actions = actions
         await assistant_reply.send()

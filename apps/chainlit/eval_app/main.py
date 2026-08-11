@@ -18,10 +18,11 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -71,6 +72,13 @@ class ScoreRequest(BaseModel):
     config_signature: str
     thread_id: str | None = None
     message_id: str | None = None
+    # Benchmark replays only: the gold answer to compare against (similarity), and
+    # provenance so replay rows never mix into the live statistics.
+    reference: str | None = None
+    source: Literal["live", "replay"] = "live"
+    run_label: str | None = None
+    gold_id: str | None = None
+    gold_turn: int | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -80,6 +88,33 @@ class FeedbackRequest(BaseModel):
     comment: str | None = None
     step_id: str | None = None
     thread_id: str | None = None
+
+
+class RatingRequest(BaseModel):
+    stars: int = Field(ge=1, le=5)
+    message_id: str | None = None
+    thread_id: str | None = None
+    config_signature: str | None = None
+
+
+class GoldRequest(BaseModel):
+    # One conversation, oldest turn first. Single Q&A = a one-element list.
+    turns: list[dict[str, str]] = Field(min_length=1)
+    config_signature: str
+    thread_id: str | None = None
+    message_id: str | None = None
+
+
+class BenchmarkRequest(BaseModel):
+    chat_model: str
+    judge_model: str | None = None
+
+
+class JobUpdate(BaseModel):
+    status: Literal["running", "done", "error"] | None = None
+    done_turns: int | None = None
+    total_turns: int | None = None
+    error: str | None = None
 
 
 @app.get("/")
@@ -99,7 +134,7 @@ async def thread(thread_id: str) -> dict[str, object]:
 
 
 @app.get("/api/stats")
-async def stats() -> dict[str, list]:
+async def stats() -> dict[str, object]:
     """Everything the dashboard draws, in one request.
 
     One endpoint rather than one per widget: the payload is a handful of rows per
@@ -109,6 +144,11 @@ async def stats() -> dict[str, list]:
     return {
         "configs": storage.stats_by_config(DB_PATH),
         "failures": storage.failure_categories(DB_PATH),
+        "gold": storage.list_gold(DB_PATH),
+        "benchmark": storage.benchmark_stats(DB_PATH),
+        # Recent jobs, so the dashboard can pulse a play button while its run is
+        # still going and surface an error where the click happened.
+        "jobs": storage.list_jobs(DB_PATH),
     }
 
 
@@ -158,6 +198,7 @@ async def post_score(request: ScoreRequest) -> dict[str, object]:
         embed_model=request.embed_model,
         base_url=LITELLM_BASE_URL,
         api_key=LITELLM_API_KEY,
+        reference=request.reference,
     )
     # Why the judge landed where it did, kept separately from the numbers because it
     # is read whole and never aggregated.
@@ -177,5 +218,95 @@ async def post_score(request: ScoreRequest) -> dict[str, object]:
         message_id=request.message_id,
         thread_id=request.thread_id,
         detail=detail or None,
+        similarity=scores.get("similarity"),
+        source=request.source,
+        run_label=request.run_label,
+        gold_id=request.gold_id,
+        gold_turn=request.gold_turn,
     )
     return scores
+
+
+@app.post("/api/rating")
+async def post_rating(request: RatingRequest) -> dict[str, str]:
+    """Record a 1-5 star rating for one answer.
+
+    Separate from ``/api/feedback`` because the two carry different identifiers:
+    thumbs arrive with Chainlit's ``forId`` (which may name the parent run step),
+    stars arrive with the exact assistant message id from an action payload.
+    """
+    storage.add_rating(
+        DB_PATH,
+        stars=request.stars,
+        message_id=request.message_id,
+        thread_id=request.thread_id,
+        config_signature=request.config_signature,
+    )
+    return {"status": "ok"}
+
+
+@app.post("/api/gold")
+async def post_gold(request: GoldRequest) -> dict[str, str | None]:
+    """Freeze a conversation as a gold reference for benchmark replays.
+
+    The app sends the turns itself — it holds the session history — so marking
+    works even while a judge is still scoring the answer. Marking the same answer
+    twice is idempotent (unique ``message_id``).
+    """
+    gold_id = storage.add_gold(
+        DB_PATH,
+        turns=request.turns,
+        config_signature=request.config_signature,
+        thread_id=request.thread_id,
+        message_id=request.message_id,
+    )
+    return {"status": "ok", "gold_id": gold_id}
+
+
+@app.get("/api/gold")
+async def get_gold() -> dict[str, list]:
+    """The active gold set, turns included — what a benchmark run replays."""
+    return {"gold": storage.list_gold(DB_PATH)}
+
+
+@app.post("/api/benchmark")
+async def post_benchmark(request: BenchmarkRequest) -> dict[str, str]:
+    """Queue a benchmark run. The app's poller picks it up.
+
+    A queue rather than a call because the dependency edge is one-way: this
+    service cannot answer questions (no retrieval stack in its image) and the app
+    takes no inbound calls from it. Refused when the gold set is empty — a run
+    over nothing would report itself as a successful benchmark of zero turns.
+    """
+    if not storage.list_gold(DB_PATH):
+        raise HTTPException(status_code=409, detail="no active gold conversations")
+    run_label = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} {request.chat_model}"
+    job_id = storage.create_job(
+        DB_PATH,
+        chat_model=request.chat_model,
+        judge_model=request.judge_model,
+        run_label=run_label,
+    )
+    return {"status": "queued", "job_id": job_id, "run_label": run_label}
+
+
+@app.get("/api/benchmark/next")
+async def next_benchmark_job() -> dict[str, str | None]:
+    """Atomically claim the oldest pending job; ``{}`` when there is none.
+
+    Polled by the app every few seconds while evaluation is enabled.
+    """
+    return storage.claim_pending_job(DB_PATH) or {}
+
+
+@app.post("/api/benchmark/{job_id}")
+async def update_benchmark_job(job_id: str, request: JobUpdate) -> dict[str, str]:
+    storage.update_job(
+        DB_PATH,
+        job_id,
+        status=request.status,
+        done_turns=request.done_turns,
+        total_turns=request.total_turns,
+        error=request.error,
+    )
+    return {"status": "ok"}

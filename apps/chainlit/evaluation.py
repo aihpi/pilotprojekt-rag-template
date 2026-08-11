@@ -222,3 +222,60 @@ async def post_feedback(
             "judge_model": ev.judge_model or chat_model or cfg.models.chat_model,
         },
     )
+
+
+async def post_rating(
+    *,
+    stars: int,
+    message_id: str | None = None,
+    thread_id: str | None = None,
+    chat_model: str | None = None,
+    cfg: "RagConfig | None" = None,
+) -> None:
+    """Record a 1-5 star rating. Never raises.
+
+    Unlike thumbs, the id here is exact: it comes from the action payload, which
+    carries the assistant message id the score rows are keyed by.
+    """
+    cfg, ev = _resolve(cfg)
+    if not ev.enabled:
+        return
+    await _post(
+        ev,
+        "/api/rating",
+        {
+            "stars": stars,
+            "message_id": message_id,
+            "thread_id": thread_id,
+            "config_signature": config_signature(cfg, chat_model),
+        },
+    )
+
+
+async def post_gold(
+    *,
+    turns: list[dict[str, str]],
+    message_id: str | None = None,
+    thread_id: str | None = None,
+    chat_model: str | None = None,
+    cfg: "RagConfig | None" = None,
+) -> dict[str, Any] | None:
+    """Freeze a conversation as a gold reference. Returns the service reply.
+
+    ``None`` means the service was unreachable (or evaluation is off) — the
+    caller should say so, because unlike a lost score a lost gold marking is a
+    user action that silently failing would betray.
+    """
+    cfg, ev = _resolve(cfg)
+    if not ev.enabled or not turns:
+        return None
+    return await _post(
+        ev,
+        "/api/gold",
+        {
+            "turns": turns,
+            "message_id": message_id,
+            "thread_id": thread_id,
+            "config_signature": config_signature(cfg, chat_model),
+        },
+    )

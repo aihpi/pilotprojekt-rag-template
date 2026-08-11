@@ -20,7 +20,9 @@ its sources do not back up.
 score means the answer may be perfectly true and still beside the point.
 
 Neither one needs a "correct answer" written by hand, which is why they work on
-the real conversations people are already having.
+the real conversations people are already having. (A third metric, **similarity**,
+does compare against a saved reference answer — it only appears in benchmark
+replays, see [Gold dataset & benchmarks](#gold-dataset-benchmarks).)
 
 ### How they are calculated
 
@@ -267,6 +269,57 @@ A practical run:
 
 Asking the *same* questions matters. Different questions produce different scores
 regardless of configuration.
+
+## Gold dataset & benchmarks
+
+Live scores tell you how each configuration handled *whatever people happened to
+ask it*. A benchmark asks every configuration *the same questions* — and those
+questions come from you.
+
+**Marking gold.** Under every answer (while evaluation is on) there are two extra
+buttons. "Als Gold speichern" freezes the conversation up to that answer — every
+question you asked and every answer you got, in order — as a reference. Mark an
+answer when the whole exchange leading to it was good; a single Q&A is just a
+one-turn conversation. Marking the same answer twice changes nothing. "Bewerten"
+records a 1-5 star rating, which shows up per configuration in the dashboard —
+a human counterweight to the judge's numbers.
+
+**Running a benchmark.** Once at least one gold conversation exists, every row in
+the dashboard's comparison table gets a play button (▶). Clicking it re-asks the
+entire gold set with that row's chat model: turn by turn, with the *replayed
+model's own* previous answers as the conversation history — so a wrong turn-1
+answer changes the premise of turn 2, exactly as it would for a real user. That
+drift is what a conversation benchmark measures. Each turn is scored on
+faithfulness, relevance and **similarity** — embedding cosine against the gold
+answer for that turn.
+
+Three rules keep the numbers honest:
+
+- **The judge is pinned per run** — `evaluation.judge_model`, or the configured
+  chat model — and never follows the replayed model. A model grading itself is
+  not a comparison.
+- **Replay rows never enter the live table.** They aggregate in their own "Gold
+  benchmark" section. Replayed answers skip the app's citation-link and figure
+  post-processing, so compare runs with runs, not with live rows.
+- **Coverage is shown as `n/total turns`.** If a re-ingested corpus makes gold
+  questions unanswerable, the gap shows instead of hiding.
+
+There is also a CLI, useful for scripting several models in one go:
+
+```bash
+docker compose exec chainlit python benchmark.py --models gemma-4-31b gpt-oss-120b
+```
+
+`--judge MODEL` pins a different judge; `--label NAME` names the run. Comparing
+two *runs* also requires the same judge — the label carries a timestamp so runs
+stay distinguishable.
+
+**Retiring a gold conversation** has no UI yet; it is one line against the eval
+database (the row keeps its history, it just leaves the active set):
+
+```bash
+docker compose exec eval python -c "import sqlite3; c=sqlite3.connect('/app/.evaldb/eval.sqlite3'); c.execute(\"UPDATE gold_answers SET active=0 WHERE id='<gold-id>'\"); c.commit()"
+```
 
 ## When someone clicks "not helpful"
 

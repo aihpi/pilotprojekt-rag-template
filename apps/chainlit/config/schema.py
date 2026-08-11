@@ -453,7 +453,7 @@ class EvaluationConfig(BaseModel):
     chain that has no business in the Chainlit image, and a judge call must never
     sit between the user and their answer.
 
-    Both metrics are *reference-free* — they need no ground-truth answer, so they
+    The two live metrics are *reference-free* — they need no ground-truth answer, so they
     work on real chats — but each costs a judge call, and ``relevance``
     additionally costs one embedding call. That is why this is opt-in.
 
