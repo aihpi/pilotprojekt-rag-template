@@ -110,8 +110,14 @@ img[src*="/logo"] { height: 96px !important; max-height: 96px !important; width:
   position: fixed; z-index: 2147483002; display: none;
   /* Wider than the composer it sits over, on purpose. The content is claim text
    * with a judge's reason under each one, and at the old width every reason wrapped
-   * to three or four lines. */
-  max-width: min(52rem, calc(100vw - 2rem));
+   * to three or four lines.
+   *
+   * A fixed width, not a max: the panel now has tabs, and sizing to content made
+   * it collapse around the narrower Vergleich table (or the one-line loading
+   * state) on every tab switch. A stable box also keeps the tabs from moving
+   * under the cursor mid-click. min-height for the same reason, vertically. */
+  width: min(52rem, calc(100vw - 2rem));
+  min-height: 14rem;
   max-height: min(72vh, 44rem); overflow-y: auto; overscroll-behavior: contain;
   padding: .8rem .9rem; border-radius: .6rem;
   border: 1px solid hsl(var(--border));
