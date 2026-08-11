@@ -224,32 +224,54 @@ async def post_feedback(
     )
 
 
-async def post_rating(
-    *,
-    stars: int,
-    message_id: str | None = None,
-    thread_id: str | None = None,
-    chat_model: str | None = None,
-    cfg: "RagConfig | None" = None,
-) -> None:
-    """Record a 1-5 star rating. Never raises.
+def conversation_turns(
+    messages: list[dict[str, Any]], turn_index: int | None = None
+) -> list[dict[str, str]]:
+    """A message history as completed ``{"user", "assistant"}`` pairs.
 
-    Unlike thumbs, the id here is exact: it comes from the action payload, which
-    carries the assistant message id the score rows are keyed by.
+    Tool and system messages fall out; an assistant message only counts once a
+    user question precedes it (the paired shape is what a benchmark replays), and
+    a trailing unanswered user turn is dropped. ``turn_index`` truncates to the
+    first N pairs.
+
+    Works on both message shapes this app stores: the in-session OpenAI list and
+    the rows ``chat_history.get_session_messages`` returns.
     """
-    cfg, ev = _resolve(cfg)
-    if not ev.enabled:
-        return
-    await _post(
-        ev,
-        "/api/rating",
-        {
-            "stars": stars,
-            "message_id": message_id,
-            "thread_id": thread_id,
-            "config_signature": config_signature(cfg, chat_model),
-        },
-    )
+    turns: list[dict[str, str]] = []
+    pending_user: str | None = None
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        if role == "user":
+            pending_user = content
+        elif role == "assistant" and pending_user is not None:
+            turns.append({"user": pending_user, "assistant": content})
+            pending_user = None
+    if turn_index is not None:
+        turns = turns[: max(0, turn_index)]
+    return turns
+
+
+def gold_suggested(summary: dict[str, Any], ev) -> bool:
+    """Whether the badge should offer to save this conversation as gold.
+
+    The judge scouts, the human decides: the newest scored answer clearing both
+    thresholds makes the badge grow its marker, and the save action sits in the
+    panel. Never suggested when either threshold is off (``null``), when the
+    metric is missing (a failed judge is not evidence of quality), or when this
+    answer is already gold (re-asking would nag).
+    """
+    if ev.gold_min_faithfulness is None or ev.gold_min_relevance is None:
+        return False
+    if summary.get("last_message_gold"):
+        return False
+    faithfulness = summary.get("last_faithfulness")
+    relevance = summary.get("last_relevance")
+    if faithfulness is None or relevance is None:
+        return False
+    return faithfulness >= ev.gold_min_faithfulness and relevance >= ev.gold_min_relevance
 
 
 async def post_gold(

@@ -151,7 +151,7 @@ Begründungen des Judges je Aussage: die stammen aus den englischen Prompts von 
 und bleiben so oder so englisch.
 
 Wenn du die Zahlen sammeln willst, ohne sie jemandem vor die Nase zu setzen, setze
-`show_badge: false`. Das Dashboard füllt sich weiterhin.
+`show_badge: false`. Die Daten sammeln sich trotzdem für spätere Vergleiche.
 
 Läuft der Dienst nicht, speichert die App einfach nichts. Du siehst keinen Fehler,
 und die Antworten sind unverändert.
@@ -224,24 +224,22 @@ alles andere, du musst also nichts zusätzlich einrichten.
 Richte `judge_model` möglichst auf ein **anderes** Modell als das bewertete. Ein
 Modell, das seine eigene Arbeit benotet, ist mit sich selbst meist großzügig.
 
-## Das Dashboard
+## Der Vergleich — der zweite Tab des Abzeichens
 
-Wenn der Dienst läuft, liegt das Dashboard auf **<http://localhost:8001>**.
-
-Es gibt dafür einen Link in der Kopfzeile der App, der ist aber standardmäßig
-auskommentiert, damit Leute, die die Evaluation nie einschalten, keinen Link ins
-Leere bekommen. Zum Aktivieren den `[[UI.header_links]]`-Block für Evaluation in
-`apps/chainlit/.chainlit/config.toml` einkommentieren.
+Klick auf das Abzeichen öffnet das Panel mit zwei Tabs. **Dieses Gespräch** ist
+die oben beschriebene Gesprächsansicht. **Vergleich** ist die Gegenüberstellung:
+eine Zeile je Konfiguration, geholt über die App selbst — der Browser spricht nie
+direkt mit dem Eval-Dienst, also gibt es keine zweite Adresse, keinen zweiten
+Login und keine zweite Sprache.
 
 Die Tabelle zeigt eine Zeile pro Konfiguration:
 
 | Spalte | Bedeutung |
 |---|---|
-| Configuration | Chat-Modell, Embedding-Modell, Chunking und Collection |
-| Answers | Wie viele Antworten damit bewertet wurden |
-| Faithfulness | Mittelwert über diese Antworten |
-| Relevance | Mittelwert über diese Antworten |
-| Thumbs | Wie oft „hilfreich" bzw. „nicht hilfreich" geklickt wurde |
+| Konfiguration | Chat-Modell, darunter Chunking und Collection |
+| n | Wie viele Antworten damit bewertet wurden |
+| Treue | Mittelwert über diese Antworten |
+| Relevanz | Mittelwert über diese Antworten |
 
 Achte auf die Anzahl der Antworten. „0,91 über 3 Antworten" und „0,91 über 300"
 sind nicht dieselbe Aussage.
@@ -286,33 +284,35 @@ Live-Werte sagen dir, wie jede Konfiguration mit dem umging, *was die Leute zuf�
 gefragt haben*. Ein Benchmark stellt jeder Konfiguration *dieselben Fragen* — und
 die kommen von dir.
 
-**Gold markieren.** Unter jeder Antwort gibt es (bei eingeschalteter Evaluation)
-zwei zusätzliche Knöpfe. „Als Gold speichern" friert das Gespräch bis zu dieser
-Antwort ein — jede Frage und jede Antwort, in Reihenfolge — als Referenz. Markiere
-eine Antwort, wenn der ganze Austausch dorthin gut war; ein einzelnes
-Frage-Antwort-Paar ist einfach ein Gespräch mit einer Runde. Zweimal markieren
-ändert nichts. „Bewerten" speichert eine Bewertung mit 1-5 Sternen, die je
-Konfiguration im Dashboard erscheint — ein menschliches Gegengewicht zu den Zahlen
-des Judges.
+**Gold markieren — der Quest-Marker.** Wenn eine Antwort über den Schwellen
+liegt (`gold_min_faithfulness`, Standard 0,9, und `gold_min_relevance`, Standard
+0,8), erscheint am Abzeichen ein gelbes **!** — die Videospiel-Konvention für
+„hier gibt es etwas zu tun". Ein Klick aufs Abzeichen öffnet das Panel mit dem
+Angebot: *Starke Antwort — als Gold-Referenz speichern?* Speichern friert das
+Gespräch bis zu dieser Antwort ein — jede Frage und jede Antwort, in Reihenfolge —
+als Referenz; ein einzelnes Frage-Antwort-Paar ist einfach ein Gespräch mit einer
+Runde. Ignorieren (✕) zieht den Marker für diese Antwort zurück. Der Judge späht
+vor, du entscheidest: Hohe Werte heißen nicht *vollständig*, deshalb wird nie
+automatisch gespeichert. Eine der Schwellen auf `null` setzen schaltet den
+Vorschlag ganz ab.
 
-**Benchmark starten.** Sobald mindestens ein Gold-Gespräch existiert, bekommt jede
-Zeile der Vergleichstabelle im Dashboard einen Play-Knopf (▶). Ein Klick stellt den
-gesamten Gold-Datensatz mit dem Chat-Modell dieser Zeile erneut: Runde für Runde,
-mit den *eigenen* vorherigen Antworten des wiederholenden Modells als
-Gesprächsverlauf — eine falsche Antwort in Runde 1 verändert also die Prämisse von
-Runde 2, genau wie bei einem echten Nutzer. Diese Drift ist das, was ein
-Gesprächs-Benchmark misst. Jede Runde wird auf Treue, Relevanz und **Ähnlichkeit**
-bewertet — Embedding-Kosinus gegen die Gold-Antwort dieser Runde.
+**Benchmark starten** stellt den gesamten Gold-Datensatz mit einem gewählten
+Chat-Modell erneut: Runde für Runde, mit den *eigenen* vorherigen Antworten des
+wiederholenden Modells als Gesprächsverlauf — eine falsche Antwort in Runde 1
+verändert also die Prämisse von Runde 2, genau wie bei einem echten Nutzer. Diese
+Drift ist das, was ein Gesprächs-Benchmark misst. Jede Runde wird auf Treue,
+Relevanz und **Ähnlichkeit** bewertet — Embedding-Kosinus gegen die Gold-Antwort
+dieser Runde. Gestartet wird ein Lauf vorerst über die Kommandozeile (unten); ein
+Auslöser im Abzeichen-Panel ist der geplante nächste Schritt.
 
 Drei Regeln halten die Zahlen ehrlich:
 
 - **Der Judge ist je Lauf fest** — `evaluation.judge_model`, sonst das konfigurierte
   Chat-Modell — und folgt nie dem wiederholten Modell. Ein Modell, das sich selbst
   benotet, ist kein Vergleich.
-- **Replay-Zeilen landen nie in der Live-Tabelle.** Sie aggregieren in ihrem
-  eigenen Abschnitt „Gold-Benchmark". Wiederholte Antworten überspringen die
-  Zitat-Link- und Abbildungs-Nachbearbeitung der App — vergleiche also Läufe mit
-  Läufen, nicht mit Live-Zeilen.
+- **Replay-Zeilen landen nie im Live-Vergleich.** Wiederholte Antworten
+  überspringen die Zitat-Link- und Abbildungs-Nachbearbeitung der App — vergleiche
+  also Läufe mit Läufen, nicht mit Live-Zeilen.
 - **Die Abdeckung steht als `n/alle Runden` dabei.** Macht ein neu ingestierter
   Korpus Gold-Fragen unbeantwortbar, zeigt sich die Lücke, statt sich zu verstecken.
 

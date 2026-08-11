@@ -478,6 +478,14 @@ class EvaluationConfig(BaseModel):
     """Show the running conversation score in a badge above the chatbox. ``false``
     still records everything for the dashboard, which is what you want when you would
     rather not put a number in front of workshop participants."""
+    gold_min_faithfulness: float | None = 0.9
+    """An answer scoring at least this on faithfulness (and clearing
+    ``gold_min_relevance``) makes the badge offer to save the conversation as a gold
+    reference — a yellow ``!`` appears on the badge, the save action sits in its
+    panel. ``null`` turns the suggestion off entirely."""
+    gold_min_relevance: float | None = 0.8
+    """The relevance half of the gold suggestion threshold. Set lower than
+    faithfulness by default because relevance is the noisier judge metric."""
     service_url: str = "http://eval:8001"
     """Base URL of the ``eval_app`` service. The default resolves on the compose
     network; running locally with ``uv run`` it is ``http://localhost:8001``."""

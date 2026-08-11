@@ -413,3 +413,43 @@ def test_an_old_database_gains_the_new_columns_and_tables(tmp_path):
     assert row["answers"] == 1, "pre-migration rows default to source='live'"
     storage.add_gold(path, turns=TURNS, config_signature=SIG_A)
     assert storage.claim_pending_job(path) is None, "jobs table exists and is empty"
+
+
+# --------------------------------------------------------------------------- #
+# The gold suggestion's two storage facts
+# --------------------------------------------------------------------------- #
+
+
+def test_the_summary_names_the_newest_scored_answer(db):
+    _score(db, thread_id="t-1", message_id="m-old", faithfulness=0.5)
+    _score(db, thread_id="t-1", message_id="m-new", faithfulness=1.0)
+
+    s = storage.thread_summary(db, "t-1")
+    assert s["last_message_id"] == "m-new"
+    assert s["last_message_gold"] is False
+
+
+def test_the_summary_knows_when_that_answer_is_already_gold(db):
+    _score(db, thread_id="t-1", message_id="m-1", faithfulness=1.0)
+    storage.add_gold(db, turns=TURNS, config_signature=SIG_A, message_id="m-1")
+
+    assert storage.thread_summary(db, "t-1")["last_message_gold"] is True
+
+
+def test_a_retired_gold_row_lets_the_suggestion_return(db):
+    _score(db, thread_id="t-1", message_id="m-1", faithfulness=1.0)
+    storage.add_gold(db, turns=TURNS, config_signature=SIG_A, message_id="m-1")
+    with storage.connect(db) as conn:
+        conn.execute("UPDATE gold_answers SET active = 0")
+
+    assert storage.thread_summary(db, "t-1")["last_message_gold"] is False
+
+
+def test_gold_takes_its_signature_from_the_score_row_when_one_exists(db):
+    # The score row recorded the model that actually answered; a caller without a
+    # session can only offer the configured default. The recorded truth wins.
+    _score(db, sig=SIG_B, message_id="m-1", faithfulness=1.0)
+    storage.add_gold(db, turns=TURNS, config_signature=SIG_A, message_id="m-1")
+
+    (entry,) = storage.list_gold(db)
+    assert entry["config_signature"] == SIG_B

@@ -185,8 +185,12 @@ services:
       # A named volume, not a bind mount: this is SQLite in WAL mode and needs real
       # POSIX locking, exactly as described for chat_db above.
       - eval_db:/app/.evaldb
-    ports:
-      - "${EVAL_PORT:-8001}:8001"
+    # No published port on purpose: the browser never talks to this service. The
+    # app proxies everything it needs (/eval-status, /eval-stats, /eval-gold) over
+    # the compose network, behind its own login. The raw dashboard and API still
+    # exist inside the network — uncomment to expose them for debugging:
+    # ports:
+    #   - "${EVAL_PORT:-8001}:8001"
 
 volumes:
   postgres_data:

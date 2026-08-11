@@ -145,7 +145,7 @@ reasons are the exception: those come from RAGAS's English prompts and stay Engl
 either way.
 
 If you would rather collect the numbers without putting them in front of anyone,
-set `show_badge: false`. The dashboard still fills up.
+set `show_badge: false`. The data still accumulates for later comparison.
 
 If the service is not running, the app simply records nothing. You will not see an
 error and answers are unaffected.
@@ -215,24 +215,22 @@ else, so there is nothing extra to configure.
 Point `judge_model` at a **different** model from the one being judged if you can.
 A model grading its own work tends to be generous with itself.
 
-## The dashboard
+## The comparison — the badge's second tab
 
-With the service running, the dashboard is at **<http://localhost:8001>**.
-
-There is a link in the app header for it, but it is commented out by default so
-that people who never turn evaluation on do not get a link that goes nowhere. To
-enable it, uncomment the `[[UI.header_links]]` block for Evaluation in
-`apps/chainlit/.chainlit/config.toml`.
+Click the badge and the panel opens with two tabs. **Dieses Gespräch** is the
+conversation view described above. **Vergleich** is the comparison: one row per
+configuration, fetched through the app itself — the browser never talks to the
+eval service directly, so there is no second address, no second login, and no
+second language.
 
 The table shows one row per configuration:
 
 | Column | Meaning |
 |---|---|
-| Configuration | Chat model, embedding model, chunking, and collection |
-| Answers | How many answers were scored under it |
+| Configuration | Chat model, with chunking and collection beneath it |
+| n | How many answers were scored under it |
 | Faithfulness | Average across those answers |
 | Relevance | Average across those answers |
-| Thumbs | How often people clicked helpful or not helpful |
 
 Watch the answer count. "0.91 across 3 answers" and "0.91 across 300" are not the
 same claim.
@@ -276,31 +274,33 @@ Live scores tell you how each configuration handled *whatever people happened to
 ask it*. A benchmark asks every configuration *the same questions* — and those
 questions come from you.
 
-**Marking gold.** Under every answer (while evaluation is on) there are two extra
-buttons. "Als Gold speichern" freezes the conversation up to that answer — every
-question you asked and every answer you got, in order — as a reference. Mark an
-answer when the whole exchange leading to it was good; a single Q&A is just a
-one-turn conversation. Marking the same answer twice changes nothing. "Bewerten"
-records a 1-5 star rating, which shows up per configuration in the dashboard —
-a human counterweight to the judge's numbers.
+**Marking gold — the quest marker.** When an answer scores above the thresholds
+(`gold_min_faithfulness`, default 0.9, and `gold_min_relevance`, default 0.8), a
+yellow **!** appears on the badge — the video-game convention for "something worth
+doing here". Click the badge and the panel opens with the offer: *Starke Antwort —
+als Gold-Referenz speichern?* Saving freezes the conversation up to that answer —
+every question and every answer, in order — as a reference; a single Q&A is just a
+one-turn conversation. Dismissing (✕) retires the marker for that answer. The
+judge scouts, you decide: high scores do not mean *complete*, which is why the
+save is never automatic. Set either threshold to `null` to turn the suggestion
+off.
 
-**Running a benchmark.** Once at least one gold conversation exists, every row in
-the dashboard's comparison table gets a play button (▶). Clicking it re-asks the
-entire gold set with that row's chat model: turn by turn, with the *replayed
-model's own* previous answers as the conversation history — so a wrong turn-1
-answer changes the premise of turn 2, exactly as it would for a real user. That
-drift is what a conversation benchmark measures. Each turn is scored on
-faithfulness, relevance and **similarity** — embedding cosine against the gold
-answer for that turn.
+**Running a benchmark** re-asks the entire gold set with a chosen chat model:
+turn by turn, with the *replayed model's own* previous answers as the
+conversation history — so a wrong turn-1 answer changes the premise of turn 2,
+exactly as it would for a real user. That drift is what a conversation benchmark
+measures. Each turn is scored on faithfulness, relevance and **similarity** —
+embedding cosine against the gold answer for that turn. For now a run starts from
+the CLI (below); a trigger inside the badge panel is the planned next step.
 
 Three rules keep the numbers honest:
 
 - **The judge is pinned per run** — `evaluation.judge_model`, or the configured
   chat model — and never follows the replayed model. A model grading itself is
   not a comparison.
-- **Replay rows never enter the live table.** They aggregate in their own "Gold
-  benchmark" section. Replayed answers skip the app's citation-link and figure
-  post-processing, so compare runs with runs, not with live rows.
+- **Replay rows never enter the live comparison.** Replayed answers skip the
+  app's citation-link and figure post-processing, so compare runs with runs, not
+  with live rows.
 - **Coverage is shown as `n/total turns`.** If a re-ingested corpus makes gold
   questions unanswerable, the gap shows instead of hiding.
 

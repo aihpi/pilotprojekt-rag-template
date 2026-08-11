@@ -154,3 +154,82 @@ img[src*="/logo"] { height: 96px !important; max-height: 96px !important; width:
 #rag-eval-badge-panel .reb-warn {
   padding-top: .55rem; border-top: 1px solid hsl(var(--border));
 }
+
+/* ---- The quest marker and its panel row ----------------------------------
+ * A strong answer is waiting to be saved as gold. Yellow on purpose: red reads
+ * as danger, and the marker announces an opportunity — the video-game
+ * quest-available convention. One amber that carries on light and dark. */
+#rag-eval-badge .reb-gold-mark, #rag-eval-badge-panel .reb-gold-mark {
+  color: #d97706; font-weight: 800; font-size: 1.05em; line-height: 1;
+}
+/* Plays once when the marker enters the DOM (a new suggestion), then rests. */
+#rag-eval-badge .reb-gold-mark { animation: reb-gold-pop 1.2s ease-in-out 2; }
+@keyframes reb-gold-pop {
+  0%, 100% { transform: none; opacity: 1; }
+  50% { transform: translateY(-2px) scale(1.25); opacity: .85; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #rag-eval-badge .reb-gold-mark { animation: none; }
+}
+#rag-eval-badge-panel .reb-suggest {
+  display: flex; align-items: center; gap: .5rem;
+  margin: 0 0 .7rem; padding: .45rem .6rem; border-radius: .45rem;
+  background: rgba(217, 119, 6, .12); color: hsl(var(--foreground));
+}
+#rag-eval-badge-panel .reb-suggest[data-saved="1"] {
+  background: rgba(72, 187, 120, .14);
+}
+#rag-eval-badge-panel .reb-suggest button {
+  font: inherit; cursor: pointer; border-radius: .35rem;
+  border: 1px solid hsl(var(--border)); background: transparent;
+  color: hsl(var(--foreground)); padding: .15rem .6rem;
+}
+#rag-eval-badge-panel .reb-suggest button:hover { border-color: hsl(var(--ring)); }
+#rag-eval-badge-panel .reb-suggest .reb-save { font-weight: 600; margin-left: auto; }
+#rag-eval-badge-panel .reb-suggest .reb-dismiss { border: none; opacity: .7; padding: .15rem .3rem; }
+
+/* ---- Panel tabs ----------------------------------------------------------- */
+#rag-eval-badge-panel .reb-tabs {
+  display: flex; gap: .25rem; margin: 0 0 .7rem;
+  border-bottom: 1px solid hsl(var(--border)); padding-bottom: .45rem;
+}
+#rag-eval-badge-panel .reb-tab {
+  font: inherit; cursor: pointer; border: none; border-radius: .35rem;
+  background: transparent; color: hsl(var(--muted-foreground));
+  padding: .2rem .65rem;
+}
+#rag-eval-badge-panel .reb-tab[data-active="1"] {
+  background: hsl(var(--muted)); color: hsl(var(--foreground)); font-weight: 600;
+}
+
+/* ---- The comparison tab ---------------------------------------------------
+ * Same two series colours as everywhere else in the feature: blue is
+ * faithfulness, orange is relevance. */
+#rag-eval-badge-panel .reb-hint { margin: 0 0 .6rem; color: hsl(var(--muted-foreground)); }
+#rag-eval-badge-panel .reb-table { width: 100%; border-collapse: collapse; }
+#rag-eval-badge-panel .reb-table th {
+  text-align: left; font-weight: 500; color: hsl(var(--muted-foreground));
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .04em;
+  padding: 0 .4rem .3rem 0;
+}
+#rag-eval-badge-panel .reb-table td {
+  padding: .4rem .4rem .4rem 0; border-top: 1px solid hsl(var(--border));
+  vertical-align: middle;
+}
+#rag-eval-badge-panel .reb-table td small {
+  display: block; color: hsl(var(--muted-foreground)); font-size: .68rem;
+}
+#rag-eval-badge-panel .reb-n { text-align: right; font-variant-numeric: tabular-nums; }
+#rag-eval-badge-panel .reb-cbar { display: flex; align-items: center; gap: .45rem; min-width: 7rem; }
+#rag-eval-badge-panel .reb-cbar b { font-variant-numeric: tabular-nums; min-width: 2.6ch; text-align: right; }
+#rag-eval-badge-panel .reb-track {
+  flex: 1; height: 6px; border-radius: 3px; overflow: hidden;
+  background: hsl(var(--muted)); display: inline-block;
+}
+#rag-eval-badge-panel .reb-fill { display: block; height: 100%; border-radius: 0 3px 3px 0; }
+#rag-eval-badge-panel .reb-fill.f { background: #2a78d6; }
+#rag-eval-badge-panel .reb-fill.r { background: #eb6834; }
+@media (prefers-color-scheme: dark) {
+  #rag-eval-badge-panel .reb-fill.f { background: #3987e5; }
+  #rag-eval-badge-panel .reb-fill.r { background: #d95926; }
+}

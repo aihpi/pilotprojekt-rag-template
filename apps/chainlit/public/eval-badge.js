@@ -76,6 +76,21 @@
         "Beide Werte stammen von einem Sprachmodell, das ein anderes bewertet, und " +
         "tragen dessen Meinung und Rauschen mit. Einzelwerte sagen wenig, " +
         "Veränderungen sagen etwas.",
+      tabChat: "Dieses Gespräch",
+      tabCompare: "Vergleich",
+      compareHint: "Als Veränderung lesen, nicht als Note. Sortiert nach bewerteten Antworten.",
+      compareEmpty: "Noch keine bewerteten Antworten.",
+      compareError: "Vergleich nicht verfügbar — Eval-Dienst nicht erreichbar.",
+      colConfig: "Konfiguration",
+      colAnswers: "n",
+      loading: "Laden…",
+      suggestText: "Starke Antwort — als Gold-Referenz speichern?",
+      suggestSave: "Speichern",
+      suggestDismiss: "Ignorieren",
+      suggestSaved: "Als Gold-Referenz gespeichert ({n} {turnWord}).",
+      turns: ["Runde", "Runden"],
+      suggestFailed: "Speichern fehlgeschlagen — Dienst nicht erreichbar.",
+      markerTitle: "Starke Antwort erkannt — Details im Panel",
     },
     en: {
       scoring: "Scoring…",
@@ -108,6 +123,21 @@
       caveat:
         "Both values come from one language model judging another, and carry its " +
         "opinion and its noise. Single values say little, changes say something.",
+      tabChat: "This conversation",
+      tabCompare: "Compare",
+      compareHint: "Read as deltas, not as grades. Sorted by scored answers.",
+      compareEmpty: "No scored answers yet.",
+      compareError: "Comparison unavailable — eval service unreachable.",
+      colConfig: "Configuration",
+      colAnswers: "n",
+      loading: "Loading…",
+      suggestText: "Strong answer — save as a gold reference?",
+      suggestSave: "Save",
+      suggestDismiss: "Dismiss",
+      suggestSaved: "Saved as a gold reference ({n} {turnWord}).",
+      turns: ["turn", "turns"],
+      suggestFailed: "Saving failed — service unreachable.",
+      markerTitle: "Strong answer detected — details in the panel",
     },
   };
 
@@ -140,6 +170,15 @@
   var lastStatus = null;
   var lastPath = null;
   var pollTimer = null;
+  /* Which panel tab is showing. The conversation is the default; the comparison
+   * is fetched lazily when its tab is first opened. */
+  var activeTab = "chat";
+  var compareRows = null; /* null = not loaded, "error" = fetch failed */
+  /* Suggestions the user waved away, keyed by answer id. Page-lifetime on
+   * purpose: a dismissal is "not now", not "never" — a reload may ask again.
+   * ponytail: move to localStorage if that ever annoys anyone. */
+  var dismissedGold = {};
+  var goldSavedText = null; /* confirmation shown in place of the suggestion row */
 
   /* One self-rescheduling timer rather than a fixed setInterval, so the cadence can
    * follow whether a judge is currently running. */
@@ -153,6 +192,23 @@
     if (panel) return panel;
     panel = document.createElement("div");
     panel.id = ID + "-panel";
+    // One delegated listener instead of re-binding after every innerHTML swap.
+    panel.addEventListener("click", function (event) {
+      var target = event.target.closest ? event.target.closest("[data-tab],[data-gold-save],[data-gold-dismiss]") : null;
+      if (!target) return;
+      event.stopPropagation();
+      if (target.hasAttribute("data-tab")) {
+        var tab = target.getAttribute("data-tab");
+        if (tab === activeTab) return;
+        activeTab = tab;
+        if (tab === "compare") loadCompare();
+        refreshPanel(true);
+      } else if (target.hasAttribute("data-gold-save")) {
+        saveGold();
+      } else {
+        dismissGold();
+      }
+    });
     document.body.appendChild(panel);
     return panel;
   }
@@ -220,7 +276,96 @@
     return out.join("");
   }
 
-  function panelHtml(status) {
+  /* Does the current status carry a live (not dismissed, not saved) suggestion? */
+  function goldActive(status) {
+    return !!(
+      status &&
+      status.gold_suggest &&
+      status.last_message_id &&
+      !dismissedGold[status.last_message_id]
+    );
+  }
+
+  function suggestionHtml(status) {
+    if (goldSavedText) {
+      return '<div class="reb-suggest" data-saved="1">&#10003; ' + goldSavedText + "</div>";
+    }
+    if (!goldActive(status)) return "";
+    return (
+      '<div class="reb-suggest">' +
+      '<span class="reb-gold-mark">!</span>' +
+      "<span>" + strings.suggestText + "</span>" +
+      '<button type="button" class="reb-save" data-gold-save="1">' +
+      strings.suggestSave + "</button>" +
+      '<button type="button" class="reb-dismiss" data-gold-dismiss="1" title="' +
+      strings.suggestDismiss + '" aria-label="' + strings.suggestDismiss + '">&#10005;</button>' +
+      "</div>"
+    );
+  }
+
+  function tabsHtml() {
+    function tab(id, label) {
+      return (
+        '<button type="button" class="reb-tab" data-tab="' + id + '"' +
+        (activeTab === id ? ' data-active="1"' : "") + ">" + label + "</button>"
+      );
+    }
+    return '<div class="reb-tabs">' + tab("chat", strings.tabChat) + tab("compare", strings.tabCompare) + "</div>";
+  }
+
+  function compareHtml() {
+    if (compareRows === null) return '<p class="reb-hint">' + strings.loading + "</p>";
+    if (compareRows === "error") return '<p class="reb-hint">' + strings.compareError + "</p>";
+    if (!compareRows.length) return '<p class="reb-hint">' + strings.compareEmpty + "</p>";
+
+    function cell(value, series) {
+      if (value === null || value === undefined) return "<td></td>";
+      return (
+        '<td><div class="reb-cbar"><span class="reb-track"><span class="reb-fill ' +
+        series + '" style="width:' + pct(value) + '"></span></span><b>' +
+        pct(value) + "</b></div></td>"
+      );
+    }
+
+    var rows = compareRows
+      .slice()
+      .sort(function (a, b) { return b.answers - a.answers; })
+      .map(function (r) {
+        var parts = String(r.config_signature || "").split("|");
+        var name = escapeHtml(parts[0] || "?");
+        var sub = parts.length >= 5
+          ? escapeHtml(parts[2] + " @ " + parts[3] + " · " + parts[4])
+          : "";
+        return (
+          "<tr><td><b>" + name + "</b>" +
+          (sub ? '<small>' + sub + "</small>" : "") + "</td>" +
+          '<td class="reb-n">' + r.answers + "</td>" +
+          cell(r.faithfulness, "f") + cell(r.relevance, "r") + "</tr>"
+        );
+      })
+      .join("");
+
+    return (
+      '<p class="reb-hint">' + strings.compareHint + "</p>" +
+      '<table class="reb-table"><thead><tr><th>' + strings.colConfig +
+      '</th><th class="reb-n">' + strings.colAnswers + "</th><th>" +
+      strings.faithfulness + "</th><th>" + strings.relevance + "</th></tr></thead>" +
+      "<tbody>" + rows + "</tbody></table>"
+    );
+  }
+
+  function loadCompare() {
+    compareRows = null;
+    fetch("/eval-stats", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (payload) { compareRows = payload.configs || []; })
+      .catch(function () { compareRows = "error"; })
+      .then(function () {
+        if (isOpen() && activeTab === "compare") refreshPanel();
+      });
+  }
+
+  function conversationHtml(status) {
     return [
       detailHtml(status),
       "<h4>" + strings.quality + "</h4>",
@@ -243,6 +388,62 @@
       "</dl>",
       '<div class="reb-warn">' + strings.caveat + "</div>",
     ].join("");
+  }
+
+  function panelHtml(status) {
+    return (
+      suggestionHtml(status) +
+      tabsHtml() +
+      (activeTab === "compare" ? compareHtml() : conversationHtml(status))
+    );
+  }
+
+  /* Redraw the open panel in place, keeping scroll position semantics simple:
+   * a tab switch starts at the top, a data refresh keeps the reader's place. */
+  function refreshPanel(resetScroll) {
+    if (!panel || !isOpen() || !lastStatus) return;
+    panel.innerHTML = panelHtml(lastStatus);
+    if (resetScroll) panel.scrollTop = 0;
+    positionPanel();
+  }
+
+  function saveGold() {
+    var status = lastStatus;
+    if (!goldActive(status)) return;
+    var messageId = status.last_message_id;
+    var m = /\/thread\/([0-9a-fA-F-]{36})/.exec(location.pathname);
+    fetch("/eval-gold", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ thread_id: m ? m[1] : status.thread_id, message_id: messageId }),
+    })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (payload) {
+        var n = payload.turns || 1;
+        goldSavedText = fill(strings.suggestSaved, { n: n, turnWord: plural(strings.turns, n) });
+      })
+      .catch(function () {
+        goldSavedText = strings.suggestFailed;
+      })
+      .then(function () {
+        dismissedGold[messageId] = true; // the marker's job is done either way
+        refreshPanel();
+        render(lastStatus);
+        setTimeout(function () {
+          goldSavedText = null;
+          refreshPanel();
+          poll(); // the server now reports the answer as gold
+        }, 4000);
+      });
+  }
+
+  function dismissGold() {
+    if (lastStatus && lastStatus.last_message_id) {
+      dismissedGold[lastStatus.last_message_id] = true;
+    }
+    refreshPanel();
+    render(lastStatus);
   }
 
   function element() {
@@ -277,6 +478,7 @@
   function openPanel() {
     if (!lastStatus) return;
     var p = panelElement();
+    if (activeTab === "compare") loadCompare(); // reopenings get fresh numbers
     p.innerHTML = panelHtml(lastStatus);
     p.setAttribute("data-open", "1");
     p.scrollTop = 0;
@@ -391,6 +593,15 @@
           " " +
           plural(strings.answers, status.answers) +
           "</span>"
+      );
+    }
+
+    // The quest marker: a strong answer is waiting to be saved as gold. The CSS
+    // animation plays once when the element is (re)created, i.e. when the marker
+    // first appears — later identical payloads never re-render, so it sits still.
+    if (goldActive(status)) {
+      parts.push(
+        '<span class="reb-gold-mark" title="' + strings.markerTitle + '">!</span>'
       );
     }
 

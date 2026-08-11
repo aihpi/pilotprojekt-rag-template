@@ -316,6 +316,24 @@ def thread_summary(db_path: Path, thread_id: str) -> dict[str, Any]:
             (thread_id,),
         ).fetchone()
 
+        # Which answer the newest score belongs to, and whether that answer is
+        # already a gold reference — the two facts the badge's gold suggestion
+        # needs: the id keys the save request (and the browser's dismissals), the
+        # flag keeps an accepted suggestion from ever nagging again.
+        newest = conn.execute(
+            """
+            SELECT message_id,
+                   EXISTS(SELECT 1 FROM gold_answers g
+                          WHERE g.message_id = eval_scores.message_id
+                            AND g.active = 1)  AS is_gold
+            FROM eval_scores
+            WHERE thread_id = ?
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+            """,
+            (thread_id,),
+        ).fetchone()
+
     detail = None
     if detail_row and detail_row["detail"]:
         try:
@@ -330,6 +348,8 @@ def thread_summary(db_path: Path, thread_id: str) -> dict[str, Any]:
         "relevance": row["relevance"],
         **last,
         "last_detail": detail,
+        "last_message_id": newest["message_id"] if newest else None,
+        "last_message_gold": bool(newest["is_gold"]) if newest else False,
     }
 
 
@@ -392,9 +412,21 @@ def add_gold(
     be replayed (and counted) twice. Returns the existing row's id in that case,
     so the caller cannot tell the difference — which is the right amount of
     information for an idempotent action.
+
+    When a score row exists for ``message_id``, its ``config_signature`` wins over
+    the posted one: the score row recorded the model that actually answered, while
+    a caller with no session context can only offer the configured default.
     """
     gold_id = str(uuid.uuid4())
     with connect(db_path) as conn:
+        if message_id is not None:
+            scored = conn.execute(
+                "SELECT config_signature FROM eval_scores WHERE message_id = ?"
+                " ORDER BY timestamp DESC LIMIT 1",
+                (message_id,),
+            ).fetchone()
+            if scored:
+                config_signature = scored["config_signature"]
         cursor = conn.execute(
             """
             INSERT OR IGNORE INTO gold_answers

@@ -18,7 +18,7 @@ import chainlit as cl
 from chainlit.auth import get_current_user
 from chainlit.input_widget import Select, Switch, Tags, TextInput
 from chainlit.types import Starter
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
@@ -41,7 +41,14 @@ from chat_history import (
     update_chat_session_metadata,
     upsert_user_profile,
 )
-from evaluation import post_feedback, post_gold, post_rating, post_score, trend_sign
+from evaluation import (
+    conversation_turns,
+    gold_suggested,
+    post_feedback,
+    post_gold,
+    post_score,
+    trend_sign,
+)
 from llm import cached_chat_models, chat, list_chat_models, message_to_dict
 from tools import ToolContext, build_openai_tools
 from native_chat import (
@@ -1979,7 +1986,6 @@ def _build_chat_actions(
     source_step_id: str,
     citation_panel_content: str | None = None,
     citation_source_rows: list[dict[str, Any]] | None = None,
-    turn_index: int | None = None,
 ) -> list[cl.Action]:
     normalized_followups = _sanitize_followup_questions(followup_questions)
     base_payload: dict[str, Any] = {
@@ -2015,33 +2021,6 @@ def _build_chat_actions(
                     **base_payload,
                     "question": question,
                 },
-            )
-        )
-    if get_config().evaluation.enabled:
-        # source_step_id is the assistant message id — the same key the eval store
-        # files scores under — so both payloads join exactly, without the forId
-        # ambiguity that keeps thumbs from finding their score row.
-        actions.append(
-            cl.Action(
-                name="rate_answer",
-                label="Bewerten",
-                tooltip="Antwort mit 1-5 Sternen bewerten",
-                icon="star",
-                payload={"message_id": source_step_id},
-            )
-        )
-        actions.append(
-            cl.Action(
-                name="mark_gold",
-                label="Als Gold speichern",
-                tooltip="Gespräch bis hier als Referenz für Benchmarks einfrieren",
-                icon="bookmark",
-                # turn_index says how many user turns the conversation had when this
-                # answer was produced, so marking an OLDER answer freezes only the
-                # turns up to it. ponytail: absent on actions restored after a
-                # resume — the callback then freezes the whole conversation and its
-                # confirmation says how many turns that was.
-                payload={"message_id": source_step_id, "turn_index": turn_index},
             )
         )
     return actions
@@ -2408,7 +2387,69 @@ async def on_app_startup() -> None:
             # Why the last scored answer got those numbers, for the panel.
             "detail": summary.get("last_detail"),
             "lang": lang,
+            # The quest marker: the newest answer cleared the gold thresholds and
+            # is not yet a reference. The id keys the save request and lets the
+            # browser remember a dismissal.
+            "gold_suggest": gold_suggested(summary, cfg.evaluation),
+            "last_message_id": summary.get("last_message_id"),
         }
+
+    @chainlit_fastapi_app.get("/eval-stats")
+    async def eval_stats(current_user=Depends(get_current_user)):
+        """The per-configuration comparison, for the badge panel's second tab.
+
+        Proxied server-side so the browser never needs the eval service's port:
+        the eval container stays a pure backend, and this route inherits the
+        app's auth and network position. Only ``configs`` is forwarded — the
+        panel's table needs nothing else, and the gold turns in the full stats
+        payload can be large.
+        """
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        cfg = get_config()
+        if not cfg.evaluation.enabled:
+            return {"enabled": False}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+                response = await client.get(f"{cfg.evaluation.service_url.rstrip('/')}/api/stats")
+                response.raise_for_status()
+                payload = response.json()
+        except Exception as exc:
+            print(f"[WARN] eval_stats_unavailable: {exc.__class__.__name__}: {exc}")
+            return {"enabled": True, "configs": []}
+        return {"enabled": True, "configs": payload.get("configs", [])}
+
+    @chainlit_fastapi_app.post("/eval-gold")
+    async def eval_gold(request: Request, current_user=Depends(get_current_user)):
+        """Freeze a conversation as a gold reference, from the badge's suggestion.
+
+        The turns come from the app's own chat history rather than a live session:
+        this is a plain HTTP route (the badge script calls it), so there is no
+        ``cl.user_session`` to ask — and the SQLite history survives reloads,
+        which a session would not. The eval service swaps in the config signature
+        of the scored answer, so the reference is filed under the model that
+        actually produced it.
+        """
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        if not get_config().evaluation.enabled:
+            raise HTTPException(status_code=404, detail="evaluation disabled")
+        body = await request.json()
+        thread_id = body.get("thread_id")
+        if not thread_id:
+            raise HTTPException(status_code=422, detail="thread_id required")
+        history = get_session_messages(CHAT_DB_PATH, thread_id)
+        turns = conversation_turns(history)
+        if not turns:
+            raise HTTPException(status_code=409, detail="no completed turns")
+        response = await post_gold(
+            turns=turns,
+            message_id=body.get("message_id"),
+            thread_id=thread_id,
+        )
+        if response is None:
+            raise HTTPException(status_code=502, detail="eval service unreachable")
+        return {"status": "ok", "turns": len(turns)}
 
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/pdf/{file_name:path}")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/sources/figure/{file_name:path}")
@@ -2418,6 +2459,8 @@ async def on_app_startup() -> None:
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/auth/register")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/ingest-status")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-status")
+    _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-stats")
+    _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-gold")
 
     _patch_cookie_security_openapi_model()
 
@@ -3301,90 +3344,6 @@ async def ask_followup(action: cl.Action):
         await main(cl.Message(content=question))
 
 
-def _conversation_turns(
-    messages: list[dict[str, Any]], turn_index: int | None = None
-) -> list[dict[str, str]]:
-    """The session history as completed ``{"user", "assistant"}`` pairs.
-
-    Tool and system messages fall out; an assistant message only counts once a
-    user question precedes it (the paired shape is what a benchmark replays).
-    ``turn_index`` truncates to the first N pairs, so marking an older answer as
-    gold does not freeze the turns that came after it.
-    """
-    turns: list[dict[str, str]] = []
-    pending_user: str | None = None
-    for message in messages:
-        role = message.get("role")
-        content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            continue
-        if role == "user":
-            pending_user = content
-        elif role == "assistant" and pending_user is not None:
-            turns.append({"user": pending_user, "assistant": content})
-            pending_user = None
-    if turn_index is not None:
-        turns = turns[: max(0, turn_index)]
-    return turns
-
-
-@cl.action_callback("rate_answer")
-async def rate_answer_action(action: cl.Action):
-    """1-5 stars via a picker message — Chainlit's own thumbs are binary and
-    cannot be widened (``Feedback.value: Literal[0, 1]``)."""
-    picked = await cl.AskActionMessage(
-        content="Wie gut war diese Antwort?",
-        actions=[
-            cl.Action(name="stars", label="★" * n, payload={"stars": n})
-            for n in range(1, 6)
-        ],
-        timeout=90,
-        author="System",
-    ).send()
-    stars = ((picked or {}).get("payload") or {}).get("stars")
-    if not stars:
-        return  # timed out or dismissed; nothing to record
-    await post_rating(
-        stars=int(stars),
-        message_id=(action.payload or {}).get("message_id"),
-        thread_id=cl.context.session.thread_id,
-        chat_model=_session_chat_model(),
-    )
-    await cl.Message(
-        content=f"Danke — {'★' * int(stars)} gespeichert.", author="System"
-    ).send()
-
-
-@cl.action_callback("mark_gold")
-async def mark_gold_action(action: cl.Action):
-    """Freeze the conversation up to this answer as a gold benchmark reference."""
-    payload = action.payload or {}
-    turns = _conversation_turns(
-        cl.user_session.get("messages") or [], payload.get("turn_index")
-    )
-    if not turns:
-        await cl.Message(
-            content="Kein abgeschlossenes Frage-Antwort-Paar zum Speichern gefunden.",
-            author="System",
-        ).send()
-        return
-    response = await post_gold(
-        turns=turns,
-        message_id=payload.get("message_id"),
-        thread_id=cl.context.session.thread_id,
-        chat_model=_session_chat_model(),
-    )
-    if response is None:
-        text = "Eval-Dienst nicht erreichbar — bitte später erneut versuchen."
-    else:
-        n = len(turns)
-        text = (
-            f"Als Gold-Referenz gespeichert ({n} {'Runde' if n == 1 else 'Runden'}). "
-            "Benchmarks laufen über das Dashboard auf Port 8001."
-        )
-    await cl.Message(content=text, author="System").send()
-
-
 @cl.on_message
 async def main(message: cl.Message):
     if await _handle_control_message(message):
@@ -3931,7 +3890,6 @@ async def main(message: cl.Message):
             source_step_id=assistant_reply.id,
             citation_panel_content=citation_panel_content,
             citation_source_rows=source_rows_for_session,
-            turn_index=sum(1 for m in messages if m.get("role") == "user"),
         )
         assistant_reply.actions = actions
         print("[DEBUG] followup_actions=", len(followup_questions), "total_actions=", len(actions))
@@ -4049,7 +4007,6 @@ async def main(message: cl.Message):
             followup_questions=followup_questions,
             has_citations_panel=False,
             source_step_id=assistant_reply.id,
-            turn_index=sum(1 for m in messages if m.get("role") == "user"),
         )
         assistant_reply.actions = actions
         await assistant_reply.send()

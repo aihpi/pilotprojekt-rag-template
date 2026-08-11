@@ -319,25 +319,6 @@ def test_the_trend_is_a_sign_and_needs_two_answers(mean, last, answers, expected
 # --------------------------------------------------------------------------- #
 
 
-def test_a_rating_posts_stars_with_the_exact_message_id(monkeypatch):
-    calls = _install_client(monkeypatch)
-    asyncio.run(evaluation.post_rating(
-        stars=4, message_id="m-1", thread_id="t-1",
-        chat_model="gemma-4-31b", cfg=_enabled(),
-    ))
-    url, body = calls[0]
-    assert url.endswith("/api/rating")
-    assert body["stars"] == 4 and body["message_id"] == "m-1"
-    assert body["config_signature"].startswith("gemma-4-31b|"), (
-        "the rating files under the model that answered, like the scores do"
-    )
-
-
-def test_rating_while_disabled_never_opens_a_connection(monkeypatch):
-    monkeypatch.setattr(httpx, "AsyncClient", _ExplodingClient)
-    asyncio.run(evaluation.post_rating(stars=5, cfg=RagConfig()))
-
-
 def test_gold_posts_the_turns_and_reports_the_service_reply(monkeypatch):
     calls = _install_client(monkeypatch, payload={"status": "ok", "gold_id": "g-1"})
     turns = [{"user": "Frage?", "assistant": "Antwort. Quelle 1"}]
@@ -361,3 +342,70 @@ def test_gold_returns_none_when_the_service_is_down(monkeypatch):
 def test_gold_with_no_turns_posts_nothing(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", _ExplodingClient)
     assert asyncio.run(evaluation.post_gold(turns=[], cfg=_enabled())) is None
+
+
+# --------------------------------------------------------------------------- #
+# Conversation turns (feeds gold marking and the benchmark replays)
+# --------------------------------------------------------------------------- #
+
+HISTORY = [
+    {"role": "system", "content": "Du bist ein Assistent."},
+    {"role": "user", "content": "Frage eins?"},
+    {"role": "tool", "content": '{"context": "..."}'},
+    {"role": "assistant", "content": "Antwort eins. Quelle 1"},
+    {"role": "user", "content": "Frage zwei?"},
+    {"role": "assistant", "content": "Antwort zwei. Quelle 2"},
+    {"role": "user", "content": "Noch unbeantwortet?"},
+]
+
+
+def test_turns_pair_questions_with_answers_and_drop_the_rest():
+    turns = evaluation.conversation_turns(HISTORY)
+    assert turns == [
+        {"user": "Frage eins?", "assistant": "Antwort eins. Quelle 1"},
+        {"user": "Frage zwei?", "assistant": "Antwort zwei. Quelle 2"},
+    ], "system/tool messages and the trailing unanswered question must fall out"
+
+
+def test_turns_truncate_to_the_marked_answer():
+    assert len(evaluation.conversation_turns(HISTORY, turn_index=1)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# The gold suggestion (the quest marker's decision rule)
+# --------------------------------------------------------------------------- #
+
+
+def _summary(**kw):
+    return {
+        "last_faithfulness": 0.95,
+        "last_relevance": 0.9,
+        "last_message_gold": False,
+        **kw,
+    }
+
+
+def test_a_strong_answer_is_suggested():
+    assert evaluation.gold_suggested(_summary(), _enabled().evaluation)
+
+
+def test_scores_below_either_threshold_stay_quiet():
+    ev = _enabled().evaluation
+    assert not evaluation.gold_suggested(_summary(last_faithfulness=0.8), ev)
+    assert not evaluation.gold_suggested(_summary(last_relevance=0.5), ev)
+
+
+def test_a_missing_metric_is_never_treated_as_strong():
+    # A failed judge is not evidence of quality.
+    ev = _enabled().evaluation
+    assert not evaluation.gold_suggested(_summary(last_relevance=None), ev)
+
+
+def test_an_already_gold_answer_never_nags_again():
+    ev = _enabled().evaluation
+    assert not evaluation.gold_suggested(_summary(last_message_gold=True), ev)
+
+
+def test_a_null_threshold_disables_the_suggestion():
+    ev = _enabled(gold_min_faithfulness=None).evaluation
+    assert not evaluation.gold_suggested(_summary(), ev)
