@@ -2442,6 +2442,11 @@ async def on_app_startup() -> None:
         turns = conversation_turns(history)
         if not turns:
             raise HTTPException(status_code=409, detail="no completed turns")
+        # The saver's one choice: the whole conversation, or just the final Q&A.
+        # Only these two shapes replay coherently — an arbitrary subset would leave
+        # later turns referring to context the replayed model never saw.
+        if body.get("only_last"):
+            turns = turns[-1:]
         response = await post_gold(
             turns=turns,
             message_id=body.get("message_id"),

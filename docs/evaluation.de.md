@@ -288,10 +288,14 @@ die kommen von dir.
 liegt (`gold_min_faithfulness`, Standard 0,9, und `gold_min_relevance`, Standard
 0,8), erscheint am Abzeichen ein gelbes **!** — die Videospiel-Konvention für
 „hier gibt es etwas zu tun". Ein Klick aufs Abzeichen öffnet das Panel mit dem
-Angebot: *Starke Antwort — als Gold-Referenz speichern?* Speichern friert das
-Gespräch bis zu dieser Antwort ein — jede Frage und jede Antwort, in Reihenfolge —
-als Referenz; ein einzelnes Frage-Antwort-Paar ist einfach ein Gespräch mit einer
-Runde. Ignorieren (✕) zieht den Marker für diese Antwort zurück. Der Judge späht
+Angebot: *Starke Antwort — als Gold-Referenz speichern?* Bei einem Gespräch mit
+mehreren Runden stellt Speichern eine Frage: das **ganze Gespräch** oder **nur die
+letzte Frage & Antwort**. Mehr Auswahl gibt es absichtlich nicht — ein
+Gold-Gespräch wird in Reihenfolge wiederholt, und einzeln herausgepickte Runden
+ließen spätere Fragen auf Kontext verweisen, den das wiederholende Modell nie
+gesehen hat. Nimm das einzelne Paar, wenn die Frage für sich steht; das Gespräch,
+wenn der Verlauf der Punkt ist. Ignorieren (✕) zieht den Marker für diese Antwort
+zurück. Der Judge späht
 vor, du entscheidest: Hohe Werte heißen nicht *vollständig*, deshalb wird nie
 automatisch gespeichert. Eine der Schwellen auf `null` setzen schaltet den
 Vorschlag ganz ab.

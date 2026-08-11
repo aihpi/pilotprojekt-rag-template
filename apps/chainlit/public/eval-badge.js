@@ -87,6 +87,9 @@
       suggestText: "Starke Antwort — als Gold-Referenz speichern?",
       suggestSave: "Speichern",
       suggestDismiss: "Ignorieren",
+      scopeQuestion: "Was soll gespeichert werden?",
+      scopeAll: "Ganzes Gespräch",
+      scopeLast: "Nur letzte Frage & Antwort",
       suggestSaved: "Als Gold-Referenz gespeichert ({n} {turnWord}).",
       turns: ["Runde", "Runden"],
       suggestFailed: "Speichern fehlgeschlagen — Dienst nicht erreichbar.",
@@ -134,6 +137,9 @@
       suggestText: "Strong answer — save as a gold reference?",
       suggestSave: "Save",
       suggestDismiss: "Dismiss",
+      scopeQuestion: "What should be saved?",
+      scopeAll: "Whole conversation",
+      scopeLast: "Only the last Q&A",
       suggestSaved: "Saved as a gold reference ({n} {turnWord}).",
       turns: ["turn", "turns"],
       suggestFailed: "Saving failed — service unreachable.",
@@ -179,6 +185,7 @@
    * ponytail: move to localStorage if that ever annoys anyone. */
   var dismissedGold = {};
   var goldSavedText = null; /* confirmation shown in place of the suggestion row */
+  var goldChoosing = false; /* Speichern was clicked; picking whole vs last Q&A */
 
   /* One self-rescheduling timer rather than a fixed setInterval, so the cadence can
    * follow whether a judge is currently running. */
@@ -204,7 +211,19 @@
         if (tab === "compare") loadCompare();
         refreshPanel(true);
       } else if (target.hasAttribute("data-gold-save")) {
-        saveGold();
+        var mode = target.getAttribute("data-gold-save");
+        if (mode === "ask") {
+          // Only pose the whole-vs-last question when there is a "whole" to
+          // choose: one scored answer means both buttons would do the same thing.
+          if (lastStatus && lastStatus.answers > 1) {
+            goldChoosing = true;
+            refreshPanel();
+          } else {
+            saveGold(false);
+          }
+        } else {
+          saveGold(mode === "last");
+        }
       } else {
         dismissGold();
       }
@@ -291,11 +310,27 @@
       return '<div class="reb-suggest" data-saved="1">&#10003; ' + goldSavedText + "</div>";
     }
     if (!goldActive(status)) return "";
+    if (goldChoosing) {
+      // The saver's one choice — whole conversation or just the final Q&A. Only
+      // these two shapes replay coherently; see the /eval-gold route.
+      return (
+        '<div class="reb-suggest">' +
+        '<span class="reb-gold-mark">!</span>' +
+        "<span>" + strings.scopeQuestion + "</span>" +
+        '<button type="button" class="reb-save" data-gold-save="all">' +
+        strings.scopeAll + "</button>" +
+        '<button type="button" class="reb-save" data-gold-save="last">' +
+        strings.scopeLast + "</button>" +
+        '<button type="button" class="reb-dismiss" data-gold-dismiss="1" title="' +
+        strings.suggestDismiss + '" aria-label="' + strings.suggestDismiss + '">&#10005;</button>' +
+        "</div>"
+      );
+    }
     return (
       '<div class="reb-suggest">' +
       '<span class="reb-gold-mark">!</span>' +
       "<span>" + strings.suggestText + "</span>" +
-      '<button type="button" class="reb-save" data-gold-save="1">' +
+      '<button type="button" class="reb-save" data-gold-save="ask">' +
       strings.suggestSave + "</button>" +
       '<button type="button" class="reb-dismiss" data-gold-dismiss="1" title="' +
       strings.suggestDismiss + '" aria-label="' + strings.suggestDismiss + '">&#10005;</button>' +
@@ -407,16 +442,21 @@
     positionPanel();
   }
 
-  function saveGold() {
+  function saveGold(onlyLast) {
     var status = lastStatus;
     if (!goldActive(status)) return;
+    goldChoosing = false;
     var messageId = status.last_message_id;
     var m = /\/thread\/([0-9a-fA-F-]{36})/.exec(location.pathname);
     fetch("/eval-gold", {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ thread_id: m ? m[1] : status.thread_id, message_id: messageId }),
+      body: JSON.stringify({
+        thread_id: m ? m[1] : status.thread_id,
+        message_id: messageId,
+        only_last: !!onlyLast,
+      }),
     })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (payload) {
@@ -439,6 +479,7 @@
   }
 
   function dismissGold() {
+    goldChoosing = false;
     if (lastStatus && lastStatus.last_message_id) {
       dismissedGold[lastStatus.last_message_id] = true;
     }
@@ -521,6 +562,9 @@
     if (badge) badge.removeAttribute("data-show");
     if (panel) panel.removeAttribute("data-open");
     lastStatus = null;
+    // Suggestion state belongs to the conversation just left.
+    goldChoosing = false;
+    goldSavedText = null;
     // Otherwise the unchanged-payload check suppresses the re-render whenever the
     // new conversation happens to report the same numbers as the old one.
     lastPayload = null;

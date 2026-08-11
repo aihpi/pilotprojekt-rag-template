@@ -278,9 +278,13 @@ questions come from you.
 (`gold_min_faithfulness`, default 0.9, and `gold_min_relevance`, default 0.8), a
 yellow **!** appears on the badge — the video-game convention for "something worth
 doing here". Click the badge and the panel opens with the offer: *Starke Antwort —
-als Gold-Referenz speichern?* Saving freezes the conversation up to that answer —
-every question and every answer, in order — as a reference; a single Q&A is just a
-one-turn conversation. Dismissing (✕) retires the marker for that answer. The
+als Gold-Referenz speichern?* On a conversation with several turns, saving asks
+one question: the **whole conversation**, or **only the final Q&A**. Those are the
+only two shapes offered on purpose — a gold conversation is replayed in order, so
+cherry-picking turns would leave later questions referring to context the replayed
+model never saw. Pick the single Q&A when the question stands on its own; pick the
+conversation when the exchange is the point. Dismissing (✕) retires the marker for
+that answer. The
 judge scouts, you decide: high scores do not mean *complete*, which is why the
 save is never automatic. Set either threshold to `null` to turn the suggestion
 off.
