@@ -72,12 +72,16 @@ def test_a_rating_outside_up_or_down_is_refused(db):
 
 
 def test_a_score_round_trips_with_its_contexts(db):
-    _score(db, contexts=["[1] erster Chunk", "[2] zweiter Chunk"], faithfulness=0.9)
+    _score(db, contexts=["[1] erster Chunk", "[2] zweiter Chunk"], faithfulness=0.9,
+           judge_model="ministral-3-14b")
     with storage.connect(db) as conn:
         row = conn.execute("SELECT * FROM eval_scores").fetchone()
     assert json.loads(row["contexts"]) == ["[1] erster Chunk", "[2] zweiter Chunk"]
     assert row["faithfulness"] == 0.9
     assert row["relevance"] is None, "an uncomputed metric stays null, not 0.0"
+    assert row["judge_model"] == "ministral-3-14b", (
+        "who judged must be recorded, or a judge change makes history ambiguous"
+    )
 
 
 def test_a_failed_metric_is_null_and_does_not_drag_the_average_down(db):
@@ -411,6 +415,9 @@ def test_an_old_database_gains_the_new_columns_and_tables(tmp_path):
 
     row = {r["config_signature"]: r for r in storage.stats_by_config(path)}[SIG_A]
     assert row["answers"] == 1, "pre-migration rows default to source='live'"
+    with storage.connect(path) as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(eval_scores)")}
+    assert "judge_model" in cols
     storage.add_gold(path, turns=TURNS, config_signature=SIG_A)
     assert storage.claim_pending_job(path) is None, "jobs table exists and is empty"
 

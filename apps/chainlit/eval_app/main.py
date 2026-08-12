@@ -223,6 +223,7 @@ async def post_score(request: ScoreRequest) -> dict[str, object]:
         run_label=request.run_label,
         gold_id=request.gold_id,
         gold_turn=request.gold_turn,
+        judge_model=request.judge_model,
     )
     return scores
 

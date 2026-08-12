@@ -138,6 +138,10 @@ def init_db(db_path: Path) -> None:
             ("gold_id", "TEXT"),
             ("gold_turn", "INTEGER"),
             ("similarity", "REAL"),
+            # Who judged this row. Without it, changing the judge makes history
+            # ambiguous: two rows with different scores could be one answer judged
+            # by two different models. NULL on pre-migration rows means "unknown".
+            ("judge_model", "TEXT"),
         ):
             if column not in existing:
                 conn.execute(f"ALTER TABLE eval_scores ADD COLUMN {column} {ddl}")
@@ -160,6 +164,7 @@ def add_score(
     run_label: str | None = None,
     gold_id: str | None = None,
     gold_turn: int | None = None,
+    judge_model: str | None = None,
 ) -> None:
     with connect(db_path) as conn:
         conn.execute(
@@ -167,8 +172,8 @@ def add_score(
             INSERT INTO eval_scores (
                 id, timestamp, message_id, thread_id, question, answer,
                 contexts, config_signature, faithfulness, relevance, detail,
-                similarity, source, run_label, gold_id, gold_turn
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                similarity, source, run_label, gold_id, gold_turn, judge_model
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(uuid.uuid4()),
@@ -187,6 +192,7 @@ def add_score(
                 run_label,
                 gold_id,
                 gold_turn,
+                judge_model,
             ),
         )
 

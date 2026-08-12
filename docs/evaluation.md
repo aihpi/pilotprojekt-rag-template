@@ -213,7 +213,14 @@ The judge calls go through the same gateway and the same credentials as everythi
 else, so there is nothing extra to configure.
 
 Point `judge_model` at a **different** model from the one being judged if you can.
-A model grading its own work tends to be generous with itself.
+A model grading its own work tends to be generous with itself — and with
+`judge_model: null` the judge *follows the model that answered*, so every model
+grades its own answers and scores stop being comparable across models. The shipped
+`papers` example therefore pins a small verified judge. Before trusting a judge,
+verify it the way this project does: give it an answer with three supported and
+three invented claims and check that it flags exactly the invented ones. The judge
+used is stored with every score row, so a later judge change never makes old
+numbers ambiguous.
 
 ## The comparison — the badge's second tab
 

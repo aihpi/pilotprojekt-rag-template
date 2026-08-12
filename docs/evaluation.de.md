@@ -222,7 +222,15 @@ Die Bewertungs-Aufrufe gehen über dasselbe Gateway und dieselben Zugangsdaten w
 alles andere, du musst also nichts zusätzlich einrichten.
 
 Richte `judge_model` möglichst auf ein **anderes** Modell als das bewertete. Ein
-Modell, das seine eigene Arbeit benotet, ist mit sich selbst meist großzügig.
+Modell, das seine eigene Arbeit benotet, ist mit sich selbst meist großzügig — und
+mit `judge_model: null` *folgt der Judge dem Modell, das geantwortet hat*: jedes
+Modell benotet dann seine eigenen Antworten, und die Werte sind über Modelle hinweg
+nicht mehr vergleichbar. Das mitgelieferte `papers`-Beispiel nagelt deshalb einen
+kleinen, verifizierten Judge fest. Bevor du einem Judge traust, prüfe ihn so, wie
+dieses Projekt es tut: gib ihm eine Antwort mit drei gedeckten und drei erfundenen
+Aussagen und schau, ob er genau die drei erfundenen markiert. Der verwendete Judge
+wird bei jeder Score-Zeile mitgespeichert — ein späterer Wechsel macht alte Zahlen
+also nie mehrdeutig.
 
 ## Der Vergleich — der zweite Tab des Abzeichens
 

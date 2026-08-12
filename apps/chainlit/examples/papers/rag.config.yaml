@@ -118,8 +118,16 @@ evaluation:
   metrics: [faithfulness, relevance]
   # faithfulness = are the answer's claims backed by the retrieved chunks
   # relevance    = does the answer address the question that was asked
-  judge_model: null                 # null = models.chat_model; prefer a different
-                                    # model here, self-judging inflates the scores
+  # Pinned to a model that neither answers by default nor is being compared:
+  # with judge_model null, the judge follows whichever model ANSWERED, so every
+  # model grades its own work and scores are not comparable across models.
+  #
+  # ministral-3-14b was verified as a judge against a deliberately mixed answer
+  # (three supported claims, three invented) and flagged exactly the three
+  # invented ones — the same test llama-3-3-70b passed. Judge SIZE does not
+  # change scoring latency or, per this test, verdict quality; pick whichever
+  # verified judge your gateway keeps up most reliably.
+  judge_model: ministral-3-14b
   show_badge: true                  # false still records scores for the dashboard
 
 prompt:
