@@ -122,12 +122,13 @@ evaluation:
   # with judge_model null, the judge follows whichever model ANSWERED, so every
   # model grades its own work and scores are not comparable across models.
   #
-  # ministral-3-14b was verified as a judge against a deliberately mixed answer
-  # (three supported claims, three invented) and flagged exactly the three
-  # invented ones — the same test llama-3-3-70b passed. Judge SIZE does not
-  # change scoring latency or, per this test, verdict quality; pick whichever
-  # verified judge your gateway keeps up most reliably.
-  judge_model: ministral-3-14b
+  # All three available judges passed the same verification test (a deliberately
+  # mixed answer with three supported and three invented claims — each flagged
+  # exactly the three invented ones): gemma-4-31b, llama-3-3-70b, and
+  # ministral-3-14b. Judge size does not change scoring latency. Pick whichever
+  # your gateway keeps up most reliably; gemma-4-31b is the default because it
+  # was the most consistently available during development.
+  judge_model: gemma-4-31b
   show_badge: true                  # false still records scores for the dashboard
 
 prompt:
