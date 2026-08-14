@@ -156,7 +156,7 @@ Wenn es nie auftaucht, prüfe der Reihe nach:
    da ist.
 
 Hilft das alles nicht, schau ins App-Protokoll nach Zeilen, die mit `[WARN]
-eval_status_unavailable` beginnen — das heißt, die App erreicht den
+eval_status_unavailable` beginnen - das heißt, die App erreicht den
 Evaluations-Dienst nicht.
 
 ## Werte sind alle leer (NULL)
@@ -196,7 +196,7 @@ Modellen wechselst, weil jedes Modell sich selbst anders beurteilt. Setze
   abgerufenen Textstellen gedeckt sind. Sie zerlegt die Antwort in einzelne
   Behauptungen und prüft jede gegen die Quellen. Die Formel ist schlicht:
   gedeckte Aussagen geteilt durch alle Aussagen. Ein Wert von 0,5 heißt nicht
-  „mittelmäßig" — er heißt, die Hälfte der Aussagen dieser Antwort war nicht
+  „mittelmäßig" - er heißt, die Hälfte der Aussagen dieser Antwort war nicht
   durch die Quellen belegt. Das Abzeichen-Panel listet jede Aussage mit Häkchen
   oder Kreuz und der Begründung des Judges auf, du siehst also genau, welche
   durchgefallen ist.
@@ -205,7 +205,7 @@ Modellen wechselst, weil jedes Modell sich selbst anders beurteilt. Setze
   beantwortet. Dazu werden aus der Antwort Fragen erzeugt und mit der echten
   Frage über Embedding-Ähnlichkeit verglichen. Liegen die erzeugten Fragen nahe
   an der echten, ist die Antwort relevant. Eine Relevanz von 0 % heißt meistens
-  nicht, dass die Antwort am Thema vorbeiging — sondern dass der Assistent die
+  nicht, dass die Antwort am Thema vorbeiging - sondern dass der Assistent die
   Antwort verweigert hat („steht nicht in den Dokumenten"), was das richtige
   Verhalten ist, wenn die Wissensbasis die Frage nicht abdeckt.
 

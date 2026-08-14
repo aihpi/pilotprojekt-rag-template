@@ -148,11 +148,11 @@ Der Assistent läuft, aber woher weißt du, ob er *gut* antwortet? Die Evaluatio
 bewertet jede Antwort in zwei Punkten und zeigt das Ergebnis in einem kleinen
 Abzeichen über dem Eingabefeld:
 
-- **Treue (Faithfulness)** — hat der Assistent nur Dinge gesagt, die seine Quellen
+- **Treue (Faithfulness)** - hat der Assistent nur Dinge gesagt, die seine Quellen
   auch hergeben, oder hat er eigene Behauptungen hinzugefügt? Der Wert ist der
   Anteil gedeckter Aussagen: 1,0 heißt alles geprüft, 0,5 heißt die Hälfte ist
   nicht belegt.
-- **Relevanz (Relevance)** — beantwortet die Antwort die gestellte Frage, statt
+- **Relevanz (Relevance)** - beantwortet die Antwort die gestellte Frage, statt
   zwar korrekt, aber am Thema vorbei zu sein?
 
 Beides wird von einem zweiten KI-Modell (dem *Judge*) geprüft, das die Antwort
@@ -177,7 +177,7 @@ evaluation:
 
 App neu starten (`docker compose restart chainlit`), eine Frage stellen und etwa
 fünfzehn Sekunden warten. Über dem Eingabefeld erscheint ein Abzeichen mit den
-Werten. Ein Klick darauf zeigt die ganze Erklärung — welche Aussagen bestanden
+Werten. Ein Klick darauf zeigt die ganze Erklärung - welche Aussagen bestanden
 haben, welche nicht, und warum.
 
 Die vollständige Anleitung steht unter

@@ -147,7 +147,7 @@ check these in order:
    answer is already shown. The badge appears once the score arrives.
 
 If none of that helps, check the app log for lines starting with `[WARN]
-eval_status_unavailable` — that means the app cannot reach the evaluation service.
+eval_status_unavailable` - that means the app cannot reach the evaluation service.
 
 ## Scores are all empty (NULL)
 
@@ -183,7 +183,7 @@ judged.
 - **Faithfulness** checks whether the answer's claims are supported by the text
   passages that were retrieved. It breaks the answer into individual statements,
   then checks each one against the sources. The formula is simply: supported
-  claims divided by all claims. A score of 0.5 does not mean "mediocre" — it means
+  claims divided by all claims. A score of 0.5 does not mean "mediocre" - it means
   half the statements in that answer were not backed by the sources. The badge
   panel lists every claim with a tick or cross and the judge's reason, so you can
   see exactly which one failed.
@@ -192,7 +192,7 @@ judged.
   generates questions from the answer and compares them with the original question
   using embedding similarity. If the generated questions are close to the real one,
   the answer is relevant. A relevance of 0% usually does not mean the answer was
-  off-topic — it typically means the assistant declined to answer ("not in the
+  off-topic - it typically means the assistant declined to answer ("not in the
   documents"), which is correct behaviour when the knowledge base does not cover
   the question.
 
