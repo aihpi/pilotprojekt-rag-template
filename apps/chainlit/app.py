@@ -2229,6 +2229,29 @@ async def on_app_startup() -> None:
     )
     from chainlit.server import app as chainlit_fastapi_app
 
+    # Registered before the DATABASE_URL early return below: this route reads the
+    # config singleton and touches no database, and auth_callback has an env-var
+    # fallback, so a no-database instance still has logged-in users who would
+    # otherwise get a header chip that never resolves.
+    if not getattr(chainlit_fastapi_app.state, "config_info_route_added", False):
+
+        @chainlit_fastapi_app.get("/config-info")
+        async def config_info(current_user=Depends(get_current_user)):
+            """The active instance configuration, for the header chip in the browser.
+
+            Answers "which config is this container actually running?" without
+            shell access: instance name, models, collection and the retrieval
+            switches. Behind auth like every other route here — the values name
+            your models, collection and document folders.
+            """
+            if current_user is None:
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            return _config_info_payload(get_config())
+
+        _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/config-info")
+        chainlit_fastapi_app.state.config_info_route_added = True
+        print("[STARTUP] config info route registered at /config-info")
+
     if DATABASE_URL and CHAINLIT_INIT_DB:
         await ensure_native_schema(DATABASE_URL)
 
@@ -2317,19 +2340,6 @@ async def on_app_startup() -> None:
         from document_watch import get_status
 
         return {**get_status(), "lang": lang}
-
-    @chainlit_fastapi_app.get("/config-info")
-    async def config_info(current_user=Depends(get_current_user)):
-        """The active instance configuration, for the header chip in the browser.
-
-        Answers "which config is this container actually running?" without shell
-        access: instance name, models, collection and the retrieval switches.
-        Behind auth like every other route here — the values name your models,
-        collection and document folders.
-        """
-        if current_user is None:
-            raise HTTPException(status_code=401, detail="Unauthorized")
-        return _config_info_payload(get_config())
 
     # Registration endpoint for self-registration
     @chainlit_fastapi_app.post("/auth/register")
@@ -2515,7 +2525,6 @@ async def on_app_startup() -> None:
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-status")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-stats")
     _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/eval-gold")
-    _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/config-info")
 
     _patch_cookie_security_openapi_model()
 

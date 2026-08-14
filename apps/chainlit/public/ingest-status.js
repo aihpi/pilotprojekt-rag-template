@@ -469,8 +469,10 @@
       "height:30px;padding:0 11px;border-radius:15px;",
       "font-size:12.5px;font-weight:500;line-height:1;font-family:inherit;",
       "max-width:min(260px,32vw);border:1px solid rgba(148,163,184,.34);",
-      "background:rgba(148,163,184,.18);color:#475569;cursor:default;",
-      "user-select:none}",
+      "background:rgba(148,163,184,.18);color:#475569;cursor:pointer;",
+      "user-select:none;-webkit-appearance:none;appearance:none}",
+      /* It is a real <button>, so it must not lose its focus ring. */
+      "#" + ID + ":focus-visible{outline:2px solid currentColor;outline-offset:2px}",
       "html.dark #" + ID + ",.dark #" + ID + "{background:rgba(148,163,184,.26);",
       "color:#e2e8f0;border-color:rgba(148,163,184,.42)}",
       "#" + ID + " .rci-label{white-space:nowrap;overflow:hidden;",
@@ -569,39 +571,75 @@
     if (!el.parentNode) document.body.appendChild(el);
   }
 
+  function setOpen(el, open) {
+    var panel = panelElement();
+    if (open) {
+      panel.setAttribute("data-open", "1");
+      positionPanel();
+    } else {
+      panel.removeAttribute("data-open");
+    }
+    el.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
   function render() {
     styles();
     var el = document.getElementById(ID);
     if (!el) {
-      el = document.createElement("div");
+      // A real button, not a div: hover alone leaves keyboard and touch users
+      // with no way to read the panel, and this is the only place the active
+      // configuration is shown.
+      el = document.createElement("button");
       el.id = ID;
+      el.type = "button";
+      el.setAttribute("aria-haspopup", "true");
+      el.setAttribute("aria-expanded", "false");
       el.innerHTML =
-        '<span class="rci-gear">⚙</span><span class="rci-label"></span>';
-      el.addEventListener("mouseenter", function () {
-        panelElement().setAttribute("data-open", "1");
-        positionPanel();
+        '<span class="rci-gear" aria-hidden="true">⚙</span>' +
+        '<span class="rci-label"></span>';
+      el.addEventListener("mouseenter", function () { setOpen(el, true); });
+      el.addEventListener("mouseleave", function () { setOpen(el, false); });
+      el.addEventListener("focus", function () { setOpen(el, true); });
+      el.addEventListener("blur", function () { setOpen(el, false); });
+      // Tap/click toggles, so touch (which never hovers) can open and close it.
+      el.addEventListener("click", function () {
+        setOpen(el, el.getAttribute("aria-expanded") !== "true");
       });
-      el.addEventListener("mouseleave", function () {
-        panelElement().removeAttribute("data-open");
+      el.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") setOpen(el, false);
       });
     }
     el.querySelector(".rci-label").textContent = info.name;
+    el.setAttribute("aria-label", "Active configuration: " + info.name);
     el.setAttribute("title", info.name);
     panelElement().innerHTML = panelHtml();
     place(el);
+    return el;
   }
 
   function fetchOnce() {
     fetch(ENDPOINT, { credentials: "same-origin", cache: "no-store" })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (r) {
+        // 401 is expected before login, so keep trying. A 404 means the route is
+        // not registered in this deployment: permanent, so stop rather than poll
+        // a missing endpoint for the lifetime of the tab.
+        if (r.status === 404) return "gone";
+        return r.ok ? r.json() : null;
+      })
       .then(function (data) {
+        if (data === "gone") return;
         if (!data) return setTimeout(fetchOnce, RETRY_MS);
         info = data;
         render();
-        // The header is React-rendered; put the chip back after re-renders.
+        // The header is React-rendered and can drop the chip entirely. Unlike the
+        // watcher badge above, this fetches once, so nothing else would ever put
+        // it back — rebuild it, do not just re-place it.
         new MutationObserver(function () {
-          var el = document.getElementById(ID);
-          if (el) place(el);
+          if (document.getElementById(ID)) {
+            place(document.getElementById(ID));
+          } else {
+            render();
+          }
         }).observe(document.documentElement, { childList: true, subtree: true });
         window.addEventListener("resize", positionPanel);
       })

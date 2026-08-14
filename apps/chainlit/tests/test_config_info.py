@@ -1,13 +1,16 @@
 """The /config-info payload: what the header chip claims must match the config.
 
-Only the pure builder is tested — the route around it is one auth check, and the
-route/catch-all ordering is covered by test_route_order.py.
+The route itself is one auth check, and catch-all ordering is covered by
+test_route_order.py — but its *registration point* is tested here, because it
+sits before a ``DATABASE_URL`` early return that would otherwise silence it.
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
+import re
 
 # Importing app registers a Chainlit oauth_callback, which requires an OAuth
 # provider to be configured. CI has no .env, so supply placeholders first
@@ -42,6 +45,22 @@ def test_payload_reports_the_effective_chunking_per_source():
 
     by_name = {s["name"]: s["chunking"] for s in payload["sources"]}
     assert by_name == {"pdfs": "fixed_size", "notes": "heading"}
+
+
+def test_route_is_registered_before_the_database_early_return():
+    """``on_app_startup`` returns early when DATABASE_URL is unset, and everything
+    declared after that point never registers. Auth has an env-var fallback, so a
+    no-database instance still has logged-in users — they would get a header chip
+    polling a 404 forever. Assert on source order: the failure is *where* the
+    route is declared, which no request-level test can see."""
+    source = inspect.getsource(chainlit_app.on_app_startup)
+
+    route = source.index('"/config-info"')
+    early_return = re.search(r"if not DATABASE_URL:\s*\n\s*return", source)
+    assert early_return, "the early return this test guards against is gone; revisit"
+    assert route < early_return.start(), (
+        "/config-info must be registered before the DATABASE_URL early return"
+    )
 
 
 def test_config_path_cannot_disagree_with_the_loader(monkeypatch):
