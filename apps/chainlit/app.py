@@ -2227,6 +2227,17 @@ async def on_app_startup() -> None:
         TOP_K,
         "| mode: simple_docling",
     )
+    # Refuse to serve a collection that cannot answer as configured, rather than
+    # running degraded while the config and the header chip both claim hybrid is on.
+    # Ingest cannot catch this case: someone edits the config and restarts only the app.
+    _startup_cfg = get_config()
+    if _startup_cfg.retrieval.hybrid:
+        from kb.ingestion_pipeline import get_client, verify_hybrid_compatible
+
+        verify_hybrid_compatible(
+            get_client(), _startup_cfg.vector_store.collection, hybrid=True
+        )
+
     from chainlit.server import app as chainlit_fastapi_app
 
     # Registered before the DATABASE_URL early return below: this route reads the
@@ -3531,13 +3542,10 @@ async def main(message: cl.Message):
                     cached_tool_payloads[signature] = (results, tool_payload)
 
                 for item in results:
-                    key = _result_key(item)
-                    existing = aggregated_by_key.get(key)
-                    if existing is None:
-                        aggregated_by_key[key] = item
-                        continue
-                    if float(getattr(item, "score", 0.0) or 0.0) > float(getattr(existing, "score", 0.0) or 0.0):
-                        aggregated_by_key[key] = item
+                    # First writer wins. The score comparison this replaces preferred
+                    # fetch_document's placeholder 1.0 over a real similarity, so it
+                    # swapped in that tool's longer 4000-char copy of the same chunk.
+                    aggregated_by_key.setdefault(_result_key(item), item)
 
                 messages.append(
                     {
@@ -3573,11 +3581,16 @@ async def main(message: cl.Message):
                 bool(getattr(current_msg, "tool_calls", None)),
             )
 
-        last_results = sorted(
-            aggregated_by_key.values(),
-            key=lambda r: float(getattr(r, "score", 0.0) or 0.0),
-            reverse=True,
-        )
+        # Deliberately unsorted. `score` is not comparable across tools: search
+        # returns a similarity (or a fused rank under retrieval.hybrid), while
+        # fetch_document and expand_context did no relevance matching at all and
+        # report a placeholder 1.0 — which used to sort a journal header above the
+        # passage that answered the question, and past the max_source_links cut.
+        # Insertion order is meaningful instead: dicts preserve it and retrieve()
+        # appends in Qdrant's relevance order, so search hits stay ranked and land
+        # ahead of a whole-document dump. Trade-off: two separate search calls group
+        # by call rather than interleaving by similarity.
+        last_results = list(aggregated_by_key.values())
 
         # attach mode: if figures are retrieved and the active chat model can see
         # images, produce the final answer with a multimodal vision pass (mirrors

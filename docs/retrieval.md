@@ -46,6 +46,17 @@ flip it back. No re-ingest, and one collection can serve a dense-vs-hybrid A/B.
     docker compose run --rm ingest python -m kb.ingest --recreate
     ```
 
+    **Until you do, the app refuses to start** rather than running dense-only
+    behind a config that says otherwise. Ingest, `make check` and app startup all
+    report the same thing, and name both ways out — re-ingest, or set
+    `hybrid: false`. The alternative was a silent downgrade, where hybrid appears
+    enabled and simply never contributes anything.
+
+    The same refusal covers a **lexical format change**: the tokenizer decides
+    which terms are stored, so an upgrade that changes it makes existing terms
+    unmatchable. The format version is recorded per collection at ingest and
+    compared on every run, exactly as the embedding model is.
+
 ## The three settings
 
 **`hybrid`** — off by default. Query-time only: two searches instead of one, then a

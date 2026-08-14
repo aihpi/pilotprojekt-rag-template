@@ -213,10 +213,11 @@ def hybrid_client(monkeypatch):
     monkeypatch.setattr(cfg.retrieval, "prefetch_limit", 30)
     client = RecordingClient()
     monkeypatch.setattr(rag_tool, "_get_client", lambda: client)
-    # The capability probe is a separate round trip; assume sparse unless a test
-    # says otherwise, and never let one test's answer leak into the next.
-    monkeypatch.setattr(rag_tool, "_sparse_capable", {})
-    monkeypatch.setattr(rag_tool, "_has_sparse_vector", lambda client, name: True)
+    # The compatibility guard is a separate round trip against a real collection;
+    # these tests are about the shape of the query, so let it pass.
+    from kb import ingestion_pipeline
+
+    monkeypatch.setattr(ingestion_pipeline, "verify_hybrid_compatible", lambda *a, **k: None)
     return client
 
 
@@ -263,11 +264,10 @@ def test_fusion_strategy_comes_from_config(monkeypatch, hybrid_client, name, exp
     assert hybrid_client.calls[0]["query"].fusion == expected
 
 
-def test_dense_only_collection_degrades_instead_of_raising(monkeypatch):
-    """A sparse prefetch against a collection with no lexical vector is a hard
-    400 from Qdrant, not an empty result — and tool dispatch has no enclosing
-    try, so it would surface as a failed turn. Collections predating the feature
-    cannot gain the vector, so hybrid has to fall back."""
+def test_dense_only_collection_is_refused_with_an_actionable_message(monkeypatch):
+    """Degrading quietly was worse than failing: the config and the header chip
+    both keep saying hybrid is on while only dense runs. Re-ingesting is the
+    intended remedy, so the error has to name it and stop."""
 
     async def fake_embed(texts):
         return [[0.1] * 8 for _ in texts]
@@ -277,17 +277,103 @@ def test_dense_only_collection_degrades_instead_of_raising(monkeypatch):
             params = type("P", (), {"sparse_vectors": None})()
             return type("I", (), {"config": type("C", (), {"params": params})()})()
 
+        def get_collections(self):
+            return type("R", (), {"collections": [type("C", (), {"name": "kb"})]})()
+
     monkeypatch.setattr(rag_tool, "embed", fake_embed)
     monkeypatch.setattr(rag_tool.get_config().retrieval, "hybrid", True)
-    monkeypatch.setattr(rag_tool, "_sparse_capable", {})
-    client = DenseOnly()
-    monkeypatch.setattr(rag_tool, "_get_client", lambda: client)
+    from kb import ingestion_pipeline
 
-    asyncio.run(rag_tool.retrieve("query", top_k=5))
+    monkeypatch.setattr(ingestion_pipeline, "_verified_hybrid", set())
+    monkeypatch.setattr(rag_tool, "_get_client", lambda: DenseOnly())
 
-    call = client.calls[0]
-    assert "prefetch" not in call, "must fall back to a dense query"
-    assert call["query"] == [0.1] * 8, "the dense fallback still sends the embedding"
+    with pytest.raises(RuntimeError) as excinfo:
+        asyncio.run(rag_tool.retrieve("query", top_k=5, collection="kb"))
+
+    message = str(excinfo.value)
+    assert "kb" in message, "the error must name the collection"
+    assert "--recreate" in message and "retrieval.hybrid" in message, (
+        "both ways out have to be in the message — it is the whole user-facing text"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The lexical format is stored data, so a change to it has to be caught
+# --------------------------------------------------------------------------- #
+class _SentinelClient:
+    """Enough of a client for verify_hybrid_compatible: schema + sentinel payload."""
+
+    def __init__(self, sparse=True, sentinel_payload=None):
+        self._sparse = sparse
+        self._payload = sentinel_payload
+
+    def get_collections(self):
+        return type("R", (), {"collections": [type("C", (), {"name": "kb"})]})()
+
+    def get_collection(self, name):
+        sparse = {"text": object()} if self._sparse else None
+        params = type("P", (), {"sparse_vectors": sparse})()
+        return type("I", (), {"config": type("C", (), {"params": params})()})()
+
+    def retrieve(self, collection_name, ids, with_payload=False, with_vectors=False):
+        if self._payload is None:
+            return []
+        return [type("R", (), {"payload": dict(self._payload), "vector": [0.1] * 4})()]
+
+
+def _verify(client):
+    from kb import ingestion_pipeline
+
+    ingestion_pipeline._verified_hybrid.clear()
+    ingestion_pipeline.verify_hybrid_compatible(client, "kb", hybrid=True)
+
+
+def test_a_stale_lexical_format_is_refused():
+    """The tokenizer decides the stored ids, so a collection written by a different
+    version matches nothing — silently. This is the guard that turns that into an
+    error; it exists because the format really did change twice mid-development."""
+    from kb.sparse import SPARSE_FORMAT
+
+    _verify(_SentinelClient(sentinel_payload={"sparse_format": SPARSE_FORMAT}))  # current: fine
+
+    with pytest.raises(RuntimeError, match="lexical format"):
+        _verify(_SentinelClient(sentinel_payload={"sparse_format": SPARSE_FORMAT + 1}))
+
+
+def test_a_collection_from_before_versioning_is_tolerated():
+    """No sparse_format key means it predates the guard. Matching how a missing
+    embed_model is already tolerated, that must not block anyone."""
+    _verify(_SentinelClient(sentinel_payload={"embed_model": "m"}))
+    _verify(_SentinelClient(sentinel_payload=None))
+
+
+def test_hybrid_off_skips_the_check_entirely():
+    """Nothing about a dense-only setup should be able to fail on a hybrid guard."""
+    from kb import ingestion_pipeline
+
+    ingestion_pipeline._verified_hybrid.clear()
+    ingestion_pipeline.verify_hybrid_compatible(_SentinelClient(sparse=False), "kb", hybrid=False)
+
+
+def test_the_sentinel_keeps_a_bare_vector_so_the_manifest_can_reuse_it():
+    """_manifest_vector gates on isinstance(vector, list). If the sentinel ever
+    carried the dict-shaped vector chunks use, it returns None, the manifest is
+    never written, and every later ingest re-embeds the whole corpus."""
+    from kb import ingestion_pipeline
+
+    captured = []
+
+    class Client:
+        def upsert(self, collection_name, points):
+            captured.extend(points)
+
+    ingestion_pipeline._write_sentinel(Client(), "kb", "embed-model", 4, [0.1] * 4)
+
+    point = captured[0]
+    assert isinstance(point.vector, list), (
+        "a dict-shaped sentinel vector silently disables incremental ingest"
+    )
+    assert point.payload["sparse_format"] == ingestion_pipeline.SPARSE_FORMAT
 
 
 def test_verify_claim_forces_dense_so_its_floor_stays_comparable(monkeypatch):

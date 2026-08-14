@@ -44,34 +44,6 @@ class RagResult:
 
 
 _client: QdrantClient | None = None
-_sparse_capable: dict[str, bool] = {}
-
-
-def _has_sparse_vector(client, collection: str) -> bool:
-    """Whether ``collection`` declares the lexical vector, cached per name.
-
-    A hybrid query against a collection without one is a hard 400 ("Not existing
-    vector name"), not an empty result, so this runs before the fused query is
-    built and hybrid degrades to dense instead of failing every request.
-    Collections written before sparse vectors existed cannot gain one, so the
-    answer is worth caching; a transient lookup failure is not.
-    """
-    cached = _sparse_capable.get(collection)
-    if cached is not None:
-        return cached
-    try:
-        params = client.get_collection(collection).config.params
-    except Exception:  # noqa: BLE001 — never break retrieval over a schema probe
-        return False
-    supported = SPARSE_VECTOR in (params.sparse_vectors or {})
-    _sparse_capable[collection] = supported
-    if not supported:
-        print(
-            f"[retrieval] hybrid is on, but collection '{collection}' has no lexical "
-            "vector — running dense-only. Re-ingest with --recreate to enable hybrid "
-            "(see docs/retrieval.md)."
-        )
-    return supported
 
 
 def _get_client() -> QdrantClient:
@@ -179,8 +151,13 @@ async def retrieve(
     query_filter = Filter(must=must, must_not=_EXCLUDE_META) if must else _META_FILTER
 
     use_hybrid = cfg.retrieval.hybrid if hybrid is None else hybrid
-    if use_hybrid and not _has_sparse_vector(client, target):
-        use_hybrid = False
+    if use_hybrid:
+        # Raises if this collection cannot serve hybrid. Startup checks the
+        # configured collection, but `collection` is overridable per call, so this
+        # stays a real check — cached, so it costs one probe per collection.
+        from kb.ingestion_pipeline import verify_hybrid_compatible
+
+        verify_hybrid_compatible(client, target, hybrid=True)
 
     def _query(active_filter):
         if not use_hybrid:

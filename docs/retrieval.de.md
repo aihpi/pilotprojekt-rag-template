@@ -49,6 +49,18 @@ Ingest, und eine einzige Collection taugt für ein Dense-gegen-Hybrid-A/B.
     docker compose run --rm ingest python -m kb.ingest --recreate
     ```
 
+    **Bis dahin startet die App nicht**, statt rein dense zu laufen, während die
+    Config etwas anderes behauptet. Ingest, `make check` und der App-Start melden
+    dasselbe und nennen beide Auswege — neu indexieren oder `hybrid: false`
+    setzen. Die Alternative wäre eine stille Herabstufung: Hybrid sieht aktiv aus
+    und trägt einfach nie etwas bei.
+
+    Dieselbe Verweigerung greift bei einer **Änderung des lexikalischen Formats**:
+    Der Tokenizer entscheidet, welche Begriffe gespeichert sind, also macht ein
+    Update, das ihn ändert, die bestehenden Begriffe unauffindbar. Die
+    Formatversion wird beim Ingest pro Collection festgehalten und bei jedem Lauf
+    verglichen — genau wie das Embedding-Modell.
+
 ## Die drei Einstellungen
 
 **`hybrid`** — standardmäßig aus. Wirkt nur auf die Anfrage: zwei Suchen statt einer,

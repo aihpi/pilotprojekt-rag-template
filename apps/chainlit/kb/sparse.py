@@ -25,6 +25,18 @@ if TYPE_CHECKING:
 #: non-hybrid collection is unchanged from before hybrid existed.
 SPARSE_VECTOR = "text"
 
+#: Version of the *stored* lexical format. The tokenizer and the token ids below
+#: decide which indices land in every point, so a collection is only searchable
+#: by code that tokenizes the way it was ingested. Recorded in the ingest
+#: sentinel and compared on every run, exactly as ``embed_model`` is.
+#:
+#: **Bump this whenever ``_TOKEN``, the normalisation in ``tokenize``, or
+#: ``_token_id`` changes.** Forgetting to means a query computes different ids
+#: than the corpus was written with: zero lexical matches, no error, hybrid
+#: quietly degrading to dense-only. That already happened twice during
+#: development (a crc32 mask dropped, then NFKC and hyphen folding added).
+SPARSE_FORMAT = 1
+
 # Hyphenated compounds stay whole: splitting "BSI-Standard" into "bsi" + "standard"
 # throws away the exact term the lexical leg exists to match. `[^\W_]` is
 # "word character but not underscore", so Greek and umlauts come along (IFN-γ,

@@ -19,7 +19,7 @@ from kb.chunkers import get_chunker
 from kb.chunkers.base import Chunk
 from kb.parsers import get_parser
 from kb.parsers.base import FileGate, file_gate
-from kb.sparse import SPARSE_VECTOR, sparse_vector
+from kb.sparse import SPARSE_FORMAT, SPARSE_VECTOR, sparse_vector
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,52 @@ def _ensure_collection(client, name: str, size: int, distance: str, recreate: bo
         )
 
 
+_verified_hybrid: set[str] = set()
+
+
+def verify_hybrid_compatible(client, collection: str, *, hybrid: bool) -> None:
+    """Raise unless ``collection`` can serve hybrid retrieval as configured.
+
+    Two ways it cannot, both of which otherwise fail *silently* — the lexical leg
+    simply matches nothing, so hybrid degrades to dense while the config (and the
+    header chip) still say it is on:
+
+    * the collection predates lexical vectors, and an existing collection cannot
+      gain one;
+    * it was written by a different lexical format, so its stored token ids do
+      not match the ones this code computes.
+
+    Called from ingest, app startup and the query path. A collection's answer
+    cannot change without a re-ingest, so a success is cached; a failure is not,
+    and neither is a lookup error.
+    """
+    if not hybrid or collection in _verified_hybrid:
+        return
+    if not collection_exists(client, collection):
+        return  # nothing to conflict with; ingest will build it correctly
+
+    if not _supports_sparse(client, collection):
+        raise RuntimeError(
+            f"Collection '{collection}' has no lexical vector, but retrieval.hybrid is "
+            f"on. It was built before hybrid search existed and cannot gain one, so the "
+            f"lexical half of every query would match nothing. Re-ingest with "
+            f"--recreate, or set retrieval.hybrid: false."
+        )
+
+    sentinel = _read_sentinel(client, collection) or {}
+    stored = sentinel.get("sparse_format")
+    # A missing key means the collection predates versioning — tolerated, exactly
+    # as a missing embed_model is below.
+    if stored is not None and stored != SPARSE_FORMAT:
+        raise RuntimeError(
+            f"Collection '{collection}' was built with lexical format {stored}, but this "
+            f"version writes {SPARSE_FORMAT}. Its stored terms would not match the ones "
+            f"queries compute, so hybrid search would silently find nothing. Re-ingest "
+            f"with --recreate, or set retrieval.hybrid: false."
+        )
+    _verified_hybrid.add(collection)
+
+
 def _supports_sparse(client, name: str) -> bool:
     """Whether the collection declares our sparse vector.
 
@@ -244,8 +290,18 @@ def _write_sentinel(client, name: str, embed_model: str, size: int, vector: list
         points=[
             PointStruct(
                 id=_point_id(_SENTINEL_KEY),
+                # Deliberately a bare dense vector, never the dict form used for
+                # chunks: _manifest_vector reuses this point's vector and gates on
+                # isinstance(vector, list). A dict here makes it return None, the
+                # manifest is never stored, and every later run re-embeds the whole
+                # corpus.
                 vector=vector,
-                payload={"_meta": True, "embed_model": embed_model, "vector_size": size},
+                payload={
+                    "_meta": True,
+                    "embed_model": embed_model,
+                    "vector_size": size,
+                    "sparse_format": SPARSE_FORMAT,
+                },
             )
         ],
     )
@@ -283,6 +339,9 @@ async def ingest_chunks(
     embed_model = embed_model or get_config().models.embed_model
     client = get_client()
 
+    if not recreate:
+        verify_hybrid_compatible(client, collection, hybrid=get_config().retrieval.hybrid)
+
     # Sentinel guard: refuse a silent embed-model swap into an existing collection.
     if collection_exists(client, collection) and not recreate:
         sentinel = _read_sentinel(client, collection)
@@ -302,16 +361,6 @@ async def ingest_chunks(
     # Legacy dense-only collections (created before sparse vectors) reject named
     # vectors, so attach the lexical vector only where the schema declares it.
     has_sparse = _supports_sparse(client, collection)
-    if not has_sparse and get_config().retrieval.hybrid:
-        # An existing collection cannot gain a sparse vector, and _ensure_collection
-        # only configures one at creation — so this run would otherwise report plain
-        # success while every hybrid query silently falls back to dense.
-        logger.warning(
-            "ingest: retrieval.hybrid is on but collection '%s' predates lexical "
-            "vectors, so hybrid search cannot work against it. Re-run with "
-            "--recreate to rebuild it (see docs/retrieval.md).",
-            collection,
-        )
 
     def _vector(dense: list[float], text: str):
         if not has_sparse:
@@ -545,6 +594,13 @@ async def ingest_all(
     config = config or get_config()
     collection = config.vector_store.collection
     client = get_client()
+
+    # Before the incremental gate, not inside ingest_chunks: an unchanged corpus
+    # never reaches that call, and "code updated, documents untouched" is exactly
+    # how a lexical-format mismatch arrives.
+    if not recreate:
+        verify_hybrid_compatible(client, collection, hybrid=config.retrieval.hybrid)
+
     exists = collection_exists(client, collection)
 
     manifest: dict[str, str] = {}
