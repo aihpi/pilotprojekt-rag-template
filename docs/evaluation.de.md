@@ -35,7 +35,7 @@ nicht offen halten müssen. Hier steht es zum Nachschlagen.
 **Treue** zerlegt die Antwort in einzelne Aussagen und prüft jede gegen die
 abgerufenen Textstellen:
 
-```
+```text
 Treue = gedeckte Aussagen / alle Aussagen
 ```
 
@@ -47,7 +47,7 @@ siehst also welche Aussage durchgefallen ist und musst nicht raten.
 **Relevanz** erzeugt aus der Antwort Fragen und vergleicht sie mit der Frage, die
 tatsächlich gestellt wurde:
 
-```
+```text
 Relevanz = ⌀ cos( E(erzeugte Frageᵢ) , E(echte Frage) )
 ```
 
@@ -56,7 +56,7 @@ Bewertungs-Aufruf einen Embedding-Aufruf.
 
 **Der Wert im Abzeichen** ist der laufende Mittelwert über das Gespräch:
 
-```
+```text
 ⌀ = (1/n) · Σ Wertᵢ
 ```
 
@@ -66,7 +66,7 @@ Das solltest du wissen, bevor es dich erschreckt. Wird die Antwort als
 *enthaltend* eingeschätzt — „steht nicht in den Dokumenten" — wird die Ähnlichkeit
 verworfen und die Relevanz auf **0** gesetzt:
 
-```
+```text
 Relevanz = ⌀(Cosinus) × (0 wenn die Antwort sich enthält, sonst 1)
 ```
 
@@ -86,7 +86,7 @@ Rauschen mit.
 
 Was dir etwas sagt:
 
-```
+```text
 Faithfulness 0,87  ->  0,71   nach dem Wechsel auf Chunking `heading`
 ```
 
@@ -117,7 +117,7 @@ evaluation:
 Starte die App neu und stelle eine Frage. Über dem Eingabefeld erscheint ein
 kleines Abzeichen:
 
-```
+```text
 Treue 67% ↗ · Relevanz 88% · 3 Antworten
 ```
 

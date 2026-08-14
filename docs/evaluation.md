@@ -32,7 +32,7 @@ open while you work. It is here for reference.
 **Faithfulness** breaks the answer into individual claims and checks each one
 against the retrieved chunks:
 
-```
+```text
 Faithfulness = supported claims / all claims
 ```
 
@@ -44,7 +44,7 @@ rather than guessing.
 **Relevance** generates questions from the answer and compares them to the question
 that was actually asked:
 
-```
+```text
 Relevance = ⌀ cos( E(generated questionᵢ) , E(real question) )
 ```
 
@@ -53,7 +53,7 @@ a judge call.
 
 **The badge value** is the running mean over the conversation:
 
-```
+```text
 ⌀ = (1/n) · Σ valueᵢ
 ```
 
@@ -63,7 +63,7 @@ This one is worth knowing before it alarms you. If the answer is judged
 *noncommittal* — "that is not in the documents" — the similarity is thrown away and
 relevance is forced to **0**:
 
-```
+```text
 Relevance = mean(cosine) × (0 if the answer declined, else 1)
 ```
 
@@ -81,7 +81,7 @@ another language model, so they carry its opinions and its noise.
 
 What does tell you something:
 
-```
+```text
 faithfulness 0.87  ->  0.71   after switching chunking to `heading`
 ```
 
@@ -111,7 +111,7 @@ evaluation:
 
 Restart the app and ask a question. A small badge appears above the chatbox:
 
-```
+```text
 Faithfulness 67% ↗ · Relevance 88% · 3 answers
 ```
 

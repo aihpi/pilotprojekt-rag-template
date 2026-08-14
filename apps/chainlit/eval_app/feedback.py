@@ -79,11 +79,14 @@ async def classify(
         logger.warning("evaluation: feedback classification failed (%s)", exc)
         return None
 
-    # Accept a category mentioned exactly once, which tolerates the trailing full
-    # stop and the occasional "Category: x". Two mentions means the model hedged
+    # Accept a category that appears as a standalone word exactly once. Word
+    # boundaries prevent "not hallucination" from matching as "hallucination",
+    # which the old substring check did. Two matches means the model hedged
     # ("not hallucination, more incomplete") and we would be guessing which it
     # meant, so that counts as no answer.
-    hits = [category for category in CATEGORIES if category in raw]
+    import re
+
+    hits = [c for c in CATEGORIES if re.search(rf"\b{c}\b", raw)]
     if len(hits) != 1:
         logger.warning("evaluation: unusable failure category %r", raw[:80])
         return None

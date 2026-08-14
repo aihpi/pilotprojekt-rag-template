@@ -156,11 +156,16 @@ async def post_score(
     cfg, ev = _resolve(cfg)
     if not ev.enabled:
         return None
-    # Faithfulness asks whether the answer's claims are supported by the retrieved
-    # chunks, which is unanswerable with no chunks. Scoring these anyway would
-    # book a 0.0 against an answer that correctly said "not in the documents" and
-    # drag every aggregate down with it.
-    if not contexts or not answer.strip():
+    if not answer.strip():
+        return None
+    # Faithfulness is unanswerable without chunks, but relevance only needs the
+    # question and the answer. Skip only when every requested metric needs chunks.
+    if not contexts and "faithfulness" in ev.metrics and "relevance" not in ev.metrics:
+        return None
+    metrics = list(ev.metrics)
+    if not contexts:
+        metrics = [m for m in metrics if m != "faithfulness"]
+    if not metrics:
         return None
 
     return await _post(
@@ -170,7 +175,7 @@ async def post_score(
             "question": question,
             "answer": answer,
             "contexts": contexts,
-            "metrics": list(ev.metrics),
+            "metrics": metrics,
             # `judge_model: null` is documented as "the chat model", so it follows
             # the one that actually answered rather than the configured default.
             "judge_model": ev.judge_model or chat_model or cfg.models.chat_model,

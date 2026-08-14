@@ -31,6 +31,14 @@ RUN uv sync --frozen --no-install-project --only-group eval
 # Only the service's own code and its one static page.
 COPY eval_app /app/eval_app
 
+# Run as an unprivileged user. The eval DB volume mounts at /app/.evaldb, so the
+# user must own that directory — created here so the ownership survives even when
+# the volume is empty on first start.
+RUN useradd --system --no-create-home eval \
+ && mkdir -p /app/.evaldb \
+ && chown eval:eval /app/.evaldb
+USER eval
+
 EXPOSE 8001
 
 CMD ["uvicorn", "eval_app.main:app", "--host", "0.0.0.0", "--port", "8001"]
