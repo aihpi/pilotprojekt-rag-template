@@ -36,10 +36,42 @@ if TYPE_CHECKING:
 class RagResult:
     text: str
     score: float
+    """Cosine similarity, except under ``retrieval.hybrid``, where it is a fused
+    rank score (RRF: ``sum(1/(rank+2))`` per leg, so 1.0 at best, 0.5 for a
+    top hit found by one leg only). Comparable *within* one query's results in
+    both modes; only the cosine form is comparable against a fixed threshold."""
     metadata: dict[str, Any]
 
 
 _client: QdrantClient | None = None
+_sparse_capable: dict[str, bool] = {}
+
+
+def _has_sparse_vector(client, collection: str) -> bool:
+    """Whether ``collection`` declares the lexical vector, cached per name.
+
+    A hybrid query against a collection without one is a hard 400 ("Not existing
+    vector name"), not an empty result, so this runs before the fused query is
+    built and hybrid degrades to dense instead of failing every request.
+    Collections written before sparse vectors existed cannot gain one, so the
+    answer is worth caching; a transient lookup failure is not.
+    """
+    cached = _sparse_capable.get(collection)
+    if cached is not None:
+        return cached
+    try:
+        params = client.get_collection(collection).config.params
+    except Exception:  # noqa: BLE001 — never break retrieval over a schema probe
+        return False
+    supported = SPARSE_VECTOR in (params.sparse_vectors or {})
+    _sparse_capable[collection] = supported
+    if not supported:
+        print(
+            f"[retrieval] hybrid is on, but collection '{collection}' has no lexical "
+            "vector — running dense-only. Re-ingest with --recreate to enable hybrid "
+            "(see docs/retrieval.md)."
+        )
+    return supported
 
 
 def _get_client() -> QdrantClient:
@@ -103,6 +135,7 @@ async def retrieve(
     source_scope: str | None = None,
     standard_id: str | None = None,
     include_vectors: bool = False,
+    hybrid: bool | None = None,
 ) -> list[RagResult]:
     """Retrieve documents matching the query.
 
@@ -115,6 +148,10 @@ async def retrieve(
         source_scope: Deprecated shim, folded into ``filters``
         standard_id: Deprecated shim, folded into ``filters``
         include_vectors: If True, include embedding vectors in results (for personalization)
+        hybrid: Override ``retrieval.hybrid``. ``False`` forces dense-only, which
+            keeps ``score`` on the cosine scale — pass it when a caller compares
+            the score against an absolute threshold rather than ranking within
+            one result set.
 
     Returns:
         List of RagResult objects
@@ -141,8 +178,12 @@ async def retrieve(
             must.append(FieldCondition(key=key, match=MatchValue(value=value)))
     query_filter = Filter(must=must, must_not=_EXCLUDE_META) if must else _META_FILTER
 
+    use_hybrid = cfg.retrieval.hybrid if hybrid is None else hybrid
+    if use_hybrid and not _has_sparse_vector(client, target):
+        use_hybrid = False
+
     def _query(active_filter):
-        if not cfg.retrieval.hybrid:
+        if not use_hybrid:
             return client.query_points(
                 collection_name=target,
                 query=vector,
@@ -152,11 +193,14 @@ async def retrieve(
                 with_vectors=include_vectors,
                 query_filter=active_filter,
             )
-        # score_threshold belongs on the dense leg, never on the fused query:
-        # RRF scores peak near 1/61, so a cosine-calibrated threshold applied to
-        # the fusion result discards everything. The filter has to ride on both
-        # legs too, or the _meta sentinel and manifest re-enter the candidate
-        # pool (see tests/test_retrieval_meta.py).
+        # score_threshold belongs on the dense leg, never on the fused query: a
+        # fused score is `sum(1/(rank+2))` over the legs (measured against Qdrant
+        # 1.18 — 1.0 at best, 0.5 for a top hit found by one leg only), so a
+        # cosine-calibrated threshold applied after fusion filters on a different
+        # scale than it was tuned for. The lexical leg gets no threshold at all
+        # because it has no comparable score — see RetrievalConfig.score_threshold.
+        # The filter has to ride on both legs too, or the _meta sentinel and
+        # manifest re-enter the candidate pool (see tests/test_retrieval_meta.py).
         return client.query_points(
             collection_name=target,
             prefetch=[
@@ -194,8 +238,13 @@ async def retrieve(
             continue
         # Store embedding vector if requested (for personalization scoring)
         if include_vectors and hit.vector is not None:
-            if isinstance(hit.vector, list):
-                payload["_embedding"] = hit.vector
+            # A collection declaring a named sparse vector returns a dict keyed by
+            # vector name, with the unnamed dense vector under "" — so a bare-list
+            # check alone silently yields no embedding on every hybrid-capable
+            # collection.
+            dense = hit.vector.get("") if isinstance(hit.vector, dict) else hit.vector
+            if isinstance(dense, list):
+                payload["_embedding"] = dense
         hits.append(
             RagResult(
                 text=_clean_text(text),
@@ -464,8 +513,16 @@ async def verify_claim(
     top_k: int | None = None,
 ) -> tuple[list[RagResult], bool]:
     """Re-retrieve for a drafted claim; return (evidence, supported). ``supported``
-    is a soft signal — the model still reads the evidence."""
-    results = await retrieve(claim, top_k or TOP_K, filters=filters, collection=collection)
+    is a soft signal — the model still reads the evidence.
+
+    Forces dense-only retrieval: this is the one caller that compares ``score``
+    against an absolute floor, and a fused rank score does not live on that
+    scale. Under hybrid, a top hit scores 0.5 by position alone, so the floor
+    would pass every non-empty result set and the guard would stop guarding.
+    """
+    results = await retrieve(
+        claim, top_k or TOP_K, filters=filters, collection=collection, hybrid=False
+    )
     floor = max(SCORE_THRESHOLD, 0.3)
     supported = any(r.score >= floor for r in results)
     return results, supported

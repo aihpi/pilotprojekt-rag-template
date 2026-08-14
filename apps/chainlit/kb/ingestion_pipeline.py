@@ -302,6 +302,16 @@ async def ingest_chunks(
     # Legacy dense-only collections (created before sparse vectors) reject named
     # vectors, so attach the lexical vector only where the schema declares it.
     has_sparse = _supports_sparse(client, collection)
+    if not has_sparse and get_config().retrieval.hybrid:
+        # An existing collection cannot gain a sparse vector, and _ensure_collection
+        # only configures one at creation — so this run would otherwise report plain
+        # success while every hybrid query silently falls back to dense.
+        logger.warning(
+            "ingest: retrieval.hybrid is on but collection '%s' predates lexical "
+            "vectors, so hybrid search cannot work against it. Re-run with "
+            "--recreate to rebuild it (see docs/retrieval.md).",
+            collection,
+        )
 
     def _vector(dense: list[float], text: str):
         if not has_sparse:

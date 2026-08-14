@@ -153,16 +153,20 @@ def test_new_collections_always_get_the_sparse_vector(monkeypatch):
         assert point.vector[SPARSE_VECTOR].indices, "lexical vector must not be empty"
 
 
-def test_prefetch_limit_below_max_top_k_is_rejected():
+def test_prefetch_limit_below_max_top_k_is_rejected_only_when_hybrid_is_on():
     """A pool smaller than the largest permitted top_k can fuse to fewer than
-    top_k results — silently short answers, so it fails at config load instead."""
+    top_k results. But prefetch_limit is a fusion knob: enforcing it with hybrid
+    off rejected configs that never read it, so `max_top_k: 50` (or MAX_TOP_K=50
+    in the environment) broke every entrypoint at import."""
     from pydantic import ValidationError
 
     from config.schema import RetrievalConfig
 
     with pytest.raises(ValidationError, match="prefetch_limit"):
-        RetrievalConfig(top_k=5, max_top_k=50, prefetch_limit=30)
-    RetrievalConfig(top_k=5, max_top_k=30, prefetch_limit=30)  # equality is legal
+        RetrievalConfig(hybrid=True, top_k=5, max_top_k=50, prefetch_limit=30)
+    RetrievalConfig(hybrid=True, top_k=5, max_top_k=30, prefetch_limit=30)  # equality legal
+    RetrievalConfig(top_k=5, max_top_k=50)  # hybrid off: not this validator's business
+    RetrievalConfig(top_k=40)  # max_top_k defaults to 40 > prefetch_limit 30
 
 
 def test_legacy_dense_only_collections_keep_getting_plain_vectors(monkeypatch):
@@ -209,6 +213,10 @@ def hybrid_client(monkeypatch):
     monkeypatch.setattr(cfg.retrieval, "prefetch_limit", 30)
     client = RecordingClient()
     monkeypatch.setattr(rag_tool, "_get_client", lambda: client)
+    # The capability probe is a separate round trip; assume sparse unless a test
+    # says otherwise, and never let one test's answer leak into the next.
+    monkeypatch.setattr(rag_tool, "_sparse_capable", {})
+    monkeypatch.setattr(rag_tool, "_has_sparse_vector", lambda client, name: True)
     return client
 
 
@@ -225,8 +233,9 @@ def test_hybrid_sends_a_dense_and_a_sparse_leg(hybrid_client):
 
 
 def test_score_threshold_never_reaches_the_fused_query(monkeypatch, hybrid_client):
-    """RRF scores peak near 1/61. A cosine-calibrated threshold on the fused
-    query silently discards every result."""
+    """A fused score is sum(1/(rank+2)) over the legs — measured against Qdrant
+    1.18: 1.0 at best, 0.5 for a top hit found by one leg only. Applying a
+    cosine-calibrated threshold to that filters on the wrong scale."""
     monkeypatch.setattr(rag_tool, "SCORE_THRESHOLD", 0.55)
     asyncio.run(rag_tool.retrieve("query", top_k=5))
 
@@ -252,6 +261,49 @@ def test_fusion_strategy_comes_from_config(monkeypatch, hybrid_client, name, exp
     monkeypatch.setattr(rag_tool.get_config().retrieval, "fusion", name)
     asyncio.run(rag_tool.retrieve("query", top_k=5))
     assert hybrid_client.calls[0]["query"].fusion == expected
+
+
+def test_dense_only_collection_degrades_instead_of_raising(monkeypatch):
+    """A sparse prefetch against a collection with no lexical vector is a hard
+    400 from Qdrant, not an empty result — and tool dispatch has no enclosing
+    try, so it would surface as a failed turn. Collections predating the feature
+    cannot gain the vector, so hybrid has to fall back."""
+
+    async def fake_embed(texts):
+        return [[0.1] * 8 for _ in texts]
+
+    class DenseOnly(RecordingClient):
+        def get_collection(self, name):
+            params = type("P", (), {"sparse_vectors": None})()
+            return type("I", (), {"config": type("C", (), {"params": params})()})()
+
+    monkeypatch.setattr(rag_tool, "embed", fake_embed)
+    monkeypatch.setattr(rag_tool.get_config().retrieval, "hybrid", True)
+    monkeypatch.setattr(rag_tool, "_sparse_capable", {})
+    client = DenseOnly()
+    monkeypatch.setattr(rag_tool, "_get_client", lambda: client)
+
+    asyncio.run(rag_tool.retrieve("query", top_k=5))
+
+    call = client.calls[0]
+    assert "prefetch" not in call, "must fall back to a dense query"
+    assert call["query"] == [0.1] * 8, "the dense fallback still sends the embedding"
+
+
+def test_verify_claim_forces_dense_so_its_floor_stays_comparable(monkeypatch):
+    """verify_claim is the only caller comparing score against an absolute floor.
+    Under hybrid a top hit scores 0.5 by rank alone, which clears the 0.3 floor
+    regardless of similarity — the hallucination guard would pass everything."""
+    seen = {}
+
+    async def fake_retrieve(query, top_k=None, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(rag_tool, "retrieve", fake_retrieve)
+    asyncio.run(rag_tool.verify_claim("a claim"))
+
+    assert seen.get("hybrid") is False, "verify_claim must opt out of fusion"
 
 
 def test_hybrid_off_keeps_the_original_single_vector_query(monkeypatch):

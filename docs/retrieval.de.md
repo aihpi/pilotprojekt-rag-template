@@ -66,9 +66,22 @@ dann das Zusammenführen. Die Daten darunter sind in beiden Fällen dieselben.
 
 **`prefetch_limit`** — wie viele Kandidaten jede Suche vor dem Zusammenführen
 beisteuert. Der Wert muss mindestens `max_top_k` betragen — das erzwingt der
-Config-Loader, denn ein kleinerer Pool, dessen beide Zweige dieselben Kandidaten
-liefern, kann auf weniger als `top_k` Ergebnisse zusammenschmelzen. 30 auf 5 ist
-ein vernünftiger Anfang; ein höherer Wert kostet etwas Anfragezeit und sonst nichts.
+Config-Loader, sobald `hybrid` an ist, denn ein kleinerer Pool, dessen beide Zweige
+dieselben Kandidaten liefern, kann auf weniger als `top_k` Ergebnisse
+zusammenschmelzen. 30 auf 5 ist ein vernünftiger Anfang; ein höherer Wert kostet
+etwas Anfragezeit und sonst nichts.
+
+!!! warning "`score_threshold` begrenzt nur die semantische Hälfte"
+    Ein lexikalischer Treffer hat keinen vergleichbaren Ähnlichkeitswert, deshalb
+    gilt `retrieval.score_threshold` für die semantische Suche und nicht für die
+    lexikalische. Mit `hybrid: true` kann eine Textstelle also allein über einen
+    gemeinsamen Begriff beim Modell landen, obwohl ihre Ähnlichkeit weit unter der
+    Schwelle liegt. Wenn die Schwelle das ist, was themenfremde Fragen unbeantwortet
+    lässt, prüfe nach dem Einschalten, ob das noch zutrifft.
+
+    Aus demselben Grund sucht `verify_claim` bewusst rein semantisch: Es ist die
+    einzige Stelle, die einen Wert gegen eine feste Schwelle prüft, und ein
+    zusammengeführter Wert ist ein Rang, keine Ähnlichkeit.
 
 ## Was das kostet
 

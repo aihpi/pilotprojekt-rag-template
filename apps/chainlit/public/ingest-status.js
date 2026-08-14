@@ -473,6 +473,11 @@
       "user-select:none;-webkit-appearance:none;appearance:none}",
       /* It is a real <button>, so it must not lose its focus ring. */
       "#" + ID + ":focus-visible{outline:2px solid currentColor;outline-offset:2px}",
+      /* Used only when no header anchor exists — same treatment as the badge,
+       * stacked below it, since the badge may be floating at 62px itself. */
+      "#" + ID + "[data-floating='1']{position:fixed;top:100px;right:14px;",
+      "z-index:2147483000;margin-left:0;backdrop-filter:blur(6px);",
+      "-webkit-backdrop-filter:blur(6px)}",
       "html.dark #" + ID + ",.dark #" + ID + "{background:rgba(148,163,184,.26);",
       "color:#e2e8f0;border-color:rgba(148,163,184,.42)}",
       "#" + ID + " .rci-label{white-space:nowrap;overflow:hidden;",
@@ -561,14 +566,21 @@
   function place(el) {
     for (var i = 0; i < ANCHOR_IDS.length; i++) {
       var anchor = document.getElementById(ANCHOR_IDS[i]);
-      if (anchor && anchor.parentNode) {
+      // Skip an anchor that is itself floating: inserting after an out-of-flow
+      // element would drop the chip into body flow, below the whole app.
+      if (anchor && anchor.parentNode && anchor.getAttribute("data-floating") !== "1") {
         if (el.previousElementSibling !== anchor) {
           anchor.parentNode.insertBefore(el, anchor.nextSibling);
         }
+        el.removeAttribute("data-floating");
         return;
       }
     }
+    // No header anchor (no readme button, or the badge is floating too). Pin to
+    // a fixed corner like the badge does, rather than appending a static button
+    // to <body> where it renders below the app and is never seen.
     if (!el.parentNode) document.body.appendChild(el);
+    el.setAttribute("data-floating", "1");
   }
 
   function setOpen(el, open) {
@@ -597,13 +609,19 @@
       el.innerHTML =
         '<span class="rci-gear" aria-hidden="true">⚙</span>' +
         '<span class="rci-label"></span>';
+      // `pinned` is what click toggles. Reading aria-expanded instead would
+      // always find "true", because mouseenter and focus both fire before click
+      // — so a click (and every tap on a browser that focuses buttons) closed
+      // the panel it had just opened.
+      var pinned = false;
       el.addEventListener("mouseenter", function () { setOpen(el, true); });
-      el.addEventListener("mouseleave", function () { setOpen(el, false); });
+      el.addEventListener("mouseleave", function () { if (!pinned) setOpen(el, false); });
       el.addEventListener("focus", function () { setOpen(el, true); });
-      el.addEventListener("blur", function () { setOpen(el, false); });
-      // Tap/click toggles, so touch (which never hovers) can open and close it.
+      el.addEventListener("blur", function () { pinned = false; setOpen(el, false); });
+      // Tap/click pins it open, so touch — which never hovers — can read it.
       el.addEventListener("click", function () {
-        setOpen(el, el.getAttribute("aria-expanded") !== "true");
+        pinned = !pinned;
+        setOpen(el, pinned);
       });
       el.addEventListener("keydown", function (event) {
         if (event.key === "Escape") setOpen(el, false);

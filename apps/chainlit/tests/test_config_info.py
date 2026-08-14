@@ -64,21 +64,29 @@ def test_route_is_registered_before_the_database_early_return():
 
 
 def test_config_path_cannot_disagree_with_the_loader(monkeypatch):
-    """The chip exists to say which file is loaded, so it must resolve the path
-    exactly as load_config does. `getenv(name, default)` returns "" for an empty
-    RAG_CONFIG while the loader's `or` falls back — the chip would show a blank
-    path for a run that loaded default.yaml."""
-    from config.loader import CONFIG_PATH_ENV, DEFAULT_CONFIG
+    """The chip exists to say which file is loaded, so it must report exactly what
+    the loader would read — via the loader's own resolver, not a copy of it. Two
+    ways a copy drifted: `getenv(name, default)` returns "" for an empty
+    RAG_CONFIG where the loader's `or` falls back, and a relative RAG_CONFIG has
+    to be joined to BASE_DIR or the chip shows a host-relative path for a file
+    the container loaded from /app."""
+    from config.loader import CONFIG_PATH_ENV, resolve_config_path
 
-    monkeypatch.setenv(CONFIG_PATH_ENV, "")
-    assert chainlit_app._config_info_payload(_cfg())["config_path"] == str(DEFAULT_CONFIG)
+    for value in ("", "examples/papers/rag.config.yaml"):
+        monkeypatch.setenv(CONFIG_PATH_ENV, value)
+        assert chainlit_app._config_info_payload(_cfg())["config_path"] == str(
+            resolve_config_path()
+        )
 
     monkeypatch.delenv(CONFIG_PATH_ENV, raising=False)
-    assert chainlit_app._config_info_payload(_cfg())["config_path"] == str(DEFAULT_CONFIG)
+    assert chainlit_app._config_info_payload(_cfg())["config_path"] == str(
+        resolve_config_path()
+    )
 
+    # And it is absolute, which is the half a hand-rolled copy dropped.
     monkeypatch.setenv(CONFIG_PATH_ENV, "examples/papers/rag.config.yaml")
-    payload = chainlit_app._config_info_payload(_cfg())
-    assert payload["config_path"] == "examples/papers/rag.config.yaml"
+    reported = chainlit_app._config_info_payload(_cfg())["config_path"]
+    assert reported.startswith("/") and reported.endswith("examples/papers/rag.config.yaml")
 
 
 def test_payload_carries_the_retrieval_switches_and_serializes():

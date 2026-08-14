@@ -2149,14 +2149,14 @@ def _config_info_payload(cfg) -> dict:
     """What the ``/config-info`` header chip shows. Pure so it is testable
     without booting Chainlit. ``chat_model`` is the instance default — users
     may override it per-user in the settings panel."""
-    from config.loader import CONFIG_PATH_ENV, DEFAULT_CONFIG
+    from config.loader import resolve_config_path
+    from tools import enabled_tool_ids
 
     return {
         "name": cfg.name,
-        # Same expression as load_config, via the same constants: this chip is
-        # only worth having if it cannot disagree with the loader. `or` (not
-        # getenv's default) matters — RAG_CONFIG set to "" falls back too.
-        "config_path": os.getenv(CONFIG_PATH_ENV) or str(DEFAULT_CONFIG),
+        # Resolved through the loader's own helper: this chip is only worth having
+        # if it cannot disagree with the loader about which file is loaded.
+        "config_path": str(resolve_config_path()),
         "language": cfg.language,
         "collection": cfg.vector_store.collection,
         "chat_model": cfg.models.chat_model,
@@ -2177,7 +2177,7 @@ def _config_info_payload(cfg) -> dict:
             "score_threshold": cfg.retrieval.score_threshold,
         },
         "images_mode": cfg.images.mode,
-        "tools": list(cfg.tools.enabled) or ["search"],
+        "tools": enabled_tool_ids(cfg),
     }
 
 

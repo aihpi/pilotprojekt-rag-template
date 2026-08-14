@@ -13,6 +13,7 @@ in sync with the collection.
 from __future__ import annotations
 
 import re
+import unicodedata
 import zlib
 from collections import Counter
 from typing import TYPE_CHECKING
@@ -30,10 +31,31 @@ SPARSE_VECTOR = "text"
 # Verfügbarkeit) while snake_case identifiers still split.
 _TOKEN = re.compile(r"[^\W_]+(?:-[^\W_]+)*")
 
+# Typography that a hyphen means. NFKC leaves these alone, but a PDF writing
+# "BSI‑Standard" with a non-breaking hyphen has to match a query typed with "-",
+# and "200–2" with an en dash has to match "200-2". The em dash is deliberately
+# absent: it separates clauses rather than joining a compound.
+_HYPHENS = str.maketrans({c: "-" for c in "‐‑‒–−"})
+# Soft hyphen is a line-break hint inside a word; it has no textual meaning.
+_SOFT_HYPHEN = "­"
+
 
 def tokenize(text: str) -> list[str]:
-    """Lowercased terms, hyphenated compounds kept as one token."""
-    return [m.group(0).lower() for m in _TOKEN.finditer(text)]
+    """Lowercased terms, hyphenated compounds kept as one token.
+
+    NFKC first, because PDF-extracted German routinely differs from typed German
+    in ways that are invisible on screen but split tokens: a decomposed umlaut
+    (``u`` + U+0301) is two tokens because a combining mark is not a word
+    character, and soft hyphens (U+00AD) or non-breaking hyphens (U+2011) from
+    line breaks either split a word or fail to match a typed ``-``. Ingest and
+    query must agree on the token, or the lexical vector matches nothing.
+    """
+    normalized = (
+        unicodedata.normalize("NFKC", text)
+        .replace(_SOFT_HYPHEN, "")
+        .translate(_HYPHENS)
+    )
+    return [m.group(0).lower() for m in _TOKEN.finditer(normalized)]
 
 
 def _token_id(token: str) -> int:

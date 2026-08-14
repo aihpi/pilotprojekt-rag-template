@@ -211,6 +211,9 @@ class RetrievalConfig(BaseModel):
     """Upper bound the model may request. Defaults to ``top_k`` when unset."""
     max_source_links: int = Field(default=8, ge=0)
     score_threshold: float = Field(default=0.0, ge=0.0)
+    """Minimum cosine similarity for a hit. With ``hybrid`` on this bounds the
+    **dense leg only** — the lexical leg has no comparable score, so a chunk that
+    matches lexically can enter the fused results below this similarity."""
     hybrid: bool = False
     """Search dense *and* sparse (lexical) vectors and fuse the two rankings.
     Helps where embeddings are weakest: standard numbers, compound technical
@@ -223,8 +226,8 @@ class RetrievalConfig(BaseModel):
     one of the two retrievers is clearly stronger. Measure before switching."""
     prefetch_limit: int = Field(default=30, ge=1)
     """``hybrid`` only: candidates each leg retrieves before fusion. Must be at
-    least ``max_top_k`` (enforced) — below it, two legs returning the same
-    candidates can fuse to fewer than ``top_k`` results."""
+    least ``max_top_k`` (enforced when ``hybrid`` is on) — below it, two legs
+    returning the same candidates can fuse to fewer than ``top_k`` results."""
     payload_indexes: list[str] = Field(default_factory=list)
     """Metadata fields to build Qdrant keyword indexes on."""
     filterable_fields: list[str] = Field(default_factory=list)
@@ -238,11 +241,14 @@ class RetrievalConfig(BaseModel):
             raise ValueError(
                 f"retrieval.max_top_k ({self.max_top_k}) must be >= top_k ({self.top_k})"
             )
-        if self.prefetch_limit < self.max_top_k:
+        # Only when hybrid is on: prefetch_limit is a fusion knob, and enforcing it
+        # unconditionally rejected configs that never read it — a plain
+        # `max_top_k: 50` (or MAX_TOP_K=50 in the environment) would fail at import.
+        if self.hybrid and self.prefetch_limit < self.max_top_k:
             raise ValueError(
                 f"retrieval.prefetch_limit ({self.prefetch_limit}) must be >= "
-                f"max_top_k ({self.max_top_k}); a smaller candidate pool can fuse "
-                f"to fewer than top_k results"
+                f"max_top_k ({self.max_top_k}) when retrieval.hybrid is on; a smaller "
+                f"candidate pool can fuse to fewer than top_k results"
             )
         return self
 

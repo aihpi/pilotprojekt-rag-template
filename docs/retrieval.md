@@ -61,10 +61,22 @@ merge. The data underneath is the same either way.
   when scores are poorly spread. Try both and measure; do not switch on principle.
 
 **`prefetch_limit`** — how many candidates each search contributes before merging.
-It must be at least `max_top_k` — the config loader enforces this, because a smaller
-pool whose two legs return the same candidates can fuse to fewer than `top_k`
-results. 30 into 5 is a reasonable start; raising it costs a little query time and
-nothing else.
+It must be at least `max_top_k`, which the config loader enforces when `hybrid` is
+on, because a smaller pool whose two legs return the same candidates can fuse to
+fewer than `top_k` results. 30 into 5 is a reasonable start; raising it costs a
+little query time and nothing else.
+
+!!! warning "`score_threshold` only bounds the semantic half"
+    A lexical match has no similarity score to compare, so `retrieval.score_threshold`
+    is applied to the semantic search and not to the lexical one. With `hybrid: true`
+    a chunk can therefore reach the model on the strength of one shared term even if
+    its similarity is far below the threshold. If the threshold is what keeps
+    off-topic questions from being answered, verify that still holds after enabling
+    hybrid.
+
+    For the same reason `verify_claim` deliberately runs a semantic-only search: it
+    is the one place a score is compared against a fixed bar, and a merged score is
+    a rank, not a similarity.
 
 ## What this costs
 
