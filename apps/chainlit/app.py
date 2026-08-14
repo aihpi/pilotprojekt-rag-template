@@ -2234,9 +2234,22 @@ async def on_app_startup() -> None:
     if _startup_cfg.retrieval.hybrid:
         from kb.ingestion_pipeline import get_client, verify_hybrid_compatible
 
-        verify_hybrid_compatible(
-            get_client(), _startup_cfg.vector_store.collection, hybrid=True
-        )
+        try:
+            verify_hybrid_compatible(
+                get_client(), _startup_cfg.vector_store.collection, hybrid=True
+            )
+        except RuntimeError:
+            raise  # a real incompatibility — refuse to serve it
+        except Exception as exc:  # noqa: BLE001
+            # Only the incompatibility is worth refusing to start over. The check
+            # talks to Qdrant, and compose only waits for that container to *start*,
+            # not to accept connections — so a cold start, a restart or a blip would
+            # otherwise take the whole app down over a healthy collection. The
+            # cached query-path check runs again later and still refuses then.
+            print(
+                f"[STARTUP] could not verify hybrid support for "
+                f"'{_startup_cfg.vector_store.collection}' yet: {exc}"
+            )
 
     from chainlit.server import app as chainlit_fastapi_app
 

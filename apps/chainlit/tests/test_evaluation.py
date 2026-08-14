@@ -98,8 +98,7 @@ def test_the_signature_names_every_field_that_changes_results():
         cfg.chunking.strategy,
         str(cfg.chunking.max_chars),
         cfg.vector_store.collection,
-        str(cfg.retrieval.hybrid),
-        cfg.retrieval.fusion,
+        "dense",
     ]
 
 
@@ -112,6 +111,14 @@ def test_dense_and_hybrid_runs_do_not_pool_under_one_signature():
     assert evaluation.config_signature(dense) != evaluation.config_signature(hybrid)
 
 
+def test_settings_that_only_apply_to_hybrid_do_not_split_dense_runs():
+    """fusion and prefetch_limit are inert when hybrid is off. Recording them
+    unconditionally split two behaviourally identical dense runs apart."""
+    a = RagConfig(retrieval={"fusion": "rrf", "prefetch_limit": 30})
+    b = RagConfig(retrieval={"fusion": "dbsf", "prefetch_limit": 60})
+    assert evaluation.config_signature(a) == evaluation.config_signature(b)
+
+
 def test_the_signature_follows_the_fusion_strategy():
     """RRF and DBSF weight the two legs differently, so they are separate
     configurations to compare, not one to pool."""
@@ -120,13 +127,13 @@ def test_the_signature_follows_the_fusion_strategy():
     assert evaluation.config_signature(rrf) != evaluation.config_signature(dbsf)
 
 
-def test_prefetch_limit_is_deliberately_not_in_the_signature():
-    """It widens the candidate pool without changing how anything is scored, so
-    two runs differing only by it stay comparable. Splitting them would fragment
-    the grouping for no gain."""
+def test_the_signature_follows_the_candidate_pool_when_hybrid_is_on():
+    """prefetch_limit decides which candidates fusion ever sees, so a wider pool
+    can surface a chunk neither leg ranked in its own top-k — a different answer,
+    not a comparable run."""
     a = RagConfig(retrieval={"hybrid": True, "prefetch_limit": 30})
     b = RagConfig(retrieval={"hybrid": True, "prefetch_limit": 60})
-    assert evaluation.config_signature(a) == evaluation.config_signature(b)
+    assert evaluation.config_signature(a) != evaluation.config_signature(b)
 
 
 def test_configs_differing_only_by_collection_get_different_signatures():

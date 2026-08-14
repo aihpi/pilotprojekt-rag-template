@@ -72,15 +72,18 @@ def config_signature(cfg: "RagConfig", chat_model: str | None = None) -> str:
     only by collection would otherwise share one, silently pooling scores from
     different corpora.
 
-    ``hybrid`` and ``fusion`` are in for the same reason one level down: the same
-    corpus searched dense and searched hybrid is a different retrieval path, and
-    the resulting scores are not even on the same scale (cosine versus a fused
-    rank), so pooling them would average incomparable numbers. ``fusion`` is
-    recorded unconditionally rather than only when ``hybrid`` is on — ``False|rrf``
-    and ``False|dbsf`` describe identical runs and *should* group together, and a
-    conditional here is a branch to get wrong later. ``prefetch_limit`` is
-    deliberately absent: it widens the candidate pool without changing how
-    anything is scored, so runs differing only by it stay comparable.
+    The retrieval mode is in for the same reason one level down: the same corpus
+    searched dense and searched hybrid is a different retrieval path, and the
+    resulting scores are not even on the same scale (cosine versus a fused rank),
+    so pooling them would average incomparable numbers.
+
+    It is encoded as one part describing what *actually ran* — ``dense``, or
+    ``hybrid:<fusion>:<prefetch_limit>`` — rather than as one field per setting.
+    ``fusion`` and ``prefetch_limit`` only mean anything when ``hybrid`` is on, so
+    listing them unconditionally split two identical dense runs apart whenever the
+    inert setting differed. And ``prefetch_limit`` does belong in the hybrid case:
+    it decides which candidates fusion ever sees, so a wider pool can surface a
+    chunk that neither leg ranked in its own top-k, changing the answer.
 
     Caveat worth knowing when reading old rows: the chunking fields describe how the
     *collection was ingested*, not how this query was served. Re-ingesting the same
@@ -88,6 +91,11 @@ def config_signature(cfg: "RagConfig", chat_model: str | None = None) -> str:
     that no longer exists.
     """
     strategy, max_chars = effective_chunking(cfg)
+    retrieval = (
+        f"hybrid:{cfg.retrieval.fusion}:{cfg.retrieval.prefetch_limit}"
+        if cfg.retrieval.hybrid
+        else "dense"
+    )
     # "|" cannot occur in a gateway model name, in a chunking strategy (a Literal)
     # or in a Qdrant collection name, so the parts stay unambiguously splittable.
     return "|".join(
@@ -98,8 +106,7 @@ def config_signature(cfg: "RagConfig", chat_model: str | None = None) -> str:
             strategy,
             max_chars,
             cfg.vector_store.collection,
-            cfg.retrieval.hybrid,
-            cfg.retrieval.fusion,
+            retrieval,
         )
     )
 

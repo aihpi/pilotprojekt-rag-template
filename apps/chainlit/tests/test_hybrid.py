@@ -347,12 +347,29 @@ def test_a_collection_from_before_versioning_is_tolerated():
     _verify(_SentinelClient(sentinel_payload=None))
 
 
-def test_hybrid_off_skips_the_check_entirely():
+def test_a_dense_only_collection_never_fails_the_guard_with_hybrid_off():
     """Nothing about a dense-only setup should be able to fail on a hybrid guard."""
     from kb import ingestion_pipeline
 
     ingestion_pipeline._verified_hybrid.clear()
     ingestion_pipeline.verify_hybrid_compatible(_SentinelClient(sparse=False), "kb", hybrid=False)
+
+
+def test_a_stale_format_is_refused_even_with_hybrid_off():
+    """`hybrid` is a *query-time* flag, but ingest writes lexical vectors into any
+    collection whose schema has them. Skipping the format check with hybrid off let
+    a run mix new-format vectors into an old-format index and then overwrite the
+    recorded version, leaving a corpus no later check could tell was broken."""
+    from kb import ingestion_pipeline
+    from kb.sparse import SPARSE_FORMAT
+
+    ingestion_pipeline._verified_hybrid.clear()
+    with pytest.raises(RuntimeError, match="lexical format"):
+        ingestion_pipeline.verify_hybrid_compatible(
+            _SentinelClient(sentinel_payload={"sparse_format": SPARSE_FORMAT + 1}),
+            "kb",
+            hybrid=False,
+        )
 
 
 def test_the_sentinel_keeps_a_bare_vector_so_the_manifest_can_reuse_it():

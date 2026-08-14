@@ -157,13 +157,19 @@ def verify_hybrid_compatible(client, collection: str, *, hybrid: bool) -> None:
     Called from ingest, app startup and the query path. A collection's answer
     cannot change without a re-ingest, so a success is cached; a failure is not,
     and neither is a lookup error.
+
+    ``hybrid`` gates only the *first* check. The format check runs regardless,
+    because ingest writes lexical vectors into any collection whose schema has
+    them — the query-time flag does not decide that. Skipping it with ``hybrid:
+    false`` would let a run mix new-format vectors into an old-format index and
+    then overwrite the recorded version, leaving a corpus that no later check can
+    tell is broken.
     """
-    if not hybrid or collection in _verified_hybrid:
-        return
-    if not collection_exists(client, collection):
+    if collection in _verified_hybrid or not collection_exists(client, collection):
         return  # nothing to conflict with; ingest will build it correctly
 
-    if not _supports_sparse(client, collection):
+    has_sparse = _supports_sparse(client, collection)
+    if hybrid and not has_sparse:
         raise RuntimeError(
             f"Collection '{collection}' has no lexical vector, but retrieval.hybrid is "
             f"on. It was built before hybrid search existed and cannot gain one, so the "
@@ -171,17 +177,19 @@ def verify_hybrid_compatible(client, collection: str, *, hybrid: bool) -> None:
             f"--recreate, or set retrieval.hybrid: false."
         )
 
-    sentinel = _read_sentinel(client, collection) or {}
-    stored = sentinel.get("sparse_format")
-    # A missing key means the collection predates versioning — tolerated, exactly
-    # as a missing embed_model is below.
-    if stored is not None and stored != SPARSE_FORMAT:
-        raise RuntimeError(
-            f"Collection '{collection}' was built with lexical format {stored}, but this "
-            f"version writes {SPARSE_FORMAT}. Its stored terms would not match the ones "
-            f"queries compute, so hybrid search would silently find nothing. Re-ingest "
-            f"with --recreate, or set retrieval.hybrid: false."
-        )
+    if has_sparse:
+        sentinel = _read_sentinel(client, collection) or {}
+        stored = sentinel.get("sparse_format")
+        # A missing key means the collection predates versioning — tolerated, exactly
+        # as a missing embed_model is below.
+        if stored is not None and stored != SPARSE_FORMAT:
+            raise RuntimeError(
+                f"Collection '{collection}' was built with lexical format {stored}, but "
+                f"this version writes {SPARSE_FORMAT}. Its stored terms would not match "
+                f"the ones queries compute, so hybrid search would silently find "
+                f"nothing — and ingesting into it would mix the two formats. Re-ingest "
+                f"with --recreate, or point vector_store.collection at a new name."
+            )
     _verified_hybrid.add(collection)
 
 

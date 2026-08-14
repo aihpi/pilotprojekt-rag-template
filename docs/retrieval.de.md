@@ -35,10 +35,13 @@ retrieval:
   prefetch_limit: 30 # Kandidaten pro Zweig vor dem Zusammenführen
 ```
 
-Der Ingest schreibt den lexikalischen Vektor **immer** — er ist eine lokal
-berechnete Wortzählung und kostet nichts. `hybrid` ist damit ein reiner
-Anfrage-Schalter: umlegen, neu starten, vergleichen, zurücklegen. Kein erneuter
-Ingest, und eine einzige Collection taugt für ein Dense-gegen-Hybrid-A/B.
+Der Ingest schreibt den lexikalischen Vektor in jede Collection, die er **neu
+anlegt** — er ist eine lokal berechnete Wortzählung und kostet nichts. Für diese ist
+`hybrid` damit ein reiner Anfrage-Schalter: umlegen, neu starten, vergleichen,
+zurücklegen. Kein erneuter Ingest, und eine einzige Collection taugt für ein
+Dense-gegen-Hybrid-A/B. Eine Collection, die vor diesem Feature entstanden ist,
+bleibt rein dense, bis du sie neu aufbaust (siehe unten); ein Ingest in sie schreibt
+weiterhin nur dense Vektoren.
 
 !!! warning "Collections von vor diesem Feature brauchen einmalig einen Neuaufbau"
     Eine Collection, die vor den lexikalischen Vektoren angelegt wurde, ist rein

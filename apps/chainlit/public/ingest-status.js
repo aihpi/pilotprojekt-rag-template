@@ -624,7 +624,12 @@
         setOpen(el, pinned);
       });
       el.addEventListener("keydown", function (event) {
-        if (event.key === "Escape") setOpen(el, false);
+        // `pinned` has to clear too, or the next click reads it as "open", toggles
+        // to false, and the panel stays shut.
+        if (event.key === "Escape") {
+          pinned = false;
+          setOpen(el, false);
+        }
       });
     }
     el.querySelector(".rci-label").textContent = info.name;

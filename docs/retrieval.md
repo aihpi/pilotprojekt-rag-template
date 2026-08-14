@@ -33,9 +33,12 @@ retrieval:
   prefetch_limit: 30 # candidates per leg before merging
 ```
 
-Ingest **always** writes the lexical vector — it is a locally computed word count and
-costs nothing — so `hybrid` is a pure query-time switch: flip it, restart, compare,
-flip it back. No re-ingest, and one collection can serve a dense-vs-hybrid A/B.
+Ingest writes the lexical vector into every collection it *creates* — it is a locally
+computed word count and costs nothing — so for those, `hybrid` is a pure query-time
+switch: flip it, restart, compare, flip it back. No re-ingest, and one collection can
+serve a dense-vs-hybrid A/B. A collection created before this feature stays dense-only
+until you recreate it (see below), and ingesting into it keeps writing plain dense
+vectors.
 
 !!! warning "Collections from before this feature need one re-ingest"
     A collection created before lexical vectors existed is dense-only, and its
