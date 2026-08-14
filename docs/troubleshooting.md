@@ -132,6 +132,76 @@ connection and settings on their own.
 One thing to know: documents indexed by earlier runs are safe, but whatever was being
 read when it stopped was not saved. Running it again reads those files once more.
 
+## The score badge does not appear
+
+The badge above the chatbox shows how well each answer scored. If it never appears,
+check these in order:
+
+1. **Is evaluation turned on?** It is off by default. Your settings file needs
+   `evaluation: {enabled: true}` and the evaluation service must be running
+   (`docker compose --profile eval up -d`).
+2. **Did you ask a question that uses the knowledge base?** Evaluation only scores
+   answers that looked something up. If the assistant answered from general
+   knowledge or said "not in the documents", there is nothing to score.
+3. **Wait about fifteen seconds.** Scoring happens in the background after the
+   answer is already shown. The badge appears once the score arrives.
+
+If none of that helps, check the app log for lines starting with `[WARN]
+eval_status_unavailable` — that means the app cannot reach the evaluation service.
+
+## Scores are all empty (NULL)
+
+The badge appears but the numbers are missing. This means the scoring model (the
+*judge*) tried to grade the answer but failed.
+
+The most common cause is that the judge model is not available at the AI service
+right now. Check:
+
+```bash
+docker compose logs --tail 20 eval
+```
+
+If you see `500 Internal Server Error` or `Connection error`, the judge model is
+down at the service. Wait and try again, or point `evaluation.judge_model` in your
+settings file at a different model that your service offers.
+
+A failed score is stored as empty, never as zero. That way a temporary outage does
+not drag the averages down.
+
+## The badge shows numbers I do not trust
+
+Two things to check:
+
+**Are you comparing across different models?** If `evaluation.judge_model` is not
+set, the model that *answered* also grades its own answer. That makes scores
+unreliable when you switch models in the settings panel, because each model judges
+itself differently. Set `judge_model` to a fixed model that is not the one being
+judged.
+
+**What do the metrics actually measure?**
+
+- **Faithfulness** checks whether the answer's claims are supported by the text
+  passages that were retrieved. It breaks the answer into individual statements,
+  then checks each one against the sources. The formula is simply: supported
+  claims divided by all claims. A score of 0.5 does not mean "mediocre" — it means
+  half the statements in that answer were not backed by the sources. The badge
+  panel lists every claim with a tick or cross and the judge's reason, so you can
+  see exactly which one failed.
+
+- **Relevance** checks whether the answer actually addresses the question. It
+  generates questions from the answer and compares them with the original question
+  using embedding similarity. If the generated questions are close to the real one,
+  the answer is relevant. A relevance of 0% usually does not mean the answer was
+  off-topic — it typically means the assistant declined to answer ("not in the
+  documents"), which is correct behaviour when the knowledge base does not cover
+  the question.
+
+Both scores come from the [RAGAS](https://docs.ragas.io/) evaluation framework.
+They are *reference-free*: no hand-written correct answers are needed. The trade-off
+is that they measure what the judge model *thinks*, which carries its own opinions
+and noise. Compare changes between runs ("did this config change help?"), do not
+read a single number as a verdict.
+
 ## Nothing here matches
 
 The log is the fastest way to find out more:

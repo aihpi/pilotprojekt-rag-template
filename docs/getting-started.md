@@ -136,6 +136,42 @@ If the assistant says it cannot find anything, the most likely cause is that ste
 3 read in nothing. Check that your PDFs really are in `data/documents/` and that
 `RAG_CONFIG` points at your file.
 
+## 5. See how good the answers are (optional)
+
+The assistant is working, but how do you know it is answering *well*? Evaluation
+scores every answer on two things and shows the result in a small badge above the
+chatbox:
+
+- **Faithfulness** — did the assistant only say things its sources actually
+  support, or did it add claims of its own? The score is the share of claims that
+  are backed up: 1.0 means every claim checks out, 0.5 means half of them do not.
+- **Relevance** — does the answer address the question that was asked, rather than
+  being correct but beside the point?
+
+Both are checked by a second AI model (the *judge*) that reads the answer and the
+sources and decides. No hand-written "correct answers" are needed, so it works on
+the questions people are already asking.
+
+Evaluation is off by default because it costs extra calls per answer. To turn it
+on, start the evaluation service and set one flag:
+
+```bash
+docker compose --profile eval up -d
+```
+
+Then add this to your settings file:
+
+```yaml
+evaluation:
+  enabled: true
+```
+
+Restart the app (`docker compose restart chainlit`), ask a question, and wait
+about fifteen seconds. A badge appears above the chatbox with the scores. Click
+it for the full explanation — which claims passed, which did not, and why.
+
+The full guide is at [Checking answer quality](evaluation.md).
+
 ## Without Docker
 
 Only needed if you cannot use Docker, or if you are developing on the app itself.

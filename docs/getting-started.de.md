@@ -142,6 +142,47 @@ Sagt der Assistent, er finde nichts, wurde in Schritt 3 vermutlich nichts
 eingelesen. Prüfe, ob deine PDFs wirklich in `data/documents/` liegen und ob
 `RAG_CONFIG` auf deine Datei zeigt.
 
+## 5. Sehen, wie gut die Antworten sind (optional)
+
+Der Assistent läuft, aber woher weißt du, ob er *gut* antwortet? Die Evaluation
+bewertet jede Antwort in zwei Punkten und zeigt das Ergebnis in einem kleinen
+Abzeichen über dem Eingabefeld:
+
+- **Treue (Faithfulness)** — hat der Assistent nur Dinge gesagt, die seine Quellen
+  auch hergeben, oder hat er eigene Behauptungen hinzugefügt? Der Wert ist der
+  Anteil gedeckter Aussagen: 1,0 heißt alles geprüft, 0,5 heißt die Hälfte ist
+  nicht belegt.
+- **Relevanz (Relevance)** — beantwortet die Antwort die gestellte Frage, statt
+  zwar korrekt, aber am Thema vorbei zu sein?
+
+Beides wird von einem zweiten KI-Modell (dem *Judge*) geprüft, das die Antwort
+und die Quellen liest und entscheidet. Von Hand geschriebene „richtige Antworten"
+braucht es nicht, deshalb funktioniert es auf den Fragen, die sowieso schon
+gestellt werden.
+
+Die Evaluation ist standardmäßig aus, weil sie zusätzliche Aufrufe pro Antwort
+kostet. Zum Einschalten den Evaluations-Dienst starten und eine Einstellung
+setzen:
+
+```bash
+docker compose --profile eval up -d
+```
+
+Dann in deiner Einstellungsdatei ergänzen:
+
+```yaml
+evaluation:
+  enabled: true
+```
+
+App neu starten (`docker compose restart chainlit`), eine Frage stellen und etwa
+fünfzehn Sekunden warten. Über dem Eingabefeld erscheint ein Abzeichen mit den
+Werten. Ein Klick darauf zeigt die ganze Erklärung — welche Aussagen bestanden
+haben, welche nicht, und warum.
+
+Die vollständige Anleitung steht unter
+[Antwortqualität prüfen](evaluation.de.md).
+
 ## Ohne Docker
 
 Nur nötig, wenn du Docker nicht nutzen kannst oder an der App selbst
