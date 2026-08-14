@@ -98,7 +98,35 @@ def test_the_signature_names_every_field_that_changes_results():
         cfg.chunking.strategy,
         str(cfg.chunking.max_chars),
         cfg.vector_store.collection,
+        str(cfg.retrieval.hybrid),
+        cfg.retrieval.fusion,
     ]
+
+
+def test_dense_and_hybrid_runs_do_not_pool_under_one_signature():
+    """The same corpus searched dense and searched hybrid is a different retrieval
+    path, and the scores are not even on the same scale — cosine versus a fused
+    rank. Averaging them together would be meaningless."""
+    dense = RagConfig()
+    hybrid = RagConfig(retrieval={"hybrid": True})
+    assert evaluation.config_signature(dense) != evaluation.config_signature(hybrid)
+
+
+def test_the_signature_follows_the_fusion_strategy():
+    """RRF and DBSF weight the two legs differently, so they are separate
+    configurations to compare, not one to pool."""
+    rrf = RagConfig(retrieval={"hybrid": True, "fusion": "rrf"})
+    dbsf = RagConfig(retrieval={"hybrid": True, "fusion": "dbsf"})
+    assert evaluation.config_signature(rrf) != evaluation.config_signature(dbsf)
+
+
+def test_prefetch_limit_is_deliberately_not_in_the_signature():
+    """It widens the candidate pool without changing how anything is scored, so
+    two runs differing only by it stay comparable. Splitting them would fragment
+    the grouping for no gain."""
+    a = RagConfig(retrieval={"hybrid": True, "prefetch_limit": 30})
+    b = RagConfig(retrieval={"hybrid": True, "prefetch_limit": 60})
+    assert evaluation.config_signature(a) == evaluation.config_signature(b)
 
 
 def test_configs_differing_only_by_collection_get_different_signatures():
@@ -134,7 +162,9 @@ def test_the_signature_reports_the_chunking_the_corpus_was_ingested_with():
     cfg = RagConfig(data_sources=[_source(strategy="semantic", max_chars=1500)])
     assert cfg.chunking.strategy == "fixed_size", "the global one is still the default"
 
-    _, _, strategy, max_chars, _ = evaluation.config_signature(cfg).split("|")
+    # Indexed, not unpacked: the field list grows (hybrid/fusion landed after this
+    # test was written) and a positional unpack fails on every addition.
+    strategy, max_chars = evaluation.config_signature(cfg).split("|")[2:4]
     assert (strategy, max_chars) == ("semantic", "1500")
 
 
