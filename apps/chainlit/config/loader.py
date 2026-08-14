@@ -57,6 +57,16 @@ _ENV_OVERRIDES: dict[str, str] = {
     "DATA_RAW_DIR": "sources.data_dir",
     "IMAGES_MODE": "images.mode",
     "IMAGES_VISION_MODEL": "images.vision_model",
+    # Both differ per environment rather than per instance, which is what this map
+    # is for: enabled is how you switch scoring on for one run without editing a
+    # committed config, and service_url is "eval" under compose but "localhost"
+    # when the app runs on the host.
+    "EVALUATION_ENABLED": "evaluation.enabled",
+    "EVALUATION_SERVICE_URL": "evaluation.service_url",
+    # Worth an override of its own: the judge should not be the model being judged,
+    # and when one model on the gateway is unavailable you want to repoint the judge
+    # without touching a committed config.
+    "EVALUATION_JUDGE_MODEL": "evaluation.judge_model",
 }
 
 # List-valued env vars split on this separator (matches legacy _getenv_list).

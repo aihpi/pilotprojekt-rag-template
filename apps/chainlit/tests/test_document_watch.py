@@ -376,7 +376,9 @@ def test_a_bulk_import_does_not_produce_an_endless_list(passes):
     listed = seen[0]
     assert len(listed) == document_watch._MAX_LISTED_FILES + 1
     assert listed[-1]["action"] == "more"
-    assert "more" in listed[-1]["name"]
+    # A bare count, not "and 28 more": the browser writes that sentence, because it
+    # is the only side that knows whether to write it in German or English.
+    assert listed[-1]["name"] == str(40 - document_watch._MAX_LISTED_FILES)
 
 
 # --------------------------------------------------------------------------- #

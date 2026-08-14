@@ -48,3 +48,4 @@ user question ─► retrieve (top_k, optional filters) ◄───────
 - **[Field-Mapping DSL](field-mapping.md)**: turn JSON/CSV into text (technical).
 - **[Extending](extending.md)**: support a new file type (needs Python).
 - **[Feedback Export](feedback-export.md)**: collect and download user ratings.
+- **[Checking Answer Quality](evaluation.md)**: score answers and compare configurations.

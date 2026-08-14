@@ -57,7 +57,28 @@ CHUNK_OVERLAP = _cfg.chunking.overlap
 # Both paths are optional: a missing system prompt triggers auto-generation
 # (see system_prompt_gen), and a missing citation map means no id remapping.
 SYSTEM_PROMPT_PATH = _resolve(_cfg.prompt.system_prompt_path, BASE_DIR / "system.md")
-STARTER_QUESTIONS = list(_cfg.prompt.starter_questions)
+
+
+def starter_questions(language: str | None = None) -> list[str]:
+    """Welcome-screen questions for one interface language.
+
+    A function rather than a constant because the language is only known per
+    request: Chainlit resolves it from the browser (or from ``[UI] language``) and
+    hands it to the ``@cl.set_starters`` callback.
+
+    ``prompt.starter_questions`` is usually one plain list, which every language
+    then gets. An instance whose users do not all read the same language can give
+    one list per language instead; anything that is not German falls back to
+    English, the same rule the rest of the interface follows.
+    """
+    configured = _cfg.prompt.starter_questions
+    if isinstance(configured, list):
+        return list(configured)
+    key = "de" if str(language or "").lower().startswith("de") else "en"
+    # Last resort is whichever list is there, so a config with only one language
+    # still shows its starters rather than an empty welcome screen.
+    return list(configured.get(key) or configured.get("en") or next(iter(configured.values()), []))
+
 CITATION_MAP_PATH = _resolve(_cfg.citation.map_path, BASE_DIR / "citation_map.json")
 SOURCE_PDF_FALLBACK = _cfg.citation.source_pdf_fallback or ""
 DATA_RAW_DIR = _resolve(_cfg.sources.data_dir, BASE_DIR / "data" / "documents")

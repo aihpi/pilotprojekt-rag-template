@@ -139,6 +139,83 @@ Eines solltest du wissen: Dokumente aus früheren Läufen bleiben erhalten, aber
 Abbruch gerade gelesen wurde, ist nicht gespeichert. Beim nächsten Lauf werden diese
 Dateien noch einmal gelesen.
 
+## Das Bewertungs-Abzeichen erscheint nicht
+
+Das Abzeichen über dem Eingabefeld zeigt, wie gut jede Antwort abgeschnitten hat.
+Wenn es nie auftaucht, prüfe der Reihe nach:
+
+1. **Ist die Evaluation eingeschaltet?** Sie ist standardmäßig aus. In deiner
+   Einstellungsdatei muss `evaluation: {enabled: true}` stehen, und der
+   Evaluations-Dienst muss laufen (`docker compose --profile eval up -d`).
+2. **Hast du eine Frage gestellt, die die Wissensbasis nutzt?** Die Evaluation
+   bewertet nur Antworten, bei denen etwas nachgeschlagen wurde. Hat der Assistent
+   aus allgemeinem Wissen geantwortet oder gesagt „steht nicht in den Dokumenten",
+   gibt es nichts zu bewerten.
+3. **Warte etwa fünfzehn Sekunden.** Die Bewertung läuft im Hintergrund, nachdem
+   die Antwort schon angezeigt wird. Das Abzeichen erscheint, sobald das Ergebnis
+   da ist.
+
+Hilft das alles nicht, schau ins App-Protokoll nach Zeilen, die mit `[WARN]
+eval_status_unavailable` beginnen. Das heißt, die App erreicht den
+Evaluations-Dienst nicht.
+
+## Werte sind alle leer (NULL)
+
+Das Abzeichen erscheint, aber die Zahlen fehlen. Das bedeutet, dass das
+Bewertungsmodell (der *Judge*) versucht hat, die Antwort zu benoten, aber
+gescheitert ist.
+
+Die häufigste Ursache: das Judge-Modell ist beim KI-Dienst gerade nicht
+erreichbar. Prüfe:
+
+```bash
+docker compose logs --tail 20 eval
+```
+
+Stehen dort `500 Internal Server Error` oder `Connection error`, ist das
+Judge-Modell beim Dienst ausgefallen. Warte und versuch es nochmal, oder setze
+`evaluation.judge_model` in der Einstellungsdatei auf ein anderes Modell, das dein
+Dienst anbietet.
+
+Ein fehlgeschlagener Wert wird als leer gespeichert, nie als Null. So zieht ein
+vorübergehender Ausfall die Mittelwerte nicht nach unten.
+
+## Das Abzeichen zeigt Werte, denen ich nicht traue
+
+Zwei Dinge zum Prüfen:
+
+**Vergleichst du über verschiedene Modelle hinweg?** Wenn `evaluation.judge_model`
+nicht gesetzt ist, benotet das Modell, das *geantwortet* hat, auch seine eigene
+Antwort. Das macht Werte unzuverlässig, wenn du im Einstellungs-Panel zwischen
+Modellen wechselst, weil jedes Modell sich selbst anders beurteilt. Setze
+`judge_model` auf ein festes Modell, das nicht das bewertete ist.
+
+**Was messen die Kennzahlen eigentlich?**
+
+- **Treue (Faithfulness)** prüft, ob die Aussagen der Antwort von den
+  abgerufenen Textstellen gedeckt sind. Sie zerlegt die Antwort in einzelne
+  Behauptungen und prüft jede gegen die Quellen. Die Formel ist schlicht:
+  gedeckte Aussagen geteilt durch alle Aussagen. Ein Wert von 0,5 heißt nicht
+  „mittelmäßig". Er heißt, die Hälfte der Aussagen dieser Antwort war nicht
+  durch die Quellen belegt. Das Abzeichen-Panel listet jede Aussage mit Häkchen
+  oder Kreuz und der Begründung des Judges auf, du siehst also genau, welche
+  durchgefallen ist.
+
+- **Relevanz (Relevance)** prüft, ob die Antwort die gestellte Frage tatsächlich
+  beantwortet. Dazu werden aus der Antwort Fragen erzeugt und mit der echten
+  Frage über Embedding-Ähnlichkeit verglichen. Liegen die erzeugten Fragen nahe
+  an der echten, ist die Antwort relevant. Eine Relevanz von 0 % heißt meistens
+  nicht, dass die Antwort am Thema vorbeiging. Meistens heißt es, dass der Assistent die
+  Antwort verweigert hat („steht nicht in den Dokumenten"), was das richtige
+  Verhalten ist, wenn die Wissensbasis die Frage nicht abdeckt.
+
+Beide Werte kommen aus dem Evaluations-Framework
+[RAGAS](https://docs.ragas.io/). Sie sind *referenzfrei*: von Hand geschriebene
+richtige Antworten braucht es nicht. Der Preis dafür: sie messen, was das
+Bewertungsmodell *denkt*, und das trägt dessen Meinungen und Rauschen mit.
+Vergleiche Veränderungen zwischen Durchläufen („hat diese Konfigurationsänderung
+geholfen?"), lies eine einzelne Zahl nicht als Urteil.
+
 ## Hier steht nichts, was passt
 
 Am schnellsten kommst du über das Protokoll weiter:

@@ -1,0 +1,565 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Evaluation</title>
+<!--
+  One file, no build step, no charting library. Every "chart" here is a 0-100%
+  bar, which is a div with a percentage width - a dependency would buy nothing
+  and would have to be vendored into the repo or fetched from a CDN.
+
+  Form: a table with inline bars, not a bar chart. Nineteen configurations is well
+  past the ~7 classes a chart can hold, and the reader's job is to compare two
+  numbers per row against the same 0-100% scale - which a table does better and a
+  screen reader can read at all.
+
+  Colour: two series, so two categorical slots (blue = faithfulness, orange =
+  relevance) with a legend, never one colour for both. Both were run through the
+  palette validator against the surfaces below - all six checks pass in both modes
+  (worst adjacent CVD dE 24.7 light / 26.8 dark against a >= 8 target). No ramp on
+  the bars: the configurations are nominal, and colouring them by value would
+  double-encode the length they already show.
+-->
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --plane: #f3f3f0;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --ink-muted: #898781;
+    --line: #e1e0d9;
+    --track: #eceae2;
+    --faithfulness: #2a78d6;
+    --relevance: #eb6834;
+    --similarity: #1baf7a;
+    --good: #0ca30c;
+    --critical: #d03b3b;
+    --ring: rgba(11, 11, 11, .10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --plane: #0d0d0d;
+      --ink: #fff;
+      --ink-2: #c3c2b7;
+      --ink-muted: #898781;
+      --line: #2c2c2a;
+      --track: #2c2c2a;
+      --faithfulness: #3987e5;
+      --relevance: #d95926;
+      --similarity: #199e70;
+      --ring: rgba(255, 255, 255, .10);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.5rem 4rem; background: var(--plane); color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1080px; margin: 0 auto; }
+
+  h1 { font-size: 1.5rem; font-weight: 650; margin: 0 0 .3rem; letter-spacing: -.01em; }
+  h2 {
+    font-size: .95rem; font-weight: 600; margin: 0 0 .15rem;
+    display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap;
+  }
+  .sub { color: var(--ink-2); margin: 0; font-size: .875rem; max-width: 62ch; }
+  .card {
+    background: var(--surface); border: 1px solid var(--ring); border-radius: 12px;
+    padding: 1.1rem 1.25rem; margin-top: 1.75rem;
+  }
+  .card > .sub { margin: .1rem 0 1rem; font-size: .8rem; }
+
+  /* KPI row. Proportional figures on the values - tabular is for columns. */
+  .kpis {
+    display: grid; gap: .75rem; margin-top: 1.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--ring); border-radius: 12px;
+    padding: .85rem 1rem;
+  }
+  .kpi-label { color: var(--ink-2); font-size: .75rem; margin-bottom: .3rem; }
+  .kpi-value { font-size: 1.65rem; font-weight: 650; line-height: 1.1; letter-spacing: -.02em; }
+  .kpi-value .unit { font-size: .95rem; font-weight: 500; color: var(--ink-2); margin-left: .15rem; }
+  .kpi-foot { color: var(--ink-muted); font-size: .72rem; margin-top: .25rem; }
+
+  /* Legend: two series, so identity never rests on colour alone. */
+  .legend { display: flex; gap: 1rem; font-size: .78rem; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: .4rem; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+  .swatch.f { background: var(--faithfulness); }
+  .swatch.r { background: var(--relevance); }
+
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+  th, td { text-align: left; padding: .6rem .75rem; }
+  th {
+    font-weight: 500; color: var(--ink-muted); font-size: .72rem;
+    text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
+    border-bottom: 1px solid var(--line); padding-bottom: .45rem;
+  }
+  tbody tr + tr td { border-top: 1px solid var(--line); }
+  tbody tr:hover td { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td:first-child, th:first-child { padding-left: 0; }
+  td:last-child, th:last-child { padding-right: 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+
+  /* The mark: 8px thin, square where it grows from, 4px rounded at the data end. */
+  .metric { display: flex; align-items: center; gap: .65rem; min-width: 168px; }
+  .track { flex: 1; height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+  .fill { height: 100%; border-radius: 0 4px 4px 0; }
+  .fill.f { background: var(--faithfulness); }
+  .fill.r { background: var(--relevance); }
+  .fill.s { background: var(--similarity); }
+  .swatch.s { background: var(--similarity); }
+  .metric b { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 3ch; text-align: right; }
+  .none { color: var(--ink-muted); }
+
+  .cfg { display: grid; gap: .15rem; min-width: 15rem; }
+  .cfg b { font-weight: 600; }
+  .cfg small { color: var(--ink-muted); font-size: .78rem; }
+
+  /* Status colours, with a glyph beside them - never colour alone. */
+  .up { color: var(--good); }
+  .down { color: var(--critical); }
+  .thumbs { display: inline-flex; gap: .6rem; font-variant-numeric: tabular-nums; }
+
+  /* The play button on a configuration row. A real button, not a link: it queues
+   * work. Disabled + pulsing while that model's run is still going. */
+  .play {
+    border: 1px solid var(--line); background: transparent; color: var(--ink-2);
+    border-radius: 6px; width: 28px; height: 24px; cursor: pointer;
+    font-size: .7rem; line-height: 1;
+  }
+  .play:hover:not(:disabled) { border-color: var(--ink-muted); color: var(--ink); }
+  .play:disabled { cursor: default; animation: pulse 1.8s ease-in-out infinite; }
+  .play[data-error="1"] { color: var(--critical); animation: none; }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .4 } }
+  @media (prefers-reduced-motion: reduce) { .play:disabled { animation: none; opacity: .5; } }
+
+  /* One gold conversation, expandable. */
+  details.gold { border-bottom: 1px solid var(--line); padding: .45rem 0; }
+  details.gold summary {
+    cursor: pointer; display: flex; gap: .75rem; align-items: baseline;
+    list-style: none; flex-wrap: wrap;
+  }
+  details.gold summary::-webkit-details-marker { display: none; }
+  details.gold summary::before { content: "▸"; color: var(--ink-muted); font-size: .7rem; }
+  details.gold[open] summary::before { content: "▾"; }
+  details.gold .meta { color: var(--ink-muted); font-size: .78rem; white-space: nowrap; }
+  .turn { margin: .5rem 0 .5rem 1.1rem; font-size: .85rem; }
+  .turn .who { font-weight: 600; color: var(--ink-2); font-size: .72rem;
+               text-transform: uppercase; letter-spacing: .04em; }
+  .turn p { margin: .15rem 0 0; white-space: pre-wrap; }
+
+  .empty { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 1.75rem; margin-top: 1.75rem; }
+  .empty p { margin: 0 0 .75rem; }
+  .empty pre {
+    margin: 0; padding: .75rem; overflow-x: auto; border-radius: 8px;
+    background: var(--plane); font-size: .85em; border: 1px solid var(--line);
+  }
+  .note { color: var(--ink-muted); font-size: .8rem; margin: 2rem 0 0; max-width: 78ch; }
+</style>
+
+<main>
+  <h1 id="title"></h1>
+  <p class="sub" id="sub"></p>
+  <div id="kpis" class="kpis" hidden></div>
+  <div id="body"></div>
+  <p class="note" id="note"></p>
+</main>
+
+<script>
+/*
+  German and English, on the same rule the badges in the chat app use: anything
+  that is not German gets English. Only navigator.language here - this page is
+  served by the eval container, which has no access to the app's config.toml, so
+  the `[UI] language` force does not reach it.
+*/
+const T = {
+  de: {
+    title: 'RAG-Evaluation',
+    sub: 'Antwortqualität je Konfiguration. Als Veränderung lesen, nicht als Note: eine Treue von 0,87 sagt für sich genommen wenig, 0,87&nbsp;&rarr;&nbsp;0,71 nach einer Chunking-Änderung sagt viel.',
+    note: 'Treue fragt, ob die Aussagen der Antwort von den abgerufenen Textstellen gedeckt sind. Relevanz fragt, ob die Antwort zur Frage passt. Beide werden von einem Sprachmodell bewertet und tragen dessen Meinung und Rauschen mit &mdash; Läufe vergleichen, Absolutwerten nicht trauen.',
+    loading: 'Wird geladen&hellip;',
+    notScored: 'nicht bewertet',
+    unknownConfig: 'unbekannte Konfiguration',
+    kpiConfigs: 'Konfigurationen',
+    kpiAnswers: 'Bewertete Antworten',
+    kpiFaith: 'Treue, Mittel',
+    kpiRel: 'Relevanz, Mittel',
+    kpiWeighted: 'gewichtet nach Antworten',
+    kpiFeedback: 'Rückmeldungen',
+    kpiNoFeedback: 'noch keine',
+    comparison: 'Vergleich je Konfiguration',
+    comparisonSub: 'Nach Anzahl bewerteter Antworten sortiert &mdash; die oberste Zeile hat die meisten Belege.',
+    colConfig: 'Konfiguration',
+    colAnswers: 'Antworten',
+    colFaithfulness: 'Treue',
+    colRelevance: 'Relevanz',
+    colThumbs: 'Daumen',
+    failures: 'Gemeldete Fehler',
+    failuresSub: 'Klassifizierte Kommentare zu Daumen runter. Der Anteil bezieht sich auf die Meldungen dieser Konfiguration.',
+    colCategory: 'Kategorie',
+    colCount: 'Anzahl',
+    colShare: 'Anteil',
+    categories: {
+      hallucination: 'Halluzination',
+      wrong_document: 'falsches Dokument',
+      incomplete: 'unvollständig',
+      irrelevant: 'unpassend',
+    },
+    emptyTitle: 'Noch keine Bewertungen aufgezeichnet.',
+    emptyBody: 'Schalten Sie die Evaluation in Ihrer <code>rag.config.yaml</code> ein und stellen Sie dem Assistenten eine Frage:',
+    emptyWhy: 'Bewertung ist standardmäßig aus, weil jede Antwort zwei Judge-Aufrufe plus einen Embedding-Aufruf kostet. Um zwei Konfigurationen zu vergleichen, ingestieren Sie jede in ihre eigene Collection &mdash; gruppiert wird nach Modell, Embedding-Modell, Chunking und Collection.',
+    loadError: 'Statistiken konnten nicht geladen werden.',
+    colStars: 'Sterne',
+    colRun: 'Lauf',
+    runBenchmark: 'Benchmark starten',
+    benchRunning: 'Benchmark läuft…',
+    benchFailed: 'Letzter Lauf fehlgeschlagen: ',
+    benchTitle: 'Gold-Benchmark',
+    benchSub: 'Wiederholungen des Gold-Datensatzes, Runde für Runde bewertet. Ähnlichkeit vergleicht jede Antwort mit der Gold-Referenz; der Judge ist je Lauf fest, damit kein Modell sich selbst benotet. Nur Läufe untereinander vergleichen, nicht mit der Live-Tabelle.',
+    colCoverage: 'Runden',
+    colSimilarity: 'Ähnlichkeit',
+    goldTitle: 'Gold-Datensatz',
+    goldSub: 'Eingefrorene Referenz-Gespräche, gespeichert über „Als Gold speichern" unter einer Antwort im Chat. Benchmarks stellen genau diese Fragen erneut.',
+    goldTurns: ['Runde', 'Runden'],
+    goldEmptyHint: 'Noch keine Gold-Gespräche. Markieren Sie eine gute Antwort im Chat mit „Als Gold speichern", dann erscheint hier der Play-Knopf je Konfiguration.',
+    turnUser: 'Frage',
+    turnAssistant: 'Referenzantwort',
+  },
+  en: {
+    title: 'RAG Evaluation',
+    sub: 'Answer quality per configuration. Read these as deltas, not as grades: a faithfulness of 0.87 says little on its own, 0.87&nbsp;&rarr;&nbsp;0.71 after a chunking change says a lot.',
+    note: 'Faithfulness asks whether the answer\'s claims are supported by the retrieved chunks. Relevance asks whether the answer addresses the question. Both are judged by an LLM, so they carry its opinion and its noise &mdash; compare runs, do not trust absolute values.',
+    loading: 'Loading&hellip;',
+    notScored: 'not scored',
+    unknownConfig: 'unknown configuration',
+    kpiConfigs: 'Configurations',
+    kpiAnswers: 'Scored answers',
+    kpiFaith: 'Faithfulness, mean',
+    kpiRel: 'Relevance, mean',
+    kpiWeighted: 'weighted by answers',
+    kpiFeedback: 'Feedback',
+    kpiNoFeedback: 'none yet',
+    comparison: 'Per-configuration comparison',
+    comparisonSub: 'Sorted by scored answers &mdash; the top row rests on the most evidence.',
+    colConfig: 'Configuration',
+    colAnswers: 'Answers',
+    colFaithfulness: 'Faithfulness',
+    colRelevance: 'Relevance',
+    colThumbs: 'Thumbs',
+    failures: 'Reported failures',
+    failuresSub: 'Thumbs-down comments, classified. Share is of that configuration\'s own complaints.',
+    colCategory: 'Category',
+    colCount: 'Count',
+    colShare: 'Share',
+    categories: {
+      hallucination: 'hallucination',
+      wrong_document: 'wrong document',
+      incomplete: 'incomplete',
+      irrelevant: 'irrelevant',
+    },
+    emptyTitle: 'No scores recorded yet.',
+    emptyBody: 'Turn evaluation on in your <code>rag.config.yaml</code> and ask the assistant a question:',
+    emptyWhy: 'Scoring is off by default because each answer costs two judge calls plus one embedding call. To compare two configurations, ingest each into its own collection &mdash; they are grouped by model, embedding model, chunking and collection.',
+    loadError: 'Could not load statistics.',
+    colStars: 'Stars',
+    colRun: 'Run',
+    runBenchmark: 'Run Benchmark',
+    benchRunning: 'Benchmark running…',
+    benchFailed: 'Last run failed: ',
+    benchTitle: 'Gold benchmark',
+    benchSub: 'Replays of the gold dataset, scored turn by turn. Similarity compares each answer with the gold reference; the judge is pinned per run so no model grades itself. Compare runs with each other, not with the live table.',
+    colCoverage: 'Turns',
+    colSimilarity: 'Similarity',
+    goldTitle: 'Gold dataset',
+    goldSub: 'Frozen reference conversations, saved via "Als Gold speichern" under an answer in the chat. Benchmarks re-ask exactly these questions.',
+    goldTurns: ['turn', 'turns'],
+    goldEmptyHint: 'No gold conversations yet. Mark a good answer in the chat with "Als Gold speichern" and the per-configuration play button appears here.',
+    turnUser: 'Question',
+    turnAssistant: 'Reference answer',
+  },
+};
+
+const LANG = (navigator.language || 'en').toLowerCase().indexOf('de') === 0 ? 'de' : 'en';
+const S = T[LANG];
+document.documentElement.lang = LANG;
+document.title = S.title;
+document.getElementById('title').textContent = S.title;
+document.getElementById('sub').innerHTML = S.sub;
+document.getElementById('note').innerHTML = S.note;
+document.getElementById('body').innerHTML = S.loading;
+
+// Everything below interpolates values that come out of the database, so they are
+// escaped rather than spliced into innerHTML raw. A config signature is written by
+// whoever runs the instance, not by a chat user, but the cost of being careful here
+// is one function.
+const esc = s => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+
+const pct = v => v == null ? null : Math.round(v * 100);
+const num = n => (n || 0).toLocaleString(LANG === 'de' ? 'de-DE' : 'en-GB');
+
+/*
+  A bar plus its value. The value is always written out, so the bar is a second
+  reading of it rather than the only one - nothing here is gated behind hover.
+  `series` is 'f' or 'r', which picks the categorical slot in CSS.
+*/
+function bar(value, series, label) {
+  const p = pct(value);
+  if (p === null) return `<span class="none">${S.notScored}</span>`;
+  return `<div class="metric" title="${esc(label)}: ${p}%">
+    <div class="track"><div class="fill ${series}" style="width:${p}%"></div></div>
+    <b>${p}%</b>
+  </div>`;
+}
+
+function config(signature) {
+  if (!signature) return `<span class="none">${S.unknownConfig}</span>`;
+  // {chat_model}|{embed_model}|{strategy}|{max_chars}|{collection}
+  const parts = signature.split('|').map(esc);
+  // Anything that is not a full signature - a hand-written marker from a test run,
+  // or a row from before a field was added - prints as itself. It used to print
+  // "undefined - undefined @ undefined" once per missing field.
+  if (parts.length < 5) return `<div class="cfg"><b>${parts.join(' ')}</b></div>`;
+  const [chat, embed, strategy, chunk, collection] = parts;
+  return `<div class="cfg"><b>${chat}</b><small>${embed} &middot; ${strategy} @ ${chunk} &middot; <code>${collection}</code></small></div>`;
+}
+
+function thumbs(up, down) {
+  if (!up && !down) return '<span class="none">&ndash;</span>';
+  const parts = [];
+  if (up) parts.push(`<span class="up">&#9650;&nbsp;${up}</span>`);
+  if (down) parts.push(`<span class="down">&#9660;&nbsp;${down}</span>`);
+  return `<span class="thumbs">${parts.join('')}</span>`;
+}
+
+function starCell(mean, n) {
+  if (!n) return '<span class="none">&ndash;</span>';
+  return `&#9733;&nbsp;${(Math.round(mean * 10) / 10).toLocaleString(LANG === 'de' ? 'de-DE' : 'en-GB')} <span class="none">(${n})</span>`;
+}
+
+/*
+  The play button queues a replay of the gold set with this row's chat model.
+  Disabled while nothing can run (no gold) or while a job for that model is
+  already pending/running — one benchmark at a time is the deliberate pace.
+*/
+function playCell(signature, jobs, hasGold) {
+  if (!hasGold || !signature) return '';
+  const chatModel = signature.split('|')[0];
+  const active = jobs.find(j => j.chat_model === chatModel &&
+    (j.status === 'pending' || j.status === 'running'));
+  const lastError = jobs.find(j => j.chat_model === chatModel && j.status === 'error');
+  if (active) {
+    const progress = active.total_turns ? ` ${active.done_turns}/${active.total_turns}` : '';
+    return `<button class="play" disabled title="${esc(S.benchRunning)}${progress}">&#9654;</button>`;
+  }
+  const errorTip = lastError ? ` &mdash; ${esc(S.benchFailed)}${esc(lastError.error || '')}` : '';
+  return `<button class="play" ${lastError ? 'data-error="1"' : ''}
+    title="${esc(S.runBenchmark)}${errorTip}"
+    onclick="startBenchmark('${esc(chatModel)}', this)">&#9654;</button>`;
+}
+
+async function startBenchmark(chatModel, button) {
+  button.disabled = true;
+  try {
+    await fetch('api/benchmark', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_model: chatModel }),
+    });
+  } finally {
+    load();
+  }
+}
+
+function kpi(label, value, unit, foot) {
+  return `<div class="kpi">
+    <div class="kpi-label">${label}</div>
+    <div class="kpi-value">${value}${unit ? `<span class="unit">${unit}</span>` : ''}</div>
+    ${foot ? `<div class="kpi-foot">${foot}</div>` : ''}
+  </div>`;
+}
+
+/* Weighted by answers, not a mean of means: a configuration with one scored answer
+   should not move the headline as much as one with fifty. */
+function weightedMean(rows, key) {
+  let sum = 0, n = 0;
+  for (const r of rows) {
+    if (r[key] == null) continue;
+    sum += r[key] * r.answers;
+    n += r.answers;
+  }
+  return n ? sum / n : null;
+}
+
+function kpiRow(rows) {
+  const answers = rows.reduce((a, r) => a + r.answers, 0);
+  const up = rows.reduce((a, r) => a + (r.thumbs_up || 0), 0);
+  const down = rows.reduce((a, r) => a + (r.thumbs_down || 0), 0);
+  const f = pct(weightedMean(rows, 'faithfulness'));
+  const r = pct(weightedMean(rows, 'relevance'));
+  return [
+    kpi(S.kpiConfigs, num(rows.length)),
+    kpi(S.kpiAnswers, num(answers)),
+    kpi(S.kpiFaith, f === null ? `<span class="none">&ndash;</span>` : f, f === null ? '' : '%', S.kpiWeighted),
+    kpi(S.kpiRel, r === null ? `<span class="none">&ndash;</span>` : r, r === null ? '' : '%', S.kpiWeighted),
+    kpi(S.kpiFeedback, up || down ? thumbs(up, down) : `<span class="none">&ndash;</span>`, '', up || down ? '' : S.kpiNoFeedback),
+  ].join('');
+}
+
+function configTable(rows, jobs, hasGold) {
+  return `<section class="card">
+    <h2>${S.comparison}
+      <span class="legend">
+        <span><i class="swatch f"></i>${S.colFaithfulness}</span>
+        <span><i class="swatch r"></i>${S.colRelevance}</span>
+      </span>
+    </h2>
+    <p class="sub">${S.comparisonSub}</p>
+    <div class="scroll"><table>
+      <thead><tr>
+        <th>${S.colConfig}</th><th class="num">${S.colAnswers}</th>
+        <th>${S.colFaithfulness}</th><th>${S.colRelevance}</th>
+        <th class="num">${S.colStars}</th><th class="num">${S.colThumbs}</th>
+        ${hasGold ? '<th></th>' : ''}
+      </tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${config(r.config_signature)}</td>
+        <td class="num">${num(r.answers)}</td>
+        <td>${bar(r.faithfulness, 'f', S.colFaithfulness)}</td>
+        <td>${bar(r.relevance, 'r', S.colRelevance)}</td>
+        <td class="num">${starCell(r.stars, r.stars_n)}</td>
+        <td class="num">${thumbs(r.thumbs_up, r.thumbs_down)}</td>
+        ${hasGold ? `<td class="num">${playCell(r.config_signature, jobs, hasGold)}</td>` : ''}
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </section>`;
+}
+
+function benchmarkTable(benchmark) {
+  const runs = (benchmark && benchmark.runs) || [];
+  if (!runs.length) return '';
+  const total = benchmark.gold_turns_total || 0;
+  return `<section class="card">
+    <h2>${S.benchTitle}
+      <span class="legend">
+        <span><i class="swatch s"></i>${S.colSimilarity}</span>
+        <span><i class="swatch f"></i>${S.colFaithfulness}</span>
+        <span><i class="swatch r"></i>${S.colRelevance}</span>
+      </span>
+    </h2>
+    <p class="sub">${S.benchSub}</p>
+    <div class="scroll"><table>
+      <thead><tr>
+        <th>${S.colRun}</th><th>${S.colConfig}</th><th class="num">${S.colCoverage}</th>
+        <th>${S.colSimilarity}</th><th>${S.colFaithfulness}</th><th>${S.colRelevance}</th>
+      </tr></thead>
+      <tbody>${runs.map(r => `<tr>
+        <td>${esc(r.run_label)}</td>
+        <td>${config(r.config_signature)}</td>
+        <td class="num">${num(r.n)}${total ? `<span class="none">/${num(total)}</span>` : ''}</td>
+        <td>${bar(r.similarity, 's', S.colSimilarity)}</td>
+        <td>${bar(r.faithfulness, 'f', S.colFaithfulness)}</td>
+        <td>${bar(r.relevance, 'r', S.colRelevance)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </section>`;
+}
+
+function goldSection(gold) {
+  const body = gold.length
+    ? gold.map(g => {
+        const first = (g.turns[0] || {}).user || '';
+        const title = first.length > 90 ? first.slice(0, 87) + '…' : first;
+        const n = g.turns.length;
+        return `<details class="gold">
+          <summary><b>${esc(title)}</b>
+            <span class="meta">${n} ${n === 1 ? S.goldTurns[0] : S.goldTurns[1]}
+              &middot; ${esc((g.created_at || '').slice(0, 10))}</span>
+          </summary>
+          ${g.turns.map(t => `
+            <div class="turn"><span class="who">${S.turnUser}</span><p>${esc(t.user)}</p></div>
+            <div class="turn"><span class="who">${S.turnAssistant}</span><p>${esc(t.assistant)}</p></div>
+          `).join('')}
+          <div class="turn"><span class="meta">${config(g.config_signature)}</span></div>
+        </details>`;
+      }).join('')
+    : `<p class="sub" style="margin:0">${S.goldEmptyHint}</p>`;
+  return `<section class="card">
+    <h2>${S.goldTitle}</h2>
+    <p class="sub">${S.goldSub}</p>
+    ${body}
+  </section>`;
+}
+
+function failureTable(failures) {
+  if (!failures.length) return '';
+  // Share within the configuration's own reported failures, not across all of
+  // them: "half of this config's complaints were hallucinations" is actionable,
+  // "this bar is shorter than another config's bar" is not.
+  const totals = {};
+  for (const f of failures) {
+    totals[f.config_signature] = (totals[f.config_signature] || 0) + f.n;
+  }
+  return `<section class="card">
+    <h2>${S.failures}</h2>
+    <p class="sub">${S.failuresSub}</p>
+    <div class="scroll"><table>
+      <thead><tr><th>${S.colConfig}</th><th>${S.colCategory}</th><th class="num">${S.colCount}</th><th>${S.colShare}</th></tr></thead>
+      <tbody>${failures.map(f => `<tr>
+        <td>${config(f.config_signature)}</td>
+        <td>${esc(S.categories[f.failure_category] || f.failure_category)}</td>
+        <td class="num">${num(f.n)}</td>
+        <td>${bar(f.n / totals[f.config_signature], 'r', S.colShare)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </section>`;
+}
+
+const EMPTY = `<div class="empty">
+  <p><strong>${S.emptyTitle}</strong> ${S.emptyBody}</p>
+  <pre>evaluation:
+  enabled: true</pre>
+  <p style="margin:.75rem 0 0">${S.emptyWhy}</p>
+</div>`;
+
+let pollTimer = null;
+
+function load() {
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  fetch('api/stats')
+    .then(r => r.json())
+    .then(({ configs, failures, gold, benchmark, jobs }) => {
+      gold = gold || []; jobs = jobs || [];
+      // Most-evidenced first. Sorting changes the order, never the colours - those
+      // belong to the metric, not to the row.
+      const rows = configs.slice().sort((a, b) => b.answers - a.answers ||
+        String(a.config_signature).localeCompare(String(b.config_signature)));
+      const kpis = document.getElementById('kpis');
+      kpis.innerHTML = kpiRow(rows);
+      kpis.hidden = !rows.length;
+      document.getElementById('body').innerHTML =
+        (rows.length ? configTable(rows, jobs, gold.length > 0) : EMPTY) +
+        benchmarkTable(benchmark) +
+        goldSection(gold) +
+        failureTable(failures);
+      // A run in flight updates its progress server-side; keep the page current
+      // until every job has settled, then stop asking.
+      if (jobs.some(j => j.status === 'pending' || j.status === 'running')) {
+        pollTimer = setTimeout(load, 5000);
+      }
+    })
+    .catch(err => {
+      document.getElementById('body').innerHTML =
+        `<div class="empty"><p><strong>${S.loadError}</strong></p><pre>${esc(err)}</pre></div>`;
+    });
+}
+
+load();
+</script>

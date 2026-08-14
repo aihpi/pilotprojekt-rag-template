@@ -206,6 +206,23 @@ async def personalized_retrieve(
     )
 
 
+def context_with_source(result: RagResult) -> str:
+    """One retrieved chunk plus its provenance line, as the model receives it.
+
+    Shared with :func:`build_context` so that the text a judge scores an answer
+    against cannot drift from the text the model was actually given.
+
+    That drift was a real bug. Answer scoring used to send bare ``result.text``, so
+    the judge never saw which document a chunk came from — and every answer's
+    closing "Die Informationen stammen aus der Quelle X (Seite 1-2)" was therefore
+    unverifiable. Faithfulness docked a claim on essentially every cited answer, with
+    the reason "the context does not mention the source ... as the source of the
+    information", which is true only because we had removed it.
+    """
+    label = get_config().citation.labels.get("source", "Source")
+    return f"{result.text}\n{label}: {citations.render_citation_line(result.metadata)}"
+
+
 def build_context(results: list[RagResult], *, figure_markers: bool | None = None) -> str:
     """Numbered retrieval context for the model.
 
@@ -215,7 +232,6 @@ def build_context(results: list[RagResult], *, figure_markers: bool | None = Non
     follows ``images.inline_figures`` from the config.
     """
     cfg = get_config()
-    label = cfg.citation.labels.get("source", "Source")
     want_markers = cfg.images.inline_figures if figure_markers is None else figure_markers
     exists = None
     if want_markers and cfg.images.mode != "none":
@@ -229,8 +245,7 @@ def build_context(results: list[RagResult], *, figure_markers: bool | None = Non
 
     lines: list[str] = []
     for idx, result in enumerate(results, start=1):
-        line = citations.render_citation_line(result.metadata)
-        entry = f"[{idx}] {result.text}\n{label}: {line}"
+        entry = f"[{idx}] {context_with_source(result)}"
         if exists is not None:
             token = figure_markers_mod.figure_marker_for_metadata(result.metadata, exists=exists)
             if token:

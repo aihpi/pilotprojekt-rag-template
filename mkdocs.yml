@@ -50,6 +50,7 @@ plugins:
             System Prompts: System-Prompts
             Extending (parsers & chunkers): Erweitern (Parser & Chunker)
             Feedback Export: Feedback-Export
+            Checking Answer Quality: Antwortqualität prüfen
   - mkdocstrings:
       handlers:
         python:
@@ -81,6 +82,7 @@ nav:
   - Agentic Tools: tools.md
   - Figures & Images: images.md
   - System Prompts: prompts.md
+  - Checking Answer Quality: evaluation.md
   - Troubleshooting: troubleshooting.md
   - Configuration Reference: configuration.md
   - Field-Mapping DSL: field-mapping.md
