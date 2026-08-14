@@ -44,6 +44,24 @@ def test_payload_reports_the_effective_chunking_per_source():
     assert by_name == {"pdfs": "fixed_size", "notes": "heading"}
 
 
+def test_config_path_cannot_disagree_with_the_loader(monkeypatch):
+    """The chip exists to say which file is loaded, so it must resolve the path
+    exactly as load_config does. `getenv(name, default)` returns "" for an empty
+    RAG_CONFIG while the loader's `or` falls back — the chip would show a blank
+    path for a run that loaded default.yaml."""
+    from config.loader import CONFIG_PATH_ENV, DEFAULT_CONFIG
+
+    monkeypatch.setenv(CONFIG_PATH_ENV, "")
+    assert chainlit_app._config_info_payload(_cfg())["config_path"] == str(DEFAULT_CONFIG)
+
+    monkeypatch.delenv(CONFIG_PATH_ENV, raising=False)
+    assert chainlit_app._config_info_payload(_cfg())["config_path"] == str(DEFAULT_CONFIG)
+
+    monkeypatch.setenv(CONFIG_PATH_ENV, "examples/papers/rag.config.yaml")
+    payload = chainlit_app._config_info_payload(_cfg())
+    assert payload["config_path"] == "examples/papers/rag.config.yaml"
+
+
 def test_payload_carries_the_retrieval_switches_and_serializes():
     cfg = _cfg()
     cfg.retrieval.hybrid = True

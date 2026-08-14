@@ -2149,9 +2149,14 @@ def _config_info_payload(cfg) -> dict:
     """What the ``/config-info`` header chip shows. Pure so it is testable
     without booting Chainlit. ``chat_model`` is the instance default — users
     may override it per-user in the settings panel."""
+    from config.loader import CONFIG_PATH_ENV, DEFAULT_CONFIG
+
     return {
         "name": cfg.name,
-        "config_path": os.getenv("RAG_CONFIG", "config/default.yaml"),
+        # Same expression as load_config, via the same constants: this chip is
+        # only worth having if it cannot disagree with the loader. `or` (not
+        # getenv's default) matters — RAG_CONFIG set to "" falls back too.
+        "config_path": os.getenv(CONFIG_PATH_ENV) or str(DEFAULT_CONFIG),
         "language": cfg.language,
         "collection": cfg.vector_store.collection,
         "chat_model": cfg.models.chat_model,
