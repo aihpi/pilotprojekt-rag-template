@@ -44,14 +44,21 @@ def effective_chunking(cfg: "RagConfig") -> tuple[str, str]:
     Sources that disagree are reported as they are rather than resolved to one of
     them: several sources can feed one collection, and there is then no single true
     answer to give.
+
+    The two returned lists stay **positionally aligned**: the pairs are sorted once
+    and each field is emitted in that order. Deduplicating the fields independently
+    lost which size went with which strategy, so ``semantic/1500 + heading/3000``
+    and ``semantic/3000 + heading/1500`` — two different corpora — produced one
+    signature and pooled their scores.
     """
-    used = {
-        ((s.chunking or cfg.chunking).strategy, (s.chunking or cfg.chunking).max_chars)
-        for s in cfg.data_sources
-    } or {(cfg.chunking.strategy, cfg.chunking.max_chars)}
-    strategies = sorted({s for s, _ in used})
-    sizes = sorted({str(m) for _, m in used})
-    return "+".join(strategies), "+".join(sizes)
+    used = sorted(
+        {
+            ((s.chunking or cfg.chunking).strategy, (s.chunking or cfg.chunking).max_chars)
+            for s in cfg.data_sources
+        }
+        or {(cfg.chunking.strategy, cfg.chunking.max_chars)}
+    )
+    return "+".join(s for s, _ in used), "+".join(str(m) for _, m in used)
 
 
 def config_signature(cfg: "RagConfig", chat_model: str | None = None) -> str:

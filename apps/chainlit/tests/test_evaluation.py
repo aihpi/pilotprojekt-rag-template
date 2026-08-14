@@ -175,6 +175,25 @@ def test_the_signature_reports_the_chunking_the_corpus_was_ingested_with():
     assert (strategy, max_chars) == ("semantic", "1500")
 
 
+def test_two_sources_keep_each_strategy_paired_with_its_own_size():
+    """Deduplicating strategies and sizes independently lost which size went with
+    which strategy, so semantic/1500 + heading/3000 and semantic/3000 +
+    heading/1500 — two genuinely different corpora — pooled under one signature."""
+    def _two(first: int, second: int):
+        return RagConfig(
+            data_sources=[
+                {**_source(strategy="semantic", max_chars=first), "name": "a"},
+                {**_source(strategy="heading", max_chars=second), "name": "b"},
+            ]
+        )
+
+    a, b = _two(1500, 3000), _two(3000, 1500)
+    assert evaluation.config_signature(a) != evaluation.config_signature(b)
+    # And the two fields stay positionally aligned, so the pairing is readable.
+    assert evaluation.effective_chunking(a) == ("heading+semantic", "3000+1500")
+    assert evaluation.effective_chunking(b) == ("heading+semantic", "1500+3000")
+
+
 def test_a_source_without_an_override_still_reports_the_global_chunking():
     cfg = RagConfig(chunking={"strategy": "heading"}, data_sources=[_source()])
     assert evaluation.effective_chunking(cfg)[0] == "heading"
@@ -189,7 +208,10 @@ def test_sources_that_disagree_are_reported_as_disagreeing():
             {**_source(strategy="heading", max_chars=3000), "name": "notes"},
         ]
     )
-    assert evaluation.effective_chunking(cfg) == ("heading+semantic", "1500+3000")
+    # Positionally aligned: heading is the 3000 one, semantic the 1500 one. This
+    # previously read ("heading+semantic", "1500+3000") — each field sorted on its
+    # own, which silently swapped the sizes onto the wrong strategies.
+    assert evaluation.effective_chunking(cfg) == ("heading+semantic", "3000+1500")
 
 
 def test_the_signature_names_the_model_that_answered_not_the_configured_one():

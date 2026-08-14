@@ -123,7 +123,7 @@ class _IngestClient:
         self.upserted.extend(points)
 
 
-def _run_ingest(client, monkeypatch, texts=("BSI-Standard 200-2 gilt.",)):
+def _run_ingest(client, monkeypatch, texts=("BSI-Standard 200-2 gilt.",), **kw):
     import llm
     from kb.chunkers.base import Chunk
     from kb import ingestion_pipeline as pipeline
@@ -134,7 +134,9 @@ def _run_ingest(client, monkeypatch, texts=("BSI-Standard 200-2 gilt.",)):
     monkeypatch.setattr(llm, "embed", fake_embed)
     monkeypatch.setattr(pipeline, "get_client", lambda: client)
     chunks = [Chunk(text=t, metadata={"source_file": "d.md"}, doc_id=f"d:{i}") for i, t in enumerate(texts)]
-    return asyncio.run(pipeline.ingest_chunks(chunks, collection="kb", embed_model="m"))
+    return asyncio.run(
+        pipeline.ingest_chunks(chunks, collection="kb", embed_model="m", **kw)
+    )
 
 
 def test_new_collections_always_get_the_sparse_vector(monkeypatch):
@@ -167,6 +169,24 @@ def test_prefetch_limit_below_max_top_k_is_rejected_only_when_hybrid_is_on():
     RetrievalConfig(hybrid=True, top_k=5, max_top_k=30, prefetch_limit=30)  # equality legal
     RetrievalConfig(top_k=5, max_top_k=50)  # hybrid off: not this validator's business
     RetrievalConfig(top_k=40)  # max_top_k defaults to 40 > prefetch_limit 30
+
+
+def test_ingest_chunks_uses_the_hybrid_setting_it_was_given(monkeypatch):
+    """`kb.ingest --config other.yaml` loads a config that need not be the process
+    singleton. Reading get_config() here meant ingest_all checked one policy and
+    ingest_chunks another within a single run — the explicit argument is the only
+    one that describes the corpus actually being written."""
+    from kb import ingestion_pipeline
+
+    assert rag_tool.get_config().retrieval.hybrid is False, "singleton says dense"
+
+    ingestion_pipeline._verified_hybrid.clear()
+    with pytest.raises(RuntimeError, match="no lexical vector"):
+        _run_ingest(_IngestClient(existing_sparse=False), monkeypatch, hybrid=True)
+
+    # And the same run is fine when the caller really is dense.
+    ingestion_pipeline._verified_hybrid.clear()
+    _run_ingest(_IngestClient(existing_sparse=False), monkeypatch, hybrid=False)
 
 
 def test_legacy_dense_only_collections_keep_getting_plain_vectors(monkeypatch):

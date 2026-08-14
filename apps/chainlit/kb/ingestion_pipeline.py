@@ -332,6 +332,7 @@ async def ingest_chunks(
     batch_size: int | None = None,
     max_batch_chars: int | None = None,
     embed_model: str | None = None,
+    hybrid: bool = False,
     progress: ProgressCallback | None = None,
 ) -> int:
     from qdrant_client.models import PointStruct
@@ -348,7 +349,7 @@ async def ingest_chunks(
     client = get_client()
 
     if not recreate:
-        verify_hybrid_compatible(client, collection, hybrid=get_config().retrieval.hybrid)
+        verify_hybrid_compatible(client, collection, hybrid=hybrid)
 
     # Sentinel guard: refuse a silent embed-model swap into an existing collection.
     if collection_exists(client, collection) and not recreate:
@@ -660,6 +661,10 @@ async def ingest_all(
             payload_indexes=config.retrieval.payload_indexes,
             recreate=recreate,
             embed_model=config.models.embed_model,
+            # Passed, not read from get_config(): `kb.ingest --config other.yaml`
+            # loads an explicit config that need not be the process singleton, and
+            # one run applying two different policies is worse than either policy.
+            hybrid=config.retrieval.hybrid,
             progress=progress,
         )
     elif gate.skipped and not removed:
