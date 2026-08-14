@@ -227,8 +227,8 @@ Jede einzelne Option steht in der [Konfiguration](docs/configuration.de.md).
 - **Antwortqualität messen.** Jede Antwort bekommt zwei Werte: *Treue* (sagt der
   Assistent nur, was seine Quellen hergeben?) und *Relevanz* (beantwortet er die
   gestellte Frage?). Ein kleines Abzeichen über dem Eingabefeld zeigt den
-  laufenden Mittelwert, ein Klick darauf die Einzelbewertung je Aussage - welche
-  bestanden haben, welche nicht, und warum. Daneben vergleicht ein zweiter Tab
+  laufenden Mittelwert. Ein Klick darauf zeigt die Einzelbewertung je Aussage:
+  welche bestanden haben, welche nicht, und warum. Daneben vergleicht ein zweiter Tab
   verschiedene Konfigurationen, so dass „hat diese Änderung geholfen?" etwas
   wird, das man anschauen kann. → [Doku](docs/evaluation.de.md)
 
@@ -246,7 +246,7 @@ Das `--profile eval` startet einen zusätzlichen Container, der nur für die
 Bewertung zuständig ist. Er läuft getrennt von der Chat-App, damit die schwere
 Bewertungsbibliothek den Antwortweg nicht bremst und damit eine Bewertung, die
 fehlschlägt, nie eine Antwort verliert. Ohne `--profile eval` wird dieser
-Container weder gebaut noch gestartet - wer die Bewertung nicht braucht, zahlt
+Container weder gebaut noch gestartet. Wer die Bewertung nicht braucht, zahlt
 also nichts dafür.
 
 Dann in deiner Einstellungsdatei ergänzen:
@@ -258,7 +258,7 @@ evaluation:
 
 App neu starten (`docker compose restart chainlit`), eine Frage stellen und etwa
 fünfzehn Sekunden warten. Über dem Eingabefeld erscheint ein Abzeichen mit den
-Werten. Ein Klick darauf zeigt die ganze Erklärung - welche Aussagen bestanden
+Werten. Ein Klick darauf zeigt die ganze Erklärung: welche Aussagen bestanden
 haben, welche nicht, und warum.
 
 ## Wie alles zusammenspielt

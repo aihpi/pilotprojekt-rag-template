@@ -142,10 +142,10 @@ The assistant is working, but how do you know it is answering *well*? Evaluation
 scores every answer on two things and shows the result in a small badge above the
 chatbox:
 
-- **Faithfulness** - did the assistant only say things its sources actually
+- **Faithfulness** checks whether the assistant only said things its sources actually
   support, or did it add claims of its own? The score is the share of claims that
   are backed up: 1.0 means every claim checks out, 0.5 means half of them do not.
-- **Relevance** - does the answer address the question that was asked, rather than
+- **Relevance** checks whether the answer addresses the question that was asked, rather than
   being correct but beside the point?
 
 Both are checked by a second AI model (the *judge*) that reads the answer and the
@@ -168,7 +168,7 @@ evaluation:
 
 Restart the app (`docker compose restart chainlit`), ask a question, and wait
 about fifteen seconds. A badge appears above the chatbox with the scores. Click
-it for the full explanation - which claims passed, which did not, and why.
+it for the full explanation: which claims passed, which did not, and why.
 
 The full guide is at [Checking answer quality](evaluation.md).
 
