@@ -224,6 +224,42 @@ Jede einzelne Option steht in der [Konfiguration](docs/configuration.de.md).
 - Nutzer können Modelle wechseln und Anweisungen bearbeiten, die Auswahl wird
   gespeichert.
 - Chat-Verlauf, Daumen hoch/runter und Export, mit GitHub- oder lokalem Login.
+- **Antwortqualität messen.** Jede Antwort bekommt zwei Werte: *Treue* (sagt der
+  Assistent nur, was seine Quellen hergeben?) und *Relevanz* (beantwortet er die
+  gestellte Frage?). Ein kleines Abzeichen über dem Eingabefeld zeigt den
+  laufenden Mittelwert, ein Klick darauf die Einzelbewertung je Aussage — welche
+  bestanden haben, welche nicht, und warum. Daneben vergleicht ein zweiter Tab
+  verschiedene Konfigurationen, so dass „hat diese Änderung geholfen?" etwas
+  wird, das man anschauen kann. → [Doku](docs/evaluation.de.md)
+
+### Evaluation einschalten
+
+Die Evaluation ist standardmäßig aus, weil sie zusätzliche Aufrufe pro Antwort
+kostet. Zum Einschalten den Evaluations-Dienst starten und eine Einstellung
+setzen:
+
+```bash
+docker compose --profile eval up -d
+```
+
+Das `--profile eval` startet einen zusätzlichen Container, der nur für die
+Bewertung zuständig ist. Er läuft getrennt von der Chat-App, damit die schwere
+Bewertungsbibliothek den Antwortweg nicht bremst und damit eine Bewertung, die
+fehlschlägt, nie eine Antwort verliert. Ohne `--profile eval` wird dieser
+Container weder gebaut noch gestartet — wer die Bewertung nicht braucht, zahlt
+also nichts dafür.
+
+Dann in deiner Einstellungsdatei ergänzen:
+
+```yaml
+evaluation:
+  enabled: true
+```
+
+App neu starten (`docker compose restart chainlit`), eine Frage stellen und etwa
+fünfzehn Sekunden warten. Über dem Eingabefeld erscheint ein Abzeichen mit den
+Werten. Ein Klick darauf zeigt die ganze Erklärung — welche Aussagen bestanden
+haben, welche nicht, und warum.
 
 ## Wie alles zusammenspielt
 
@@ -257,6 +293,7 @@ erweiterst: Dateiformate in `kb/parsers/`, Arten des Textteilens in
 | [Agentische Tools](docs/tools.de.md) | die fünf Tools, eigene schreiben |
 | [Abbildungen](docs/images.de.md) | `images.mode`, Inline-Platzierung |
 | [System-Prompts](docs/prompts.de.md) | Generierung, Bearbeitung, Modell-Selektor |
+| [Antwortqualität prüfen](docs/evaluation.de.md) | Bewertung, Abzeichen, Vergleich |
 | [Konfiguration](docs/configuration.de.md) | vollständige Schema-Referenz |
 | [Field-Mapping-DSL](docs/field-mapping.de.md) | JSON/CSV → Chunks |
 | [Erweitern](docs/extending.de.md) | eigene Parser, Chunker, Tools |

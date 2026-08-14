@@ -214,6 +214,39 @@ Every single option is listed in [Configuration](docs/configuration.md).
 - Users can switch models and edit instructions in the settings panel, and their
   choice is remembered.
 - Chat history, thumbs up/down and exports, with GitHub or local login.
+- **Measure answer quality.** Every answer gets two scores: *faithfulness* (does
+  the assistant only say things its sources actually support?) and *relevance*
+  (does it answer the question that was asked?). A small badge above the chatbox
+  shows the running average, and a click opens the per-claim breakdown — which
+  claims passed, which did not, and why. A second tab compares different
+  configurations side by side, so "did that change help?" becomes something you
+  can look at. → [docs](docs/evaluation.md)
+
+### Turning evaluation on
+
+Evaluation is off by default because it costs extra calls per answer. To turn it
+on, start the evaluation service and set one flag:
+
+```bash
+docker compose --profile eval up -d
+```
+
+The `--profile eval` flag starts an extra container that handles scoring only. It
+runs separately from the chat app so the heavy scoring library does not slow down
+answers, and so a failed score never loses an answer. Without `--profile eval`
+this container is neither built nor started — if you do not need scoring, you pay
+nothing for it.
+
+Then add this to your settings file:
+
+```yaml
+evaluation:
+  enabled: true
+```
+
+Restart the app (`docker compose restart chainlit`), ask a question and wait
+about fifteen seconds. A badge appears above the chatbox with the scores. Click
+it for the full explanation — which claims passed, which did not, and why.
 
 ## How it fits together
 
@@ -246,6 +279,7 @@ types in `kb/parsers/`, ways of cutting text in `kb/chunkers/`, and abilities in
 | [Agentic tools](docs/tools.md) | the five tools, writing your own |
 | [Figures & images](docs/images.md) | `images.mode`, inline placement |
 | [System prompts](docs/prompts.md) | generation, editing, model picker |
+| [Checking answer quality](docs/evaluation.md) | scoring, badge, comparison |
 | [Configuration](docs/configuration.md) | full schema reference |
 | [Field-mapping DSL](docs/field-mapping.md) | JSON/CSV → chunks |
 | [Extending](docs/extending.md) | custom parsers, chunkers, tools |
