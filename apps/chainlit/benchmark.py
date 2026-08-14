@@ -196,7 +196,11 @@ async def run_job(
     job_id = job.get("id")
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        gold = (await client.get(f"{base}/api/gold")).json()["gold"]
+        # Checked, unlike the progress posts below: a failed fetch here otherwise
+        # surfaces as KeyError('gold') from an error body, naming nothing useful.
+        gold_response = await client.get(f"{base}/api/gold")
+        gold_response.raise_for_status()
+        gold = gold_response.json()["gold"]
         total = sum(len(g["turns"]) for g in gold)
         done = failed = 0
         if report and job_id:

@@ -2235,8 +2235,13 @@ async def on_app_startup() -> None:
         from kb.ingestion_pipeline import get_client, verify_hybrid_compatible
 
         try:
-            verify_hybrid_compatible(
-                get_client(), _startup_cfg.vector_store.collection, hybrid=True
+            # to_thread: the check makes blocking Qdrant calls, and this runs on the
+            # event loop during startup.
+            await asyncio.to_thread(
+                verify_hybrid_compatible,
+                get_client(),
+                _startup_cfg.vector_store.collection,
+                hybrid=True,
             )
         except RuntimeError:
             raise  # a real incompatibility — refuse to serve it
