@@ -49,24 +49,29 @@ Der Ingest schreibt den lexikalischen Vektor in jede Collection, die er **neu
 anlegt** — er ist eine lokal berechnete Wortzählung und kostet nichts. Für diese ist
 `hybrid` damit ein reiner Anfrage-Schalter: umlegen, neu starten, vergleichen,
 zurücklegen. Kein erneuter Ingest, und eine einzige Collection taugt für ein
-Dense-gegen-Hybrid-A/B. Eine Collection, die vor diesem Feature entstanden ist,
-bleibt rein dense, bis du sie neu aufbaust (siehe unten); ein Ingest in sie schreibt
-weiterhin nur dense Vektoren.
+Dense-gegen-Hybrid-A/B. Eine Collection, die vor diesem Feature entstanden ist, ist
+rein dense und bleibt es, bis der nächste Ingest sie neu aufbaut (siehe unten) — bis
+dahin schreibt ein Ingest in sie weiterhin nur dense Vektoren, statt zu scheitern.
 
-!!! warning "Collections von vor diesem Feature brauchen einmalig einen Neuaufbau"
+!!! warning "Collections von vor diesem Feature bauen sich einmalig selbst neu"
     Eine Collection, die vor den lexikalischen Vektoren angelegt wurde, ist rein
-    dense — ihre Punkte können nachträglich keinen bekommen. Mit `hybrid: false`
-    funktioniert sie unverändert; für Hybrid einmal neu indexieren:
+    dense — ihre Punkte können nachträglich keinen bekommen. Der Ingest erkennt
+    das und baut sie neu, ohne dass du ein Flag kennen musst:
 
     ```bash
-    docker compose run --rm ingest python -m kb.ingest --recreate
+    docker compose run --rm ingest python -m kb.ingest
     ```
 
-    **Bis dahin startet die App nicht**, statt rein dense zu laufen, während die
-    Config etwas anderes behauptet. Ingest, `make check` und der App-Start melden
-    dasselbe und nennen beide Auswege — neu indexieren oder `hybrid: false`
-    setzen. Die Alternative wäre eine stille Herabstufung: Hybrid sieht aktiv aus
-    und trägt einfach nie etwas bei.
+    Er nennt den Grund und die Zahl der verworfenen Punkte, denn ein Neuaufbau
+    embeddet den gesamten Korpus neu, und das ist abgerechneter Gateway-Verkehr.
+    Er greift nur bei einem echten Defekt: Mit `hybrid: false` ist eine rein
+    dense Collection völlig brauchbar und bleibt unangetastet.
+
+    **Bis du das ausführst, startet die App nicht**, statt rein dense zu laufen,
+    während die Config etwas anderes behauptet — sie kann nicht indexieren, also
+    kann sie das nicht selbst beheben. `make check` und der App-Start nennen
+    denselben einen Befehl. Die Alternative wäre eine stille Herabstufung: Hybrid
+    sieht aktiv aus und trägt einfach nie etwas bei.
 
     Dieselbe Verweigerung greift bei einer **Änderung des lexikalischen Formats**:
     Der Tokenizer entscheidet, welche Begriffe gespeichert sind, also macht ein

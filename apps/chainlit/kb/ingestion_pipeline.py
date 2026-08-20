@@ -139,61 +139,80 @@ def _ensure_collection(client, name: str, size: int, distance: str, recreate: bo
         )
 
 
+def lexical_rebuild_reason(client, collection: str, *, hybrid: bool) -> str | None:
+    """Why ``collection`` must be rebuilt before it can be searched lexically, or None.
+
+    Two ways a collection is unusable, both of which otherwise fail *silently* —
+    the lexical leg simply matches nothing, so hybrid degrades to dense while the
+    config (and the header chip) still say it is on:
+
+    * it predates lexical vectors, and an existing collection cannot gain one;
+    * it was written by a different lexical format, so its stored token ids do not
+      match the ones this code computes.
+
+    ``hybrid`` gates only the first. A dense-only collection is perfectly usable
+    with the switch off — ingest keeps writing plain dense points into it — so
+    calling it broken there would demand a full re-embed nobody asked for. The
+    format check is ungated: ingest writes lexical vectors into any collection whose
+    schema has them, so a mismatch would mix two formats in one index and then
+    overwrite the recorded version, leaving a corpus no later check can diagnose.
+    """
+    if not collection_exists(client, collection):
+        return None  # nothing to conflict with; ingest will build it correctly
+
+    has_sparse = _supports_sparse(client, collection)
+    if hybrid and not has_sparse:
+        return (
+            f"Collection '{collection}' has no lexical vector, but retrieval.hybrid is "
+            f"on. It was built before hybrid search existed and cannot gain one, so the "
+            f"lexical half of every query would match nothing."
+        )
+    if has_sparse:
+        stored = (_read_sentinel(client, collection) or {}).get("sparse_format")
+        # A missing key means the collection predates versioning — tolerated, exactly
+        # as a missing embed_model is below.
+        if stored is not None and stored != SPARSE_FORMAT:
+            return (
+                f"Collection '{collection}' was built with lexical format {stored}, but "
+                f"this version writes {SPARSE_FORMAT}. Its stored terms would not match "
+                f"the ones queries compute, so hybrid search would silently find "
+                f"nothing — and ingesting into it would mix the two formats."
+            )
+    return None
+
+
 _verified_hybrid: set[tuple[str, bool]] = set()
 
 
 def verify_hybrid_compatible(client, collection: str, *, hybrid: bool) -> None:
     """Raise unless ``collection`` can serve hybrid retrieval as configured.
 
-    Two ways it cannot, both of which otherwise fail *silently* — the lexical leg
-    simply matches nothing, so hybrid degrades to dense while the config (and the
-    header chip) still say it is on:
+    For readers that cannot fix the problem themselves — the app, the query path,
+    ``make check``. Ingest calls :func:`lexical_rebuild_reason` instead and rebuilds.
 
-    * the collection predates lexical vectors, and an existing collection cannot
-      gain one;
-    * it was written by a different lexical format, so its stored token ids do
-      not match the ones this code computes.
-
-    Called from ingest, app startup and the query path. A collection's answer
-    cannot change without a re-ingest, so a success is cached; a failure is not,
-    and neither is a lookup error.
-
-    ``hybrid`` gates only the *first* check. The format check runs regardless,
-    because ingest writes lexical vectors into any collection whose schema has
-    them — the query-time flag does not decide that. Skipping it with ``hybrid:
-    false`` would let a run mix new-format vectors into an old-format index and
-    then overwrite the recorded version, leaving a corpus that no later check can
-    tell is broken.
+    A collection's answer cannot change without a re-ingest, so a success is cached;
+    a failure is not, and neither is a lookup error. Keyed on the flag too, since
+    ``hybrid`` decides whether the missing-vector case counts as broken.
     """
-    # Keyed on the flag too: `hybrid` decides whether the missing-lexical-vector
-    # check runs, so a cached pass from a `hybrid=False` call would let a later
-    # `hybrid=True` call skip the refusal entirely.
-    if (collection, hybrid) in _verified_hybrid or not collection_exists(client, collection):
-        return  # nothing to conflict with; ingest will build it correctly
+    if (collection, hybrid) in _verified_hybrid:
+        return
 
-    has_sparse = _supports_sparse(client, collection)
-    if hybrid and not has_sparse:
+    reason = lexical_rebuild_reason(client, collection, hybrid=hybrid)
+    if reason:
         raise RuntimeError(
-            f"Collection '{collection}' has no lexical vector, but retrieval.hybrid is "
-            f"on. It was built before hybrid search existed and cannot gain one, so the "
-            f"lexical half of every query would match nothing. Re-ingest with "
-            f"--recreate, or set retrieval.hybrid: false."
+            f"{reason} Run 'docker compose run --rm ingest python -m kb.ingest' — it "
+            f"rebuilds a collection in this state automatically. Or set "
+            f"retrieval.hybrid: false to stay with semantic search."
         )
-
-    if has_sparse:
-        sentinel = _read_sentinel(client, collection) or {}
-        stored = sentinel.get("sparse_format")
-        # A missing key means the collection predates versioning — tolerated, exactly
-        # as a missing embed_model is below.
-        if stored is not None and stored != SPARSE_FORMAT:
-            raise RuntimeError(
-                f"Collection '{collection}' was built with lexical format {stored}, but "
-                f"this version writes {SPARSE_FORMAT}. Its stored terms would not match "
-                f"the ones queries compute, so hybrid search would silently find "
-                f"nothing — and ingesting into it would mix the two formats. Re-ingest "
-                f"with --recreate, or point vector_store.collection at a new name."
-            )
     _verified_hybrid.add((collection, hybrid))
+
+
+def _count_points(client, name: str) -> int | str:
+    """Point count for the rebuild log; never the reason a rebuild fails."""
+    try:
+        return client.count(collection_name=name).count
+    except Exception:  # noqa: BLE001 — a log detail, not a precondition
+        return "an unknown number of"
 
 
 def _supports_sparse(client, name: str) -> bool:
@@ -603,12 +622,25 @@ async def ingest_all(
     collection = config.vector_store.collection
     client = get_client()
 
-    # The only lexical-format check in the ingest path, and deliberately here rather
-    # than in ingest_chunks: an unchanged corpus never reaches that call, and "code
+    # Ingest is the one caller that can fix a stale lexical index, so it does rather
+    # than telling the reader to re-run it with a flag. Checked here and not in
+    # ingest_chunks because an unchanged corpus never reaches that call, and "code
     # updated, documents untouched" is exactly how a mismatch arrives. `config`, not
     # get_config() — `kb.ingest --config other.yaml` need not be the process singleton.
     if not recreate:
-        verify_hybrid_compatible(client, collection, hybrid=config.retrieval.hybrid)
+        reason = lexical_rebuild_reason(client, collection, hybrid=config.retrieval.hybrid)
+        if reason:
+            # Loud, and with the cost named: this discards every point and re-embeds
+            # the corpus, which is billed gateway traffic. Silence here would look
+            # like an ordinary incremental run that inexplicably took an hour.
+            existing = _count_points(client, collection)
+            print(f"[ingest] {reason}")
+            print(
+                f"[ingest] rebuilding '{collection}' automatically: {existing} existing "
+                f"point(s) will be discarded and the corpus re-embedded. This is the "
+                f"only way to add a lexical vector to an existing collection."
+            )
+            recreate = True
 
     exists = collection_exists(client, collection)
 

@@ -361,8 +361,8 @@ def check_hybrid_collection(config) -> Result:
         result.error = _short(str(exc))
         result.cause = "Hybrid search is switched on, but this collection cannot serve it."
         result.steps = [
-            "Rebuild the collection with 'docker compose run --rm ingest "
-            "python -m kb.ingest --recreate'",
+            "Run 'docker compose run --rm ingest python -m kb.ingest' — it rebuilds "
+            "a collection in this state by itself",
             "Or set retrieval.hybrid: false in your config to stay with semantic search",
             "Run 'make check' again",
         ]

@@ -294,8 +294,12 @@ def test_dense_only_collection_is_refused_with_an_actionable_message(monkeypatch
 
     message = str(excinfo.value)
     assert "kb" in message, "the error must name the collection"
-    assert "--recreate" in message and "retrieval.hybrid" in message, (
+    assert "kb.ingest" in message and "retrieval.hybrid" in message, (
         "both ways out have to be in the message — it is the whole user-facing text"
+    )
+    assert "--recreate" not in message, (
+        "ingest rebuilds this state by itself now; telling the reader to pass a flag "
+        "sends them to do by hand what running the command already does"
     )
 
 

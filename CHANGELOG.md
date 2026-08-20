@@ -120,12 +120,19 @@ can be pointed at a new corpus without touching Python.
 
   Ingest writes the vector into every collection it creates, so for those `hybrid`
   is a pure query-time switch — flip it, restart, compare — and one collection can
-  serve a dense-vs-hybrid A/B. A collection created before this existed is
-  dense-only and cannot gain the vector retroactively; it keeps working with
-  `hybrid: false`, and the app, ingest and `make check` all **refuse to start**
-  with `hybrid: true` rather than running dense-only behind a config that claims
-  otherwise. The same refusal covers a tokenizer change, whose format version is
-  recorded per collection and compared on every run exactly as `embed_model` is.
+  serve a dense-vs-hybrid A/B.
+
+  A collection created before this existed is dense-only and cannot gain the vector
+  retroactively, so **ingest rebuilds it on the next run** — no flag to remember. It
+  prints the reason and the number of points it discards, because a rebuild
+  re-embeds the corpus and that is billed gateway traffic, and it fires only on a
+  real defect: with `hybrid: false` a dense-only collection is perfectly usable and
+  is left alone. A tokenizer change is treated the same way and regardless of the
+  switch, since writing new-format terms into an old-format index would corrupt it;
+  the format version is recorded per collection and compared on every run exactly as
+  `embed_model` is. The app and `make check` cannot ingest, so they **refuse to
+  start** and name the one command that fixes it, rather than running dense-only
+  behind a config that claims otherwise.
   [Hybrid retrieval](https://aihpi.github.io/pilotprojekt-rag-template/retrieval/)
   covers the settings and when a reranker becomes worth its cost.
 

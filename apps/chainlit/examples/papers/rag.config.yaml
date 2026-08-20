@@ -40,8 +40,8 @@ models:
 vector_store:
   # Every ingest writes the lexical vector, whether `retrieval.hybrid` is on or
   # off — it is a local word count and costs nothing. A collection built before
-  # that was true has none and cannot gain one, so recreate it once:
-  #   docker compose run --rm ingest python -m kb.ingest --recreate
+  # that was true has none and cannot gain one, so ingest rebuilds it for you on
+  # the next run; no flag, though it does re-embed the corpus and says so.
   collection: papers
 
 data_sources:

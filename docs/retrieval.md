@@ -46,24 +46,29 @@ default stays off, so an existing instance keeps its behaviour until you opt in.
 Ingest writes the lexical vector into every collection it *creates* — it is a locally
 computed word count and costs nothing — so for those, `hybrid` is a pure query-time
 switch: flip it, restart, compare, flip it back. No re-ingest, and one collection can
-serve a dense-vs-hybrid A/B. A collection created before this feature stays dense-only
-until you recreate it (see below), and ingesting into it keeps writing plain dense
-vectors.
+serve a dense-vs-hybrid A/B. A collection created before this feature is dense-only,
+and stays that way until the next ingest rebuilds it (see below) — until then,
+ingesting into it keeps writing plain dense vectors rather than failing.
 
-!!! warning "Collections from before this feature need one re-ingest"
+!!! warning "Collections from before this feature rebuild themselves once"
     A collection created before lexical vectors existed is dense-only, and its
-    points cannot carry one retroactively. It keeps working fine with
-    `hybrid: false`; to turn hybrid on, re-ingest once with `--recreate`:
+    points cannot carry one retroactively. Ingest detects that and rebuilds it —
+    no flag to remember:
 
     ```bash
-    docker compose run --rm ingest python -m kb.ingest --recreate
+    docker compose run --rm ingest python -m kb.ingest
     ```
 
-    **Until you do, the app refuses to start** rather than running dense-only
-    behind a config that says otherwise. Ingest, `make check` and app startup all
-    report the same thing, and name both ways out — re-ingest, or set
-    `hybrid: false`. The alternative was a silent downgrade, where hybrid appears
-    enabled and simply never contributes anything.
+    It prints why, and how many points it is discarding, because a rebuild
+    re-embeds the whole corpus and that is billed gateway traffic. It fires only
+    on a real defect: with `hybrid: false` a dense-only collection is perfectly
+    usable and is left alone.
+
+    **Until you run it, the app refuses to start** rather than running dense-only
+    behind a config that says otherwise — it cannot ingest, so it cannot fix this
+    itself. `make check` and app startup both name the same one command. The
+    alternative was a silent downgrade, where hybrid appears enabled and simply
+    never contributes anything.
 
     The same refusal covers a **lexical format change**: the tokenizer decides
     which terms are stored, so an upgrade that changes it makes existing terms
