@@ -325,6 +325,12 @@ def build_context(results: list[RagResult], *, figure_markers: bool | None = Non
     return "\n\n".join(lines)
 
 
+#: What ``build_context`` adds around each entry: the ``[n] `` prefix and the blank
+#: line joining entries. Counted so ``max_context_chars`` bounds the rendered text
+#: rather than just the sum of the chunk bodies.
+_ENTRY_OVERHEAD = 8
+
+
 def render_context(
     results: list[RagResult], *, figure_markers: bool | None = None
 ) -> tuple[str, str, list[RagResult]]:
@@ -349,7 +355,12 @@ def render_context(
     kept: list[RagResult] = []
     used = 0
     for result in results:
-        cost = len(result.text)
+        # The provenance line and the "[n] " prefix are part of what the model is
+        # given, so they are part of the budget. Counting result.text alone put a
+        # 200-chunk render 11,670 chars over a 120,000 budget with nothing dropped.
+        # Residual: build_context adds a marker line for figure chunks only, still
+        # uncounted — tens of chars each, not thousands.
+        cost = len(context_with_source(result)) + _ENTRY_OVERHEAD
         if kept and used + cost > budget:
             break
         kept.append(result)
@@ -370,7 +381,7 @@ def render_context(
             f"weggelassen (Budget {budget} Zeichen). Stelle eine engere Frage "
             f"oder nutze expand_context für einen bestimmten Abschnitt.]"
         )
-    elif used > budget:
+    if used > budget:
         # ponytail: a single chunk over the whole budget is delivered whole. Only
         # reachable via `passthrough` (never splits) or non-PDF `docling_hybrid`.
         # If this fires in practice, the fix is at ingest (bound the chunker), not
@@ -552,7 +563,15 @@ async def expand_context(
             f"[WARN] expand_context_window_clamped source_file={source_file!r} "
             f"window={window} selected={len(selected)} cap={cap}"
         )
-        selected = selected[:cap]
+        # Nearest the requested section, not the head of the document. `selected` is
+        # sorted ascending, so `selected[:cap]` dropped the anchor itself whenever
+        # section_index sat more than `cap` chunks into the window — the tool then
+        # returned a window that did not contain the section it was asked about.
+        selected = sorted(
+            selected,
+            key=lambda p: abs((p.payload or {}).get("section_index", section_index) - section_index),
+        )[:cap]
+        selected.sort(key=_section_order_key)
     results: list[RagResult] = []
     for point in selected:
         payload = dict(point.payload or {})

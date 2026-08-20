@@ -139,7 +139,7 @@ def _ensure_collection(client, name: str, size: int, distance: str, recreate: bo
         )
 
 
-_verified_hybrid: set[str] = set()
+_verified_hybrid: set[tuple[str, bool]] = set()
 
 
 def verify_hybrid_compatible(client, collection: str, *, hybrid: bool) -> None:
@@ -165,7 +165,10 @@ def verify_hybrid_compatible(client, collection: str, *, hybrid: bool) -> None:
     then overwrite the recorded version, leaving a corpus that no later check can
     tell is broken.
     """
-    if collection in _verified_hybrid or not collection_exists(client, collection):
+    # Keyed on the flag too: `hybrid` decides whether the missing-lexical-vector
+    # check runs, so a cached pass from a `hybrid=False` call would let a later
+    # `hybrid=True` call skip the refusal entirely.
+    if (collection, hybrid) in _verified_hybrid or not collection_exists(client, collection):
         return  # nothing to conflict with; ingest will build it correctly
 
     has_sparse = _supports_sparse(client, collection)
@@ -190,7 +193,7 @@ def verify_hybrid_compatible(client, collection: str, *, hybrid: bool) -> None:
                 f"nothing — and ingesting into it would mix the two formats. Re-ingest "
                 f"with --recreate, or point vector_store.collection at a new name."
             )
-    _verified_hybrid.add(collection)
+    _verified_hybrid.add((collection, hybrid))
 
 
 def _supports_sparse(client, name: str) -> bool:

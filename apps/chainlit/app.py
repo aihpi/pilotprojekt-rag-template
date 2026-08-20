@@ -3796,6 +3796,9 @@ async def main(message: cl.Message):
         if MAX_SOURCE_LINKS > 0:
             desired_sources = min(desired_sources, MAX_SOURCE_LINKS)
         allowed_pdf_names = _allowed_source_pdf_names()
+        # Warn once per file, not once per chunk: a missing document usually supplies
+        # several of the retrieved chunks.
+        unlinkable_files: set[str] = set()
         # The alias number IS the retrieval index, not a separate running counter.
         # The model cites by the number it was shown, which is the position in the
         # tool payload's `citations` list — i.e. the position in last_results. A
@@ -3823,7 +3826,8 @@ async def main(message: cl.Message):
                         url_by_index[idx] = existing_url
                 continue
             file_path = _resolve_source_pdf_path(file_name, allowed_pdf_names)
-            if file_path is None:
+            if file_path is None and file_name not in unlinkable_files:
+                unlinkable_files.add(file_name)
                 # A retrieved chunk whose file is not on disk gets no alias, so any
                 # citation the model writes for it stays plain text — silently. That
                 # is worth saying out loud: it means the index and the document

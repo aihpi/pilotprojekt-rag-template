@@ -65,8 +65,11 @@ async def _fetch_document(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             },
             results=[],
         )
-    truncated = len(results) >= cap
     context, cites, kept = render_context(results)
+    # Either bound truncates the document the model is shown: the scroll cap, or the
+    # context budget dropping chunks from the tail. Reporting only the first told the
+    # model `truncated: false` for a context that carried a "Kontext gekürzt" notice.
+    truncated = len(results) >= cap or len(kept) < len(results)
     payload = {
         "source_file": source_file,
         "chunks": len(kept),

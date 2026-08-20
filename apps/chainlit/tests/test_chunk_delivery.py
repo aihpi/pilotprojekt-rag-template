@@ -116,14 +116,36 @@ def test_whitespace_is_still_collapsed_at_retrieval():
 def test_the_budget_drops_whole_chunks_and_citations_agree(monkeypatch):
     """If the context is trimmed and the citation list is not, the model can cite
     [15] for a chunk it never received — the same two-copies-disagreeing defect."""
-    monkeypatch.setattr(rag_tool.get_config().tools, "max_context_chars", 30000)
+    budget = 30000
+    monkeypatch.setattr(rag_tool.get_config().tools, "max_context_chars", budget)
     chunks = [_chunk("x" * 10000, source=f"doc{i}.pdf") for i in range(9)]
 
     context, citations, kept = render_context(chunks)
 
-    assert len(kept) == 3, "30000 budget over 10000-char chunks"
-    assert len(citations.splitlines()) == 3, "citations must number exactly what was kept"
-    assert "6 von 9" in context, "the notice has to name what was dropped"
+    # The bound is on the text the model receives, not on the sum of chunk bodies:
+    # each entry also carries its "[n] " prefix and provenance line. Asserting a
+    # hand-computed chunk count instead let the rendered context run 11,670 chars
+    # past a 120,000 budget while the test still passed.
+    assert len(context) <= budget, f"rendered {len(context)} chars against {budget}"
+    assert 1 < len(kept) < 9, "some chunks fit, not all of them"
+    assert len(citations.splitlines()) == len(kept), (
+        "citations must number exactly what was kept"
+    )
+    assert f"{9 - len(kept)} von 9" in context, "the notice has to name what was dropped"
+
+
+def test_one_more_chunk_would_break_the_budget(monkeypatch):
+    """The trim keeps as much as fits, not merely a safe-looking prefix."""
+    budget = 30000
+    monkeypatch.setattr(rag_tool.get_config().tools, "max_context_chars", budget)
+    chunks = [_chunk("x" * 10000, source=f"doc{i}.pdf") for i in range(9)]
+
+    _, _, kept = render_context(chunks)
+    # build_context, not render_context: the latter re-applies the budget and would
+    # simply drop the extra chunk again, measuring nothing.
+    one_more = rag_tool.build_context(chunks[: len(kept) + 1])
+
+    assert len(one_more) > budget, "the trim stopped earlier than it had to"
 
 
 def test_a_single_over_budget_chunk_is_delivered_whole_and_says_so(monkeypatch, capsys):
@@ -178,3 +200,26 @@ def test_the_alias_number_is_the_retrieval_index_not_a_running_counter():
     for written in ("Quelle 3: Methods (S.5)", "Quelle 3: Methoden (Seite 5-6)"):
         repaired = app._normalize_source_alias_mentions(written, alias_by_index)
         assert repaired == "Quelle 3: Methods (S.5-6)", written
+
+
+def test_a_clamped_window_still_contains_the_section_it_was_asked_about(monkeypatch):
+    """`expand_context` sorts ascending, so clamping with `selected[:cap]` returned
+    the head of the document. Asked about section 350 with a 300 window it handed
+    back sections 50..249 — the anchor absent from its own window."""
+    import types
+
+    cap = rag_tool.get_config().tools.fetch_max_chunks
+    points = [
+        types.SimpleNamespace(payload={"section_index": i, "text": f"chunk {i}", "source_file": "d.pdf"})
+        for i in range(cap + 200)
+    ]
+    monkeypatch.setattr(rag_tool, "_scroll_all", lambda *a, **k: points)
+    monkeypatch.setattr(rag_tool, "_get_client", lambda: None)
+
+    anchor = cap + 150
+    out = asyncio.run(rag_tool.expand_context("d.pdf", anchor, window=cap + 100))
+    sections = [r.metadata["section_index"] for r in out]
+
+    assert len(sections) == cap, "the clamp still has to bound the result"
+    assert anchor in sections, "the requested section must survive its own clamp"
+    assert sections == sorted(sections), "and the window stays in document order"

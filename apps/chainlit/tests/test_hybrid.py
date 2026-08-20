@@ -483,3 +483,18 @@ def test_the_fused_query_sends_the_stripped_sparse_vector(hybrid_client):
     assert sparse_leg.query.indices != sparse_vector(question).indices, (
         "the leg is carrying every function word in the question"
     )
+
+
+def test_the_cache_does_not_answer_for_a_flag_it_was_not_asked_about():
+    """`hybrid` decides whether the missing-lexical-vector check runs, so caching
+    per collection alone let a pass from a dense call satisfy a later hybrid one —
+    the refusal skipped entirely, which is the silent degradation this guards."""
+    from kb import ingestion_pipeline
+
+    ingestion_pipeline._verified_hybrid.clear()
+    client = _SentinelClient(sparse=False)
+
+    # Legitimately fine: dense-only collection, hybrid off.
+    ingestion_pipeline.verify_hybrid_compatible(client, "kb", hybrid=False)
+    with pytest.raises(RuntimeError, match="no lexical vector"):
+        ingestion_pipeline.verify_hybrid_compatible(client, "kb", hybrid=True)
