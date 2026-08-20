@@ -2145,6 +2145,82 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+def _config_yaml(cfg) -> str:
+    """The active settings as a pasteable config skeleton, for the chip's copy button.
+
+    Built from the same curated fields the chip displays, deliberately **not** from
+    ``cfg.model_dump()``: the real config object carries ``models.litellm_api_key``
+    and ``vector_store.api_key``, and a copy button is exactly the wrong place to
+    learn that. Nothing secret can reach here because nothing secret is collected.
+
+    ``data_sources`` is omitted rather than emitted — paths are instance-specific,
+    and a skeleton that names someone else's directories is worse than one that
+    says where to look. The chunking each source uses is preserved as a comment,
+    since that is the part worth comparing.
+    """
+    import yaml
+
+    from tools import enabled_tool_ids
+
+    def source_entry(src):
+        """One data source, with its *effective* chunking spelled out.
+
+        ``path`` is omitted rather than placeheld. It is the one field that cannot
+        transfer, and inventing a value for it puts fabricated data in something
+        whose whole purpose is to be truthful — a ``CHANGE-ME`` that survives a
+        paste is worse than an absence. Because ``path`` is required by the
+        schema, leaving it out fails at load with ``data_sources.0.path — Field
+        required``, which says exactly what to supply.
+
+        Everything else is real, chunking included: it is the field worth
+        comparing between two configs, and it lives per source, not at the top
+        level.
+        """
+        chunking = src.chunking or cfg.chunking
+        block = {
+            "strategy": chunking.strategy,
+            "max_chars": chunking.max_chars,
+            "overlap": chunking.overlap,
+            "min_section_chars": chunking.min_section_chars,
+        }
+        # Strategy-specific knobs only where they do something, so the output does
+        # not imply a percentile matters to fixed_size.
+        if chunking.strategy == "semantic":
+            block["semantic_breakpoint_percentile"] = chunking.semantic_breakpoint_percentile
+        if chunking.strategy == "docling_hybrid" and chunking.hybrid_max_tokens is not None:
+            block["hybrid_max_tokens"] = chunking.hybrid_max_tokens
+        entry = {"name": src.name, "format": src.format}
+        if src.glob:
+            entry["glob"] = src.glob
+        entry["chunking"] = block
+        return entry
+
+    body = {
+        "name": cfg.name,
+        "language": cfg.language,
+        "models": {
+            "chat_model": cfg.models.chat_model,
+            "fallback_chat_model": cfg.models.fallback_chat_model,
+            "embed_model": cfg.models.embed_model,
+        },
+        "vector_store": {"collection": cfg.vector_store.collection},
+        "data_sources": [source_entry(src) for src in cfg.data_sources],
+        "retrieval": {
+            "top_k": cfg.retrieval.top_k,
+            "score_threshold": cfg.retrieval.score_threshold,
+            "hybrid": cfg.retrieval.hybrid,
+            "fusion": cfg.retrieval.fusion,
+            "prefetch_limit": cfg.retrieval.prefetch_limit,
+        },
+        "images": {"mode": cfg.images.mode, "vision_model": cfg.images.vision_model},
+        "tools": {"enabled": enabled_tool_ids(cfg)},
+    }
+    # No header comment: the point is a config you can paste straight in, and three
+    # lines of preamble is three lines to delete every time. The one thing that
+    # genuinely cannot transfer says so in the value itself (path: CHANGE-ME).
+    return yaml.safe_dump(body, sort_keys=False, default_flow_style=False, allow_unicode=True)
+
+
 def _config_info_payload(cfg) -> dict:
     """What the ``/config-info`` header chip shows. Pure so it is testable
     without booting Chainlit. ``chat_model`` is the instance default — users
@@ -2178,6 +2254,7 @@ def _config_info_payload(cfg) -> dict:
         },
         "images_mode": cfg.images.mode,
         "tools": enabled_tool_ids(cfg),
+        "yaml": _config_yaml(cfg),
     }
 
 

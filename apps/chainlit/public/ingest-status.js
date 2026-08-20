@@ -457,6 +457,21 @@
   var ANCHOR_IDS = ["rag-ingest-status", "readme-button"];
 
   var info = null;
+  var pinned = false;
+  var overPanel = false;
+
+  // Two offset rounded rectangles: the conventional copy glyph, so it needs no
+  // label. A checkmark replaces it briefly on success.
+  var ICON_COPY =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    '<rect x="9" y="9" width="13" height="13" rx="2"/>' +
+    '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  var ICON_DONE =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
 
   function styles() {
     if (document.getElementById(ID + "-styles")) return;
@@ -493,12 +508,34 @@
       "transition:opacity .15s ease,transform .15s ease,visibility .15s}",
       "html.dark #" + ID + "-panel,.dark #" + ID + "-panel{color:#e8eef8;",
       "background:#111826;border-color:#2b3648;box-shadow:0 10px 28px rgba(0,0,0,.5)}",
-      "#" + ID + "-panel[data-open='1']{opacity:1;visibility:visible;transform:translateY(0)}",
+      // pointer-events must come back when open: the base rule sets `none` so a
+      // closed panel never eats clicks, but it also made the copy icon inside
+      // impossible to hover or click. Inherited from the badge's panel, where
+      // there is nothing interactive and so nothing to notice.
+      "#" + ID + "-panel[data-open='1']{opacity:1;visibility:visible;",
+      "transform:translateY(0);pointer-events:auto}",
       "#" + ID + "-panel .rci-title{font-weight:600;margin-bottom:6px}",
       "#" + ID + "-panel .rci-row{display:flex;gap:8px;margin-top:2px}",
       "#" + ID + "-panel .rci-key{flex:0 0 92px;opacity:.7}",
       "#" + ID + "-panel .rci-val{word-break:break-word}",
       "#" + ID + "-panel .rci-hint{margin-top:8px;opacity:.7}",
+      "#" + ID + "-copy{position:absolute;top:8px;right:8px;display:inline-flex;",
+      "align-items:center;justify-content:center;width:24px;height:24px;padding:0;",
+      "border-radius:6px;cursor:pointer;border:1px solid transparent;",
+      "background:transparent;color:inherit;opacity:.55;",
+      "-webkit-appearance:none;appearance:none;transition:opacity .12s,background .12s}",
+      "#" + ID + "-copy:hover{opacity:1;background:rgba(148,163,184,.38);",
+      "border-color:rgba(148,163,184,.55)}",
+      "html.dark #" + ID + "-copy:hover,.dark #" + ID + "-copy:hover{",
+      "background:rgba(148,163,184,.45);border-color:rgba(148,163,184,.6)}",
+      "#" + ID + "-copy:active{transform:scale(.92)}",
+      "#" + ID + "-copy:focus-visible{opacity:1;outline:2px solid currentColor;",
+      "outline-offset:2px}",
+      "#" + ID + "-copy[data-done='1']{opacity:1;color:#15803d;background:transparent}",
+      "html.dark #" + ID + "-copy[data-done='1'],.dark #" + ID + "-copy[data-done='1']{",
+      "color:#4ade80}",
+      // Keep the title clear of the icon.
+      "#" + ID + "-panel .rci-title{padding-right:26px}",
       "@media (max-width:560px){#" + ID + "{max-width:38vw}",
       "#" + ID + " .rci-label{display:none}}",
     ].join("");
@@ -536,7 +573,56 @@
     html += row("images", info.images_mode);
     html += row("tools", (info.tools || []).join(", "));
     html += '<div class="rci-hint">Set via RAG_CONFIG — restart to change.</div>';
+    html =
+      '<button type="button" id="' + ID + '-copy" title="Copy as YAML" ' +
+      'aria-label="Copy configuration as YAML">' + ICON_COPY + "</button>" + html;
     return html;
+  }
+
+  function copyText(text) {
+    // The async clipboard API needs a secure context: localhost qualifies, a plain
+    // http:// deployment on a LAN does not. Hence the textarea fallback — the whole
+    // reason this is not a one-liner.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      if (ok) { resolve(); } else { reject(new Error("copy blocked")); }
+    });
+  }
+
+  function flash(button, ok, label) {
+    button.innerHTML = ok ? ICON_DONE : ICON_COPY;
+    button.setAttribute("data-done", ok ? "1" : "0");
+    button.setAttribute("title", label);
+    setTimeout(function () {
+      button.innerHTML = ICON_COPY;
+      button.removeAttribute("data-done");
+      button.setAttribute("title", "Copy as YAML");
+    }, 1600);
+  }
+
+  function wireCopy() {
+    var button = document.getElementById(ID + "-copy");
+    if (!button || button.getAttribute("data-wired") === "1") return;
+    button.setAttribute("data-wired", "1");
+    button.addEventListener("click", function (event) {
+      // The chip's own click handler pins/unpins the panel; without this, copying
+      // would close the panel being copied from.
+      event.stopPropagation();
+      copyText((info && info.yaml) || "")
+        .then(function () { flash(button, true, "Copied"); })
+        .catch(function () { flash(button, false, "Copy blocked — select and press Ctrl+C"); });
+    });
   }
 
   function panelElement() {
@@ -544,6 +630,14 @@
     if (panel) return panel;
     panel = document.createElement("div");
     panel.id = ID + "-panel";
+    // Hovering the panel keeps it open, so the pointer can travel from the chip
+    // to the copy button without the panel vanishing on the way.
+    panel.addEventListener("mouseenter", function () { overPanel = true; });
+    panel.addEventListener("mouseleave", function () {
+      overPanel = false;
+      var el = document.getElementById(ID);
+      if (el && !pinned) setOpen(el, false);
+    });
     document.body.appendChild(panel);
     return panel;
   }
@@ -613,11 +707,20 @@
       // always find "true", because mouseenter and focus both fire before click
       // — so a click (and every tap on a browser that focuses buttons) closed
       // the panel it had just opened.
-      var pinned = false;
       el.addEventListener("mouseenter", function () { setOpen(el, true); });
-      el.addEventListener("mouseleave", function () { if (!pinned) setOpen(el, false); });
+      el.addEventListener("mouseleave", function () {
+        // Deferred: the pointer may be travelling onto the panel, which sets
+        // overPanel in its own mouseenter. Closing immediately would snatch the
+        // copy button away mid-reach.
+        setTimeout(function () {
+          if (!pinned && !overPanel) setOpen(el, false);
+        }, 80);
+      });
       el.addEventListener("focus", function () { setOpen(el, true); });
-      el.addEventListener("blur", function () { pinned = false; setOpen(el, false); });
+      el.addEventListener("blur", function () {
+        pinned = false;
+        if (!overPanel) setOpen(el, false);
+      });
       // Tap/click pins it open, so touch — which never hovers — can read it.
       el.addEventListener("click", function () {
         pinned = !pinned;
@@ -636,6 +739,7 @@
     el.setAttribute("aria-label", "Active configuration: " + info.name);
     el.setAttribute("title", info.name);
     panelElement().innerHTML = panelHtml();
+    wireCopy();
     place(el);
     return el;
   }

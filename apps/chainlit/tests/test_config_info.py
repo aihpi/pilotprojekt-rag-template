@@ -101,3 +101,61 @@ def test_payload_carries_the_retrieval_switches_and_serializes():
     assert payload["retrieval"]["prefetch_limit"] == 30
     assert payload["tools"] == ["search"], "empty tools config must fall back to search"
     json.dumps(payload)  # the route returns this verbatim — it has to be JSON-safe
+
+
+def test_the_copyable_yaml_carries_settings_but_never_secrets():
+    """The copy button exists to share configs, which makes it exactly the wrong
+    place to learn that the resolved config object holds litellm_api_key and the
+    Qdrant api_key. It is built from curated fields, not model_dump(), so nothing
+    secret can reach it — this pins that."""
+    import yaml as yaml_lib
+
+    cfg = _cfg()
+    cfg.models.litellm_api_key = "sk-must-not-appear"
+    cfg.vector_store.api_key = "qdrant-must-not-appear"
+
+    text = chainlit_app._config_yaml(cfg)
+    assert "must-not-appear" not in text
+    assert "api_key" not in text
+
+    parsed = yaml_lib.safe_load(text)
+    assert parsed["name"] == "unit-test-rag"
+    assert parsed["models"]["chat_model"] == cfg.models.chat_model
+    assert parsed["retrieval"]["hybrid"] is False
+    assert parsed["tools"]["enabled"] == ["search"]
+    # path is omitted, not invented: it cannot transfer, and a placeholder that
+    # survives a paste is worse than an absence. It is schema-required, so the
+    # gap fails at load naming the field instead of pointing somewhere wrong.
+    assert all("path" not in src for src in parsed["data_sources"])
+    assert "notes" in [src["name"] for src in parsed["data_sources"]]
+    assert "CHANGE-ME" not in text
+
+
+def test_the_yaml_names_each_source_own_chunking_strategy():
+    """The strategy is the field worth comparing between two configs, and it lives
+    per source — a top-level chunking block would report the fallback for a corpus
+    that never used it (the shipped papers example is exactly that case)."""
+    import yaml as yaml_lib
+
+    parsed = yaml_lib.safe_load(chainlit_app._config_yaml(_cfg()))
+    by_name = {s["name"]: s["chunking"] for s in parsed["data_sources"]}
+
+    assert by_name["pdfs"]["strategy"] == "fixed_size"      # inherits the global
+    assert by_name["notes"]["strategy"] == "heading"        # overrides it
+
+    # Strategy-specific knobs appear only where they mean something.
+    assert "semantic_breakpoint_percentile" not in by_name["notes"]
+    semantic = yaml_lib.safe_load(
+        chainlit_app._config_yaml(
+            RagConfig(data_sources=[DataSourceConfig(
+                name="s", path="d", format="pdf",
+                chunking=ChunkingConfig(strategy="semantic"),
+            )])
+        )
+    )
+    assert semantic["data_sources"][0]["chunking"]["semantic_breakpoint_percentile"] == 95.0
+
+
+def test_the_payload_exposes_the_yaml_for_the_button():
+    payload = chainlit_app._config_info_payload(_cfg())
+    assert payload["yaml"].startswith("name: unit-test-rag")
