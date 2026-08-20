@@ -3810,7 +3810,18 @@ async def main(message: cl.Message):
         if MAX_SOURCE_LINKS > 0:
             desired_sources = min(desired_sources, MAX_SOURCE_LINKS)
         allowed_pdf_names = _allowed_source_pdf_names()
-        display_counter = 1
+        # The alias number IS the retrieval index, not a separate running counter.
+        # The model cites by the number it was shown, which is the position in the
+        # tool payload's `citations` list — i.e. the position in last_results. A
+        # second counter that only advanced for *linkable* sources drifted from it
+        # the moment a chunk had no resolvable PDF: the answer said "Quelle 5" while
+        # the alias said "Quelle 4", so _normalize_source_alias_mentions looked up a
+        # number no alias carried and left the citation as plain text.
+        #
+        # Consequence, accepted deliberately: the panel can show gaps (Quelle 2, 3,
+        # 5) when a retrieved chunk cannot be linked. A number that matches what the
+        # model read is worth more than a consecutive one — and a gap is a true
+        # statement about the context.
         for idx, result in enumerate(last_results, start=1):
             file_name = extract_source_file(result.metadata)
             if not file_name:
@@ -3826,11 +3837,21 @@ async def main(message: cl.Message):
                         url_by_index[idx] = existing_url
                 continue
             file_path = _resolve_source_pdf_path(file_name, allowed_pdf_names)
+            if file_path is None:
+                # A retrieved chunk whose file is not on disk gets no alias, so any
+                # citation the model writes for it stays plain text — silently. That
+                # is worth saying out loud: it means the index and the document
+                # folder disagree, which no check reports today.
+                print(
+                    f"[WARN] citation_unlinkable source_file={file_name!r} "
+                    f"cited_as=Quelle {idx} — file not found under sources.data_dir, "
+                    f"so this citation cannot be made clickable"
+                )
             if file_path is not None:
                 page_end = result.metadata.get("page_end") if isinstance(result.metadata.get("page_end"), int) else None
                 section_title = _resolve_section_title(result.metadata)
                 page_start = extract_page(result.metadata)
-                alias = _source_alias(display_counter, section_title, page_start, page_end)
+                alias = _source_alias(idx, section_title, page_start, page_end)
                 pdf_url = _source_pdf_url(file_name)
                 if isinstance(page, int):
                     pdf_url = f"{pdf_url}#page={page}"
@@ -3840,7 +3861,7 @@ async def main(message: cl.Message):
                 alias_to_url[alias] = pdf_url
                 source_rows.append(
                     (
-                        display_counter,
+                        idx,
                         alias,
                         file_name,
                         page_start,
@@ -3860,7 +3881,6 @@ async def main(message: cl.Message):
                         "evidence": evidence_snippet if isinstance(evidence_snippet, str) else None,
                     }
                 )
-                display_counter += 1
                 seen_links.add(key)
             if desired_sources and len(seen_links) >= desired_sources:
                 break

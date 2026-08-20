@@ -143,3 +143,38 @@ def test_a_single_over_budget_chunk_is_delivered_whole_and_says_so(monkeypatch, 
 def test_nothing_is_logged_on_the_happy_path(capsys):
     render_context([_chunk("short enough")])
     assert "context_budget" not in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# Citation numbering: the alias number must be the number the model was shown
+# --------------------------------------------------------------------------- #
+def test_the_alias_number_is_the_retrieval_index_not_a_running_counter():
+    """The model cites by the number in the tool payload's citation list, which is
+    the position in last_results. A separate counter that only advanced for
+    *linkable* sources drifted the moment a chunk had no resolvable PDF, so the
+    answer said "Quelle 5" while the panel said "Quelle 4" — a link to the right
+    document under the wrong number, and an unreliable lookup by number."""
+    import app
+
+    # Retrieval positions 2 and 5 are unlinkable; 1, 3 and 4 are fine.
+    linkable = {1: ("Intro", 1, None), 3: ("Methods", 5, 6), 4: ("Results", 7, None)}
+    alias_by_index = {
+        idx: app._source_alias(idx, sec, start, end)
+        for idx, (sec, start, end) in linkable.items()
+    }
+
+    numbers = [a.split(":")[0] for a in alias_by_index.values()]
+    assert numbers == ["Quelle 1", "Quelle 3", "Quelle 4"], (
+        "gaps are correct: a number that matches the context the model read is "
+        "worth more than a consecutive one"
+    )
+
+    # A citation for a gap position stays as written — there is no file to link to.
+    unchanged = app._normalize_source_alias_mentions("siehe Quelle 2: X (S.1)", alias_by_index)
+    assert unchanged == "siehe Quelle 2: X (S.1)"
+
+    # A citation for a linkable position is repaired to the exact alias, whatever
+    # spelling the model used for the page.
+    for written in ("Quelle 3: Methods (S.5)", "Quelle 3: Methoden (Seite 5-6)"):
+        repaired = app._normalize_source_alias_mentions(written, alias_by_index)
+        assert repaired == "Quelle 3: Methods (S.5-6)", written
