@@ -39,6 +39,10 @@ retrieval:
   prefetch_limit: 30 # candidates per leg before merging
 ```
 
+The bundled `examples/papers` instance ships with these set, so a fresh clone runs
+hybrid retrieval and can compare it against `hybrid: false` by restarting. The schema
+default stays off, so an existing instance keeps its behaviour until you opt in.
+
 Ingest writes the lexical vector into every collection it *creates* — it is a locally
 computed word count and costs nothing — so for those, `hybrid` is a pure query-time
 switch: flip it, restart, compare, flip it back. No re-ingest, and one collection can

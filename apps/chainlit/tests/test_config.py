@@ -36,6 +36,11 @@ def test_papers_example_enables_all_features():
     assert cfg.tools.enabled == [
         "search", "list_documents", "fetch_document", "expand_context", "verify_claim"
     ]
+    # hybrid retrieval — the example is where it is demonstrated, so it stays on
+    # here even though the schema default is off
+    assert cfg.retrieval.hybrid is True
+    assert cfg.retrieval.fusion == "rrf"
+    assert cfg.retrieval.prefetch_limit >= cfg.retrieval.max_top_k
     # figure handling incl. inline placement
     assert cfg.images.mode == "describe"
     assert cfg.images.inline_figures is True

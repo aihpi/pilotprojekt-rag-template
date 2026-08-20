@@ -40,6 +40,11 @@ retrieval:
   prefetch_limit: 30 # Kandidaten pro Zweig vor dem Zusammenführen
 ```
 
+Die mitgelieferte Instanz `examples/papers` bringt diese Werte schon mit: ein frischer
+Clone sucht hybrid und kann per Neustart gegen `hybrid: false` vergleichen. Die
+Schema-Vorgabe bleibt aus, eine bestehende Instanz verhält sich also unverändert, bis
+du sie einschaltest.
+
 Der Ingest schreibt den lexikalischen Vektor in jede Collection, die er **neu
 anlegt** — er ist eine lokal berechnete Wortzählung und kostet nichts. Für diese ist
 `hybrid` damit ein reiner Anfrage-Schalter: umlegen, neu starten, vergleichen,
