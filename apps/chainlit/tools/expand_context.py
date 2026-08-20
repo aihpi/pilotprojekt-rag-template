@@ -54,7 +54,7 @@ def _schema(cfg: "RagConfig") -> dict[str, Any]:
 
 @register_tool("expand_context", build_schema=_schema)
 async def _expand_context(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-    from rag_tool import build_context, expand_context, format_citations
+    from rag_tool import expand_context, render_context
 
     source_file = str(args.get("source_file") or "")
     raw_index = args.get("section_index")
@@ -76,12 +76,16 @@ async def _expand_context(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     results = await expand_context(
         source_file, section_index, window=window, collection=ctx.collection
     )
+    context, cites, kept = render_context(results)
     payload = {
         "source_file": source_file,
         "section_index": section_index,
         "window": window,
-        "chunks": len(results),
-        "context": build_context(results),
-        "citations": format_citations(results),
+        "chunks": len(kept),
+        "context": context,
+        "citations": cites,
     }
-    return ToolResult(payload=payload, results=results, step_output={"chunks": len(results)})
+    step: dict[str, Any] = {"chunks": len(kept)}
+    if len(results) != len(kept):
+        step["omitted"] = len(results) - len(kept)
+    return ToolResult(payload=payload, results=kept, step_output=step)

@@ -81,11 +81,25 @@ def extract_page(payload: dict[str, Any]) -> int | None:
     return None
 
 
-def _clean_text(text: str, max_len: int = 1200) -> str:
-    text = re.sub(r"\s+", " ", text).strip()
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3].rstrip() + "..."
+def _normalize(text: str) -> str:
+    """Collapse whitespace. Deliberately does not truncate.
+
+    It used to cut every chunk to the first 1200 characters, which meant the
+    lexical index matched the *stored* text while the model read a shorter copy.
+    A term past that point was unreachable: `ab15898` sits at offset 2312 of its
+    chunk, so search ranked that chunk first and the answer was still "not in the
+    documents". `expand_context` could not recover it either — widening adds more
+    chunks, each cut the same way, and never revisits the one it already had.
+
+    Chunk size is the chunker's decision (`chunking.max_chars`, doubled by the
+    heading/semantic oversize guard). A second, smaller limit here undid it. The
+    bound that remains is `tools.max_context_chars`, applied per rendered context
+    by dropping whole chunks — see `render_context`.
+
+    Whitespace collapse has to happen here and before any budgeting: `_result_key`
+    in app.py keys deduplication on the first 120 characters of this output.
+    """
+    return re.sub(r"\s+", " ", text).strip()
 
 
 # The per-collection metadata points (the embed-model sentinel and the file
@@ -224,7 +238,7 @@ async def retrieve(
                 payload["_embedding"] = dense
         hits.append(
             RagResult(
-                text=_clean_text(text),
+                text=_normalize(text),
                 score=float(hit.score),
                 metadata=payload,
             )
@@ -309,6 +323,64 @@ def build_context(results: list[RagResult], *, figure_markers: bool | None = Non
                 entry = f"{entry}\n{figure_markers_mod.MARKER_CONTEXT_LABEL}: {token}"
         lines.append(entry)
     return "\n\n".join(lines)
+
+
+def render_context(
+    results: list[RagResult], *, figure_markers: bool | None = None
+) -> tuple[str, str, list[RagResult]]:
+    """Render the model context and its citation list from ONE list of results.
+
+    Returns ``(context, citations, kept)``. Callers must put ``kept`` into
+    ``ToolResult.results`` so the payload, the citation numbering, the aggregation
+    and the citation panel all describe the same chunks.
+
+    Rendering them together is the point, not a convenience. ``build_context`` and
+    ``format_citations`` each number from 1 independently, so trimming one and not
+    the other lets the model cite ``[15]`` for a chunk it never received — the same
+    two-copies-of-the-truth defect that made a term at offset 2312 unreachable.
+
+    The budget (``tools.max_context_chars``) drops **whole chunks from the tail**.
+    A chunk is the unit the chunker chose; cutting inside one is the bug this
+    replaces. A single chunk larger than the entire budget is kept anyway, over
+    budget and logged: returning nothing reads to the model as "not found", which is
+    precisely the failure being removed.
+    """
+    budget = get_config().tools.max_context_chars
+    kept: list[RagResult] = []
+    used = 0
+    for result in results:
+        cost = len(result.text)
+        if kept and used + cost > budget:
+            break
+        kept.append(result)
+        used += cost
+
+    dropped = len(results) - len(kept)
+    context = build_context(kept, figure_markers=figure_markers)
+
+    if dropped:
+        print(
+            f"[WARN] context_budget_trim results_in={len(results)} kept={len(kept)} "
+            f"dropped={dropped} chars={used} budget={budget}"
+        )
+        # Told to the model, not just the log: it can ask something narrower instead
+        # of answering from a context whose edge it cannot see.
+        context += (
+            f"\n\n[Kontext gekürzt: {dropped} von {len(results)} Abschnitten "
+            f"weggelassen (Budget {budget} Zeichen). Stelle eine engere Frage "
+            f"oder nutze expand_context für einen bestimmten Abschnitt.]"
+        )
+    elif used > budget:
+        # ponytail: a single chunk over the whole budget is delivered whole. Only
+        # reachable via `passthrough` (never splits) or non-PDF `docling_hybrid`.
+        # If this fires in practice, the fix is at ingest (bound the chunker), not
+        # here — splitting at delivery is the defect this function exists to undo.
+        print(
+            f"[WARN] context_budget_single_chunk_over chars={used} budget={budget} "
+            f"— delivered whole; bound the chunker instead"
+        )
+
+    return context, format_citations(kept), kept
 
 
 def format_citations(results: list[RagResult]) -> str:
@@ -446,7 +518,7 @@ async def fetch_document(
         text = _extract_text(payload)
         if not text:
             continue
-        results.append(RagResult(text=_clean_text(text, max_len=4000), score=1.0, metadata=payload))
+        results.append(RagResult(text=_normalize(text), score=1.0, metadata=payload))
     return results
 
 
@@ -470,6 +542,17 @@ async def expand_context(
     if not selected:
         selected = [p for p in points if (p.payload or {}).get("section_index") == section_index]
     selected.sort(key=_section_order_key)
+    # The window is floored at 0 by the tool but never ceilinged, so the model can
+    # ask for one large enough to return the whole document. Rule: expand_context
+    # can never return more than fetch_document would. Reuses that field rather
+    # than adding a knob; render_context bounds what actually reaches the model.
+    cap = get_config().tools.fetch_max_chunks
+    if len(selected) > cap:
+        print(
+            f"[WARN] expand_context_window_clamped source_file={source_file!r} "
+            f"window={window} selected={len(selected)} cap={cap}"
+        )
+        selected = selected[:cap]
     results: list[RagResult] = []
     for point in selected:
         payload = dict(point.payload or {})
@@ -478,7 +561,7 @@ async def expand_context(
         text = _extract_text(payload)
         if not text:
             continue
-        results.append(RagResult(text=_clean_text(text), score=1.0, metadata=payload))
+        results.append(RagResult(text=_normalize(text), score=1.0, metadata=payload))
     return results
 
 

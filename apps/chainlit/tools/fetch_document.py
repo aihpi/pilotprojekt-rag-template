@@ -49,7 +49,7 @@ def _schema(cfg: "RagConfig") -> dict[str, Any]:
 
 @register_tool("fetch_document", build_schema=_schema)
 async def _fetch_document(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-    from rag_tool import build_context, fetch_document, format_citations
+    from rag_tool import fetch_document, render_context
 
     source_file = str(args.get("source_file") or "")
     if not source_file:
@@ -66,11 +66,15 @@ async def _fetch_document(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             results=[],
         )
     truncated = len(results) >= cap
+    context, cites, kept = render_context(results)
     payload = {
         "source_file": source_file,
-        "chunks": len(results),
+        "chunks": len(kept),
         "truncated": truncated,
-        "context": build_context(results),
-        "citations": format_citations(results),
+        "context": context,
+        "citations": cites,
     }
-    return ToolResult(payload=payload, results=results, step_output={"chunks": len(results)})
+    step: dict[str, Any] = {"chunks": len(kept)}
+    if len(results) != len(kept):
+        step["omitted"] = len(results) - len(kept)
+    return ToolResult(payload=payload, results=kept, step_output=step)

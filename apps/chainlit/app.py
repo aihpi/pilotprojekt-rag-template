@@ -61,7 +61,7 @@ from native_chat import (
     upsert_feedback,
 )
 from config import get_config
-from rag_tool import build_context, context_with_source, extract_page, extract_source_file, retrieve
+from rag_tool import context_with_source, extract_page, extract_source_file, render_context, retrieve
 from figure_markers import (
     build_figure_candidates,
     figure_display_name,
@@ -2924,7 +2924,12 @@ def _rebuild_system_prompt_in_session() -> None:
     user_profile = cl.user_session.get("user_profile")
     system_prompt = _build_full_system_prompt(chat_profile_config, user_profile)
 
-    messages = cl.user_session.get("messages") or []
+    # A copy, not the session's list: `messages` is mutated in place below and there
+    # is no try/except around chat(), so an oversized request would otherwise leave
+    # the oversized history in the session and every later question would fail the
+    # same way until reload. The only path that skips the set() at the end of main()
+    # is an exception, so success is byte-identical and only failure is forgotten.
+    messages = list(cl.user_session.get("messages") or [])
     if messages and messages[0].get("role") == "system":
         messages[0]["content"] = system_prompt or ""
     elif system_prompt:
@@ -3698,7 +3703,7 @@ async def main(message: cl.Message):
                 last_results, _img_cfg, limit=_img_cfg.images.max_attach_images
             )
             if attach_figures and _model_is_vision_capable(active_model, _img_cfg):
-                vision_context = build_context(last_results[: max(TOP_K, 8)])
+                vision_context, _, _ = render_context(last_results[: max(TOP_K, 8)])
                 user_parts: list[dict[str, Any]] = [
                     {
                         "type": "text",
@@ -3745,7 +3750,7 @@ async def main(message: cl.Message):
                 "aggregated_hits=",
                 len(last_results),
             )
-            final_context = build_context(last_results[: max(TOP_K, 8)])
+            final_context, _, _ = render_context(last_results[: max(TOP_K, 8)])
             _fig_hint = _figure_marker_system_message(last_results)
             forced_messages = [
                 *messages,

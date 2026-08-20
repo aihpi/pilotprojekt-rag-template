@@ -147,7 +147,7 @@ async def answer_question(
     if getattr(current, "tool_calls", None):
         # Round cap hit: force a final answer from what was collected, exactly as
         # the app's safety stop does (app.py, "tool_round_limit_reached").
-        from rag_tool import build_context
+        from rag_tool import render_context
 
         forced = [
             *history,
@@ -157,7 +157,7 @@ async def answer_question(
             )},
             {"role": "user", "content": (
                 f"Frage: {question}\n\n"
-                f"Kontext:\n{build_context(results[: max(TOP_K, 8)])}\n\n"
+                f"Kontext:\n{render_context(results[: max(TOP_K, 8)])[0]}\n\n"
                 "Antworte auf Deutsch mit Quellenhinweisen [1], [2], ..."
             )},
         ]

@@ -352,7 +352,27 @@ class ToolsConfig(BaseModel):
     descriptions: dict[str, str] = Field(default_factory=dict)
     """tool_id -> OpenAI function description override (``search`` uses ``tool:``)."""
     fetch_max_chunks: int = Field(default=200, ge=1)
-    """Whole-document size cap for ``fetch_document`` (guards context blow-up)."""
+    """Whole-document chunk cap for ``fetch_document``. Bounds the Qdrant scroll —
+    it does **not** bound what reaches the model; ``max_context_chars`` does."""
+    max_context_chars: int = Field(default=120000, ge=1000)
+    """Character budget for one rendered tool context, enforced by dropping **whole
+    chunks** from the tail — never by cutting inside a chunk.
+
+    Sized from the model's context window, not from the corpus: ~30k tokens at the
+    conventional chars/4, roughly a quarter of a 128k window, leaving room for the
+    system prompt, the conversation so far and the answer. That is deliberately
+    above the largest real document this corpus produces (~99,000 chars for a
+    102-chunk paper), so ``fetch_document`` keeps its contract of returning a whole
+    document. It bounds the case no window could take: ``fetch_max_chunks`` (200) x
+    the chunker's ceiling (6000) is 1.2M chars, ~300k tokens.
+
+    **Lower it if your gateway serves a smaller window.** Nothing can detect this —
+    the gateway advertises no context length for any model — so this is the one knob
+    that has to be set by hand for a 32k deployment.
+
+    Cutting inside a chunk is what this replaces: a fixed 1200-char cut made 37% of
+    the corpus searchable but never deliverable, and a term at offset 2312 was
+    invisible even though search had ranked its chunk first."""
     expand_window: int = Field(default=1, ge=0)
     """Default neighbor window for ``expand_context``."""
 

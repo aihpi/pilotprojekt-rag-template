@@ -47,7 +47,7 @@ def _schema(cfg: "RagConfig") -> dict[str, Any]:
 
 @register_tool("verify_claim", build_schema=_schema)
 async def _verify_claim(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-    from rag_tool import build_context, format_citations, verify_claim
+    from rag_tool import render_context, verify_claim
 
     claim = str(args.get("claim") or "")
     if not claim:
@@ -56,12 +56,14 @@ async def _verify_claim(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     results, supported = await verify_claim(
         claim, filters=dict(ctx.filters), collection=ctx.collection
     )
+    context, cites, kept = render_context(results)
     payload = {
         "claim": claim,
         "supported": supported,
-        "context": build_context(results),
-        "citations": format_citations(results),
+        "context": context,
+        "citations": cites,
     }
-    return ToolResult(
-        payload=payload, results=results, step_output={"supported": supported, "hits": len(results)}
-    )
+    step = {"supported": supported, "hits": len(kept)}
+    if len(results) != len(kept):
+        step["omitted"] = len(results) - len(kept)
+    return ToolResult(payload=payload, results=kept, step_output=step)
