@@ -158,13 +158,23 @@ can be pointed at a new corpus without touching Python.
 
   The cap was also the only bound on the payload, so `tools.max_context_chars`
   replaces it — default 120000, derived from the model's context window rather than
-  from one corpus, and above the largest measured real payload. It drops **whole
-  chunks from the tail**, never mid-text, and tells the assistant it did. A single
-  chunk larger than the entire budget is delivered whole and over budget with a
-  loud log, because splitting it is the bug being fixed and returning nothing reads
-  as "not found". Context and citations are now rendered by one function returning
-  both, so a dropped chunk cannot leave the assistant citing a source it never
-  received.
+  from one corpus, and above the largest measured real payload. It bounds the text
+  the assistant actually receives, provenance lines and numbering included, and
+  drops **whole chunks from the tail**, never mid-text, saying so in the context
+  when it does. A single chunk larger than the entire budget is delivered whole and
+  over budget with a loud log, because splitting it is the bug being fixed and
+  returning nothing reads as "not found". Context and citations are rendered by one
+  function returning both, so a dropped chunk cannot leave the assistant citing a
+  source it never received.
+
+  `expand_context` is bounded too, by `tools.fetch_max_chunks` — it can never return
+  more than `fetch_document` would. The window it keeps is **centred on the section
+  that was asked about**, so clamping a large window cannot hand back the start of
+  the document instead of the passage in question.
+
+  **Lower `max_context_chars` if your gateway serves a smaller window than 128k.**
+  Nothing can detect this — the gateway advertises no context length for any model
+  — so it is the one setting a 32k deployment has to change by hand.
 - **Sources were numbered by display order, so citations pointed at the wrong
   document.** The assistant cites the retrieval index it was given, while the panel
   renumbered from one as it rendered — with hybrid retrieval reordering results,
