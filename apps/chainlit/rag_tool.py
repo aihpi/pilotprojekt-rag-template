@@ -5,11 +5,20 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
+from qdrant_client.models import (
+    FieldCondition,
+    Filter,
+    Fusion,
+    FusionQuery,
+    MatchAny,
+    MatchValue,
+    Prefetch,
+)
 
 import citations
 import figure_markers as figure_markers_mod
 from config import get_config
+from kb.sparse import SPARSE_VECTOR, sparse_query_vector
 from llm import embed
 from settings import (
     QDRANT_API_KEY,
@@ -27,6 +36,10 @@ if TYPE_CHECKING:
 class RagResult:
     text: str
     score: float
+    """Cosine similarity, except under ``retrieval.hybrid``, where it is a fused
+    rank score (RRF: ``sum(1/(rank+2))`` per leg, so 1.0 at best, 0.5 for a
+    top hit found by one leg only). Comparable *within* one query's results in
+    both modes; only the cosine form is comparable against a fixed threshold."""
     metadata: dict[str, Any]
 
 
@@ -68,11 +81,25 @@ def extract_page(payload: dict[str, Any]) -> int | None:
     return None
 
 
-def _clean_text(text: str, max_len: int = 1200) -> str:
-    text = re.sub(r"\s+", " ", text).strip()
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3].rstrip() + "..."
+def _normalize(text: str) -> str:
+    """Collapse whitespace. Deliberately does not truncate.
+
+    It used to cut every chunk to the first 1200 characters, which meant the
+    lexical index matched the *stored* text while the model read a shorter copy.
+    A term past that point was unreachable: `ab15898` sits at offset 2312 of its
+    chunk, so search ranked that chunk first and the answer was still "not in the
+    documents". `expand_context` could not recover it either — widening adds more
+    chunks, each cut the same way, and never revisits the one it already had.
+
+    Chunk size is the chunker's decision (`chunking.max_chars`, doubled by the
+    heading/semantic oversize guard). A second, smaller limit here undid it. The
+    bound that remains is `tools.max_context_chars`, applied per rendered context
+    by dropping whole chunks — see `render_context`.
+
+    Whitespace collapse has to happen here and before any budgeting: `_result_key`
+    in app.py keys deduplication on the first 120 characters of this output.
+    """
+    return re.sub(r"\s+", " ", text).strip()
 
 
 # The per-collection metadata points (the embed-model sentinel and the file
@@ -94,6 +121,7 @@ async def retrieve(
     source_scope: str | None = None,
     standard_id: str | None = None,
     include_vectors: bool = False,
+    hybrid: bool | None = None,
 ) -> list[RagResult]:
     """Retrieve documents matching the query.
 
@@ -106,6 +134,10 @@ async def retrieve(
         source_scope: Deprecated shim, folded into ``filters``
         standard_id: Deprecated shim, folded into ``filters``
         include_vectors: If True, include embedding vectors in results (for personalization)
+        hybrid: Override ``retrieval.hybrid``. ``False`` forces dense-only, which
+            keeps ``score`` on the cosine scale — pass it when a caller compares
+            the score against an absolute threshold rather than ranking within
+            one result set.
 
     Returns:
         List of RagResult objects
@@ -132,27 +164,61 @@ async def retrieve(
             must.append(FieldCondition(key=key, match=MatchValue(value=value)))
     query_filter = Filter(must=must, must_not=_EXCLUDE_META) if must else _META_FILTER
 
-    response = client.query_points(
-        collection_name=target,
-        query=vector,
-        limit=k,
-        score_threshold=SCORE_THRESHOLD,
-        with_payload=True,
-        with_vectors=include_vectors,
-        query_filter=query_filter,
-    )
+    use_hybrid = cfg.retrieval.hybrid if hybrid is None else hybrid
+    if use_hybrid:
+        # Raises if this collection cannot serve hybrid. Startup checks the
+        # configured collection, but `collection` is overridable per call, so this
+        # stays a real check — cached, so it costs one probe per collection.
+        from kb.ingestion_pipeline import verify_hybrid_compatible
+
+        verify_hybrid_compatible(client, target, hybrid=True)
+
+    def _query(active_filter):
+        if not use_hybrid:
+            return client.query_points(
+                collection_name=target,
+                query=vector,
+                limit=k,
+                score_threshold=SCORE_THRESHOLD,
+                with_payload=True,
+                with_vectors=include_vectors,
+                query_filter=active_filter,
+            )
+        # score_threshold belongs on the dense leg, never on the fused query: a
+        # fused score is `sum(1/(rank+2))` over the legs (measured against Qdrant
+        # 1.18 — 1.0 at best, 0.5 for a top hit found by one leg only), so a
+        # cosine-calibrated threshold applied after fusion filters on a different
+        # scale than it was tuned for. The lexical leg gets no threshold at all
+        # because it has no comparable score — see RetrievalConfig.score_threshold.
+        # The filter has to ride on both legs too, or the _meta sentinel and
+        # manifest re-enter the candidate pool (see tests/test_retrieval_meta.py).
+        return client.query_points(
+            collection_name=target,
+            prefetch=[
+                Prefetch(
+                    query=vector,
+                    limit=cfg.retrieval.prefetch_limit,
+                    score_threshold=SCORE_THRESHOLD,
+                    filter=active_filter,
+                ),
+                Prefetch(
+                    query=sparse_query_vector(query),
+                    using=SPARSE_VECTOR,
+                    limit=cfg.retrieval.prefetch_limit,
+                    filter=active_filter,
+                ),
+            ],
+            query=FusionQuery(fusion=Fusion(cfg.retrieval.fusion)),
+            limit=k,
+            with_payload=True,
+            with_vectors=include_vectors,
+        )
+
+    response = _query(query_filter)
     points = list(response.points or [])
     if not points and must:
         # Compatibility fallback for collections without the filtered fields.
-        response = client.query_points(
-            collection_name=target,
-            query=vector,
-            limit=k,
-            score_threshold=SCORE_THRESHOLD,
-            with_payload=True,
-            with_vectors=include_vectors,
-            query_filter=_META_FILTER,
-        )
+        response = _query(_META_FILTER)
         points = list(response.points or [])
 
     hits: list[RagResult] = []
@@ -163,11 +229,16 @@ async def retrieve(
             continue
         # Store embedding vector if requested (for personalization scoring)
         if include_vectors and hit.vector is not None:
-            if isinstance(hit.vector, list):
-                payload["_embedding"] = hit.vector
+            # A collection declaring a named sparse vector returns a dict keyed by
+            # vector name, with the unnamed dense vector under "" — so a bare-list
+            # check alone silently yields no embedding on every hybrid-capable
+            # collection.
+            dense = hit.vector.get("") if isinstance(hit.vector, dict) else hit.vector
+            if isinstance(dense, list):
+                payload["_embedding"] = dense
         hits.append(
             RagResult(
-                text=_clean_text(text),
+                text=_normalize(text),
                 score=float(hit.score),
                 metadata=payload,
             )
@@ -252,6 +323,75 @@ def build_context(results: list[RagResult], *, figure_markers: bool | None = Non
                 entry = f"{entry}\n{figure_markers_mod.MARKER_CONTEXT_LABEL}: {token}"
         lines.append(entry)
     return "\n\n".join(lines)
+
+
+#: What ``build_context`` adds around each entry: the ``[n] `` prefix and the blank
+#: line joining entries. Counted so ``max_context_chars`` bounds the rendered text
+#: rather than just the sum of the chunk bodies.
+_ENTRY_OVERHEAD = 8
+
+
+def render_context(
+    results: list[RagResult], *, figure_markers: bool | None = None
+) -> tuple[str, str, list[RagResult]]:
+    """Render the model context and its citation list from ONE list of results.
+
+    Returns ``(context, citations, kept)``. Callers must put ``kept`` into
+    ``ToolResult.results`` so the payload, the citation numbering, the aggregation
+    and the citation panel all describe the same chunks.
+
+    Rendering them together is the point, not a convenience. ``build_context`` and
+    ``format_citations`` each number from 1 independently, so trimming one and not
+    the other lets the model cite ``[15]`` for a chunk it never received — the same
+    two-copies-of-the-truth defect that made a term at offset 2312 unreachable.
+
+    The budget (``tools.max_context_chars``) drops **whole chunks from the tail**.
+    A chunk is the unit the chunker chose; cutting inside one is the bug this
+    replaces. A single chunk larger than the entire budget is kept anyway, over
+    budget and logged: returning nothing reads to the model as "not found", which is
+    precisely the failure being removed.
+    """
+    budget = get_config().tools.max_context_chars
+    kept: list[RagResult] = []
+    used = 0
+    for result in results:
+        # The provenance line and the "[n] " prefix are part of what the model is
+        # given, so they are part of the budget. Counting result.text alone put a
+        # 200-chunk render 11,670 chars over a 120,000 budget with nothing dropped.
+        # Residual: build_context adds a marker line for figure chunks only, still
+        # uncounted — tens of chars each, not thousands.
+        cost = len(context_with_source(result)) + _ENTRY_OVERHEAD
+        if kept and used + cost > budget:
+            break
+        kept.append(result)
+        used += cost
+
+    dropped = len(results) - len(kept)
+    context = build_context(kept, figure_markers=figure_markers)
+
+    if dropped:
+        print(
+            f"[WARN] context_budget_trim results_in={len(results)} kept={len(kept)} "
+            f"dropped={dropped} chars={used} budget={budget}"
+        )
+        # Told to the model, not just the log: it can ask something narrower instead
+        # of answering from a context whose edge it cannot see.
+        context += (
+            f"\n\n[Kontext gekürzt: {dropped} von {len(results)} Abschnitten "
+            f"weggelassen (Budget {budget} Zeichen). Stelle eine engere Frage "
+            f"oder nutze expand_context für einen bestimmten Abschnitt.]"
+        )
+    if used > budget:
+        # ponytail: a single chunk over the whole budget is delivered whole. Only
+        # reachable via `passthrough` (never splits) or non-PDF `docling_hybrid`.
+        # If this fires in practice, the fix is at ingest (bound the chunker), not
+        # here — splitting at delivery is the defect this function exists to undo.
+        print(
+            f"[WARN] context_budget_single_chunk_over chars={used} budget={budget} "
+            f"— delivered whole; bound the chunker instead"
+        )
+
+    return context, format_citations(kept), kept
 
 
 def format_citations(results: list[RagResult]) -> str:
@@ -389,7 +529,7 @@ async def fetch_document(
         text = _extract_text(payload)
         if not text:
             continue
-        results.append(RagResult(text=_clean_text(text, max_len=4000), score=1.0, metadata=payload))
+        results.append(RagResult(text=_normalize(text), score=1.0, metadata=payload))
     return results
 
 
@@ -413,6 +553,25 @@ async def expand_context(
     if not selected:
         selected = [p for p in points if (p.payload or {}).get("section_index") == section_index]
     selected.sort(key=_section_order_key)
+    # The window is floored at 0 by the tool but never ceilinged, so the model can
+    # ask for one large enough to return the whole document. Rule: expand_context
+    # can never return more than fetch_document would. Reuses that field rather
+    # than adding a knob; render_context bounds what actually reaches the model.
+    cap = get_config().tools.fetch_max_chunks
+    if len(selected) > cap:
+        print(
+            f"[WARN] expand_context_window_clamped source_file={source_file!r} "
+            f"window={window} selected={len(selected)} cap={cap}"
+        )
+        # Nearest the requested section, not the head of the document. `selected` is
+        # sorted ascending, so `selected[:cap]` dropped the anchor itself whenever
+        # section_index sat more than `cap` chunks into the window — the tool then
+        # returned a window that did not contain the section it was asked about.
+        selected = sorted(
+            selected,
+            key=lambda p: abs((p.payload or {}).get("section_index", section_index) - section_index),
+        )[:cap]
+        selected.sort(key=_section_order_key)
     results: list[RagResult] = []
     for point in selected:
         payload = dict(point.payload or {})
@@ -421,7 +580,7 @@ async def expand_context(
         text = _extract_text(payload)
         if not text:
             continue
-        results.append(RagResult(text=_clean_text(text), score=1.0, metadata=payload))
+        results.append(RagResult(text=_normalize(text), score=1.0, metadata=payload))
     return results
 
 
@@ -433,8 +592,16 @@ async def verify_claim(
     top_k: int | None = None,
 ) -> tuple[list[RagResult], bool]:
     """Re-retrieve for a drafted claim; return (evidence, supported). ``supported``
-    is a soft signal — the model still reads the evidence."""
-    results = await retrieve(claim, top_k or TOP_K, filters=filters, collection=collection)
+    is a soft signal — the model still reads the evidence.
+
+    Forces dense-only retrieval: this is the one caller that compares ``score``
+    against an absolute floor, and a fused rank score does not live on that
+    scale. Under hybrid, a top hit scores 0.5 by position alone, so the floor
+    would pass every non-empty result set and the guard would stop guarding.
+    """
+    results = await retrieve(
+        claim, top_k or TOP_K, filters=filters, collection=collection, hybrid=False
+    )
     floor = max(SCORE_THRESHOLD, 0.3)
     supported = any(r.score >= floor for r in results)
     return results, supported

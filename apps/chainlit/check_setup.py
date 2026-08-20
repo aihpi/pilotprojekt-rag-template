@@ -338,6 +338,44 @@ def check_qdrant(url: str) -> Result:
     return result
 
 
+def check_hybrid_collection(config) -> Result:
+    """Can the configured collection actually serve hybrid retrieval?
+
+    `check_qdrant` only proves the index answers; it never opens the collection.
+    A collection built before hybrid existed, or by a different lexical format,
+    matches nothing on the lexical half — so hybrid looks enabled and does not
+    work. The app refuses to start in that state, which is unhelpful to discover
+    after a deploy; this is the preflight that says so first.
+    """
+    collection = config.vector_store.collection
+    result = Result(name=f"Hybrid search for collection '{collection}'")
+    if not config.retrieval.hybrid:
+        result.skipped = "retrieval.hybrid is off"
+        return result
+
+    from kb.ingestion_pipeline import get_client, verify_hybrid_compatible
+
+    try:
+        verify_hybrid_compatible(get_client(), collection, hybrid=True)
+    except RuntimeError as exc:
+        result.error = _short(str(exc))
+        result.cause = "Hybrid search is switched on, but this collection cannot serve it."
+        result.steps = [
+            "Run 'docker compose run --rm ingest python -m kb.ingest' — it rebuilds "
+            "a collection in this state by itself",
+            "Or set retrieval.hybrid: false in your config to stay with semantic search",
+            "Run 'make check' again",
+        ]
+        return result
+    except Exception as exc:  # noqa: BLE001 — reachability is check_qdrant's job
+        result.skipped = f"could not be checked ({_short(str(exc))})"
+        return result
+
+    result.ok = True
+    result.attempts = result.passed = 1
+    return result
+
+
 def _tiny_png_data_uri() -> str:
     from PIL import Image, ImageDraw
 
@@ -429,6 +467,7 @@ def run(*, skip_vision: bool = False) -> list[Result]:
         )
     probes.append(vision)
     probes.append(check_qdrant(QDRANT_URL))
+    probes.append(check_hybrid_collection(config))
 
     for result in probes[1:]:
         print(result.line())

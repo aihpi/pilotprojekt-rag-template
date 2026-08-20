@@ -19,6 +19,7 @@ from kb.chunkers import get_chunker
 from kb.chunkers.base import Chunk
 from kb.parsers import get_parser
 from kb.parsers.base import FileGate, file_gate
+from kb.sparse import SPARSE_FORMAT, SPARSE_VECTOR, sparse_vector
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ def _distance(name: str):
 
 
 def _ensure_collection(client, name: str, size: int, distance: str, recreate: bool) -> None:
-    from qdrant_client.models import VectorParams
+    from qdrant_client.models import Modifier, SparseVectorParams, VectorParams
 
     if recreate and collection_exists(client, name):
         client.delete_collection(collection_name=name, timeout=60)
@@ -127,7 +128,107 @@ def _ensure_collection(client, name: str, size: int, distance: str, recreate: bo
         client.create_collection(
             collection_name=name,
             vectors_config=VectorParams(size=size, distance=_distance(distance)),
+            # Every new collection gets the sparse (lexical) vector, whether or
+            # not hybrid search is on: the vector is a locally computed word
+            # count, so writing it costs nothing, and its presence makes
+            # `retrieval.hybrid` a pure query-time switch — no re-ingest to turn
+            # it on later, and one collection can A/B dense vs. fused retrieval.
+            # IDF is applied server-side, which is why the client only ever
+            # sends term frequencies (see kb/sparse.py).
+            sparse_vectors_config={SPARSE_VECTOR: SparseVectorParams(modifier=Modifier.IDF)},
         )
+
+
+def lexical_rebuild_reason(client, collection: str, *, hybrid: bool) -> str | None:
+    """Why ``collection`` must be rebuilt before it can be searched lexically, or None.
+
+    Two ways a collection is unusable, both of which otherwise fail *silently* —
+    the lexical leg simply matches nothing, so hybrid degrades to dense while the
+    config (and the header chip) still say it is on:
+
+    * it predates lexical vectors, and an existing collection cannot gain one;
+    * it was written by a different lexical format, so its stored token ids do not
+      match the ones this code computes.
+
+    ``hybrid`` gates only the first. A dense-only collection is perfectly usable
+    with the switch off — ingest keeps writing plain dense points into it — so
+    calling it broken there would demand a full re-embed nobody asked for. The
+    format check is ungated: ingest writes lexical vectors into any collection whose
+    schema has them, so a mismatch would mix two formats in one index and then
+    overwrite the recorded version, leaving a corpus no later check can diagnose.
+    """
+    if not collection_exists(client, collection):
+        return None  # nothing to conflict with; ingest will build it correctly
+
+    has_sparse = _supports_sparse(client, collection)
+    if hybrid and not has_sparse:
+        return (
+            f"Collection '{collection}' has no lexical vector, but retrieval.hybrid is "
+            f"on. It was built before hybrid search existed and cannot gain one, so the "
+            f"lexical half of every query would match nothing."
+        )
+    if has_sparse:
+        stored = (_read_sentinel(client, collection) or {}).get("sparse_format")
+        # A missing key means the collection predates versioning — tolerated, exactly
+        # as a missing embed_model is below.
+        if stored is not None and stored != SPARSE_FORMAT:
+            return (
+                f"Collection '{collection}' was built with lexical format {stored}, but "
+                f"this version writes {SPARSE_FORMAT}. Its stored terms would not match "
+                f"the ones queries compute, so hybrid search would silently find "
+                f"nothing — and ingesting into it would mix the two formats."
+            )
+    return None
+
+
+_verified_hybrid: set[tuple[str, bool]] = set()
+
+
+def verify_hybrid_compatible(client, collection: str, *, hybrid: bool) -> None:
+    """Raise unless ``collection`` can serve hybrid retrieval as configured.
+
+    For readers that cannot fix the problem themselves — the app, the query path,
+    ``make check``. Ingest calls :func:`lexical_rebuild_reason` instead and rebuilds.
+
+    A collection's answer cannot change without a re-ingest, so a success is cached;
+    a failure is not, and neither is a lookup error. Keyed on the flag too, since
+    ``hybrid`` decides whether the missing-vector case counts as broken.
+    """
+    if (collection, hybrid) in _verified_hybrid:
+        return
+
+    reason = lexical_rebuild_reason(client, collection, hybrid=hybrid)
+    if reason:
+        raise RuntimeError(
+            f"{reason} Run 'docker compose run --rm ingest python -m kb.ingest' — it "
+            f"rebuilds a collection in this state automatically. Or set "
+            f"retrieval.hybrid: false to stay with semantic search."
+        )
+    _verified_hybrid.add((collection, hybrid))
+
+
+def _count_points(client, name: str) -> int | str:
+    """Point count for the rebuild log; never the reason a rebuild fails."""
+    try:
+        return client.count(collection_name=name).count
+    except Exception:  # noqa: BLE001 — a log detail, not a precondition
+        return "an unknown number of"
+
+
+def _supports_sparse(client, name: str) -> bool:
+    """Whether the collection declares our sparse vector.
+
+    Collections created before sparse vectors existed are dense-only, and Qdrant
+    rejects a point carrying a vector name the collection does not declare — so
+    incremental ingest into an old collection must keep writing plain dense.
+
+    A lookup failure propagates deliberately: guessing "legacy" on error would
+    write dense-only points into a sparse-capable collection, leaving permanent
+    silent gaps in the lexical index. The collection exists at every call site
+    (``_ensure_collection`` ran first), so a failure here is a real fault.
+    """
+    params = client.get_collection(name).config.params
+    return SPARSE_VECTOR in (params.sparse_vectors or {})
 
 
 def _ensure_payload_indexes(client, name: str, fields: list[str]) -> None:
@@ -219,8 +320,18 @@ def _write_sentinel(client, name: str, embed_model: str, size: int, vector: list
         points=[
             PointStruct(
                 id=_point_id(_SENTINEL_KEY),
+                # Deliberately a bare dense vector, never the dict form used for
+                # chunks: _manifest_vector reuses this point's vector and gates on
+                # isinstance(vector, list). A dict here makes it return None, the
+                # manifest is never stored, and every later run re-embeds the whole
+                # corpus.
                 vector=vector,
-                payload={"_meta": True, "embed_model": embed_model, "vector_size": size},
+                payload={
+                    "_meta": True,
+                    "embed_model": embed_model,
+                    "vector_size": size,
+                    "sparse_format": SPARSE_FORMAT,
+                },
             )
         ],
     )
@@ -274,9 +385,24 @@ async def ingest_chunks(
     _ensure_payload_indexes(client, collection, payload_indexes or [])
     _write_sentinel(client, collection, embed_model, len(first_vec), first_vec)
 
+    # Legacy dense-only collections (created before sparse vectors) reject named
+    # vectors, so attach the lexical vector only where the schema declares it.
+    has_sparse = _supports_sparse(client, collection)
+
+    def _vector(dense: list[float], text: str):
+        if not has_sparse:
+            return dense
+        return {"": dense, SPARSE_VECTOR: sparse_vector(text)}
+
     client.upsert(
         collection_name=collection,
-        points=[PointStruct(id=_point_id(chunks[0].doc_id), vector=first_vec, payload=_payload(chunks[0]))],
+        points=[
+            PointStruct(
+                id=_point_id(chunks[0].doc_id),
+                vector=_vector(first_vec, chunks[0].text),
+                payload=_payload(chunks[0]),
+            )
+        ],
     )
 
     start = 1
@@ -292,7 +418,7 @@ async def ingest_chunks(
             total += n
         vectors = await embed([c.text for c in batch])
         points = [
-            PointStruct(id=_point_id(c.doc_id), vector=v, payload=_payload(c))
+            PointStruct(id=_point_id(c.doc_id), vector=_vector(v, c.text), payload=_payload(c))
             for c, v in zip(batch, vectors, strict=True)
         ]
         try:
@@ -495,6 +621,27 @@ async def ingest_all(
     config = config or get_config()
     collection = config.vector_store.collection
     client = get_client()
+
+    # Ingest is the one caller that can fix a stale lexical index, so it does rather
+    # than telling the reader to re-run it with a flag. Checked here and not in
+    # ingest_chunks because an unchanged corpus never reaches that call, and "code
+    # updated, documents untouched" is exactly how a mismatch arrives. `config`, not
+    # get_config() — `kb.ingest --config other.yaml` need not be the process singleton.
+    if not recreate:
+        reason = lexical_rebuild_reason(client, collection, hybrid=config.retrieval.hybrid)
+        if reason:
+            # Loud, and with the cost named: this discards every point and re-embeds
+            # the corpus, which is billed gateway traffic. Silence here would look
+            # like an ordinary incremental run that inexplicably took an hour.
+            existing = _count_points(client, collection)
+            print(f"[ingest] {reason}")
+            print(
+                f"[ingest] rebuilding '{collection}' automatically: {existing} existing "
+                f"point(s) will be discarded and the corpus re-embedded. This is the "
+                f"only way to add a lexical vector to an existing collection."
+            )
+            recreate = True
+
     exists = collection_exists(client, collection)
 
     manifest: dict[str, str] = {}

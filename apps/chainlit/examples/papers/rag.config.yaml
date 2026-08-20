@@ -38,6 +38,10 @@ models:
   selectable_chat_models: []
 
 vector_store:
+  # Every ingest writes the lexical vector, whether `retrieval.hybrid` is on or
+  # off — it is a local word count and costs nothing. A collection built before
+  # that was true has none and cannot gain one, so ingest rebuilds it for you on
+  # the next run; no flag, though it does re-embed the corpus and says so.
   collection: papers
 
 data_sources:
@@ -66,6 +70,32 @@ data_sources:
 
 retrieval:
   top_k: 5
+
+  # --- Hybrid search -------------------------------------------------------- #
+  # A lexical (keyword) search runs alongside the semantic one and the two
+  # rankings are fused. On here because this corpus is made of what embeddings
+  # are worst at: catalogue numbers (ab15898), chemical names, cell lines. An
+  # embedding maps those to "generic lab methods"; the exact string is the only
+  # signal. Measured on these nine papers, top-1 correct document over 30 such
+  # terms: 76% -> 93% when asked as a question, 50% -> 90% for the bare term.
+  #
+  # Costs no model, no GPU and no new dependency — the lexical vector is a word
+  # count, and Qdrant applies the IDF weighting server-side.
+  #
+  # Set `false` for semantic search only. Either way the stored data is the same,
+  # so flipping this needs no re-ingest — one collection serves both modes and you
+  # can A/B them by restarting.
+  hybrid: true
+  # How two rankings become one. `rrf` fuses on rank position and is the robust
+  # default; `dbsf` fuses on distribution-normalized scores and can win when one
+  # of the two searches is clearly stronger. Measure before switching.
+  fusion: rrf
+  # Candidates each search contributes before fusion. Must be >= max_top_k (which
+  # defaults to top_k). 30 into 5 is a sane start; raising it costs a little query
+  # time and nothing else.
+  prefetch_limit: 30
+  # -------------------------------------------------------------------------- #
+
   # Lets the `search` tool scope to a single document via its `document` argument.
   filterable_fields: [source_file]
 

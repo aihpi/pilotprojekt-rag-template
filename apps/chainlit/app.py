@@ -61,7 +61,7 @@ from native_chat import (
     upsert_feedback,
 )
 from config import get_config
-from rag_tool import build_context, context_with_source, extract_page, extract_source_file, retrieve
+from rag_tool import context_with_source, extract_page, extract_source_file, render_context, retrieve
 from figure_markers import (
     build_figure_candidates,
     figure_display_name,
@@ -2145,6 +2145,105 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+def _retrieval_fields(cfg) -> dict:
+    """The retrieval settings both the chip and its YAML report. One definition, so
+    the panel cannot show a mode the copied config does not."""
+    return {
+        "top_k": cfg.retrieval.top_k,
+        "score_threshold": cfg.retrieval.score_threshold,
+        "hybrid": cfg.retrieval.hybrid,
+        "fusion": cfg.retrieval.fusion,
+        "prefetch_limit": cfg.retrieval.prefetch_limit,
+    }
+
+
+def _config_yaml(cfg) -> str:
+    """The active settings as a pasteable config skeleton, for the chip's copy button.
+
+    Built from the same curated fields the chip displays, deliberately **not** from
+    ``cfg.model_dump()``: the real config object carries ``models.litellm_api_key``
+    and ``vector_store.api_key``, and a copy button is exactly the wrong place to
+    learn that. Nothing secret can reach here because nothing secret is collected.
+
+    Each data source keeps its name, format, glob and *effective* chunking — the
+    fields worth comparing between two configs. ``path`` is dropped: it is the one
+    field that cannot transfer, and the schema requires it, so a paste fails with
+    ``data_sources.0.path — Field required``, which names what to supply.
+    """
+    import yaml
+
+    from tools import enabled_tool_ids
+
+    def source_entry(src):
+        chunking = src.chunking or cfg.chunking
+        block = {
+            "strategy": chunking.strategy,
+            "max_chars": chunking.max_chars,
+            "overlap": chunking.overlap,
+            "min_section_chars": chunking.min_section_chars,
+        }
+        # Strategy-specific knobs only where they do something, so the output does
+        # not imply a percentile matters to fixed_size.
+        if chunking.strategy == "semantic":
+            block["semantic_breakpoint_percentile"] = chunking.semantic_breakpoint_percentile
+        if chunking.strategy == "docling_hybrid" and chunking.hybrid_max_tokens is not None:
+            block["hybrid_max_tokens"] = chunking.hybrid_max_tokens
+        entry = {"name": src.name, "format": src.format}
+        if src.glob:
+            entry["glob"] = src.glob
+        entry["chunking"] = block
+        return entry
+
+    body = {
+        "name": cfg.name,
+        "language": cfg.language,
+        "models": {
+            "chat_model": cfg.models.chat_model,
+            "fallback_chat_model": cfg.models.fallback_chat_model,
+            "embed_model": cfg.models.embed_model,
+        },
+        "vector_store": {"collection": cfg.vector_store.collection},
+        "data_sources": [source_entry(src) for src in cfg.data_sources],
+        "retrieval": _retrieval_fields(cfg),
+        "images": {"mode": cfg.images.mode, "vision_model": cfg.images.vision_model},
+        "tools": {"enabled": enabled_tool_ids(cfg)},
+    }
+    # No header comment: the point is a config you can paste straight in, and three
+    # lines of preamble is three lines to delete every time.
+    return yaml.safe_dump(body, sort_keys=False, default_flow_style=False, allow_unicode=True)
+
+
+def _config_info_payload(cfg) -> dict:
+    """What the ``/config-info`` header chip shows. Pure so it is testable
+    without booting Chainlit. ``chat_model`` is the instance default — users
+    may override it per-user in the settings panel."""
+    from config.loader import resolve_config_path
+    from tools import enabled_tool_ids
+
+    return {
+        "name": cfg.name,
+        # Resolved through the loader's own helper: this chip is only worth having
+        # if it cannot disagree with the loader about which file is loaded.
+        "config_path": str(resolve_config_path()),
+        "language": cfg.language,
+        "collection": cfg.vector_store.collection,
+        "chat_model": cfg.models.chat_model,
+        "embed_model": cfg.models.embed_model,
+        "sources": [
+            {
+                "name": src.name,
+                "format": src.format,
+                "chunking": (src.chunking or cfg.chunking).strategy,
+            }
+            for src in cfg.data_sources
+        ],
+        "retrieval": _retrieval_fields(cfg),
+        "images_mode": cfg.images.mode,
+        "tools": enabled_tool_ids(cfg),
+        "yaml": _config_yaml(cfg),
+    }
+
+
 @cl.on_app_startup
 async def on_app_startup() -> None:
     global SYSTEM_PROMPT
@@ -2191,7 +2290,59 @@ async def on_app_startup() -> None:
         TOP_K,
         "| mode: simple_docling",
     )
+    # Refuse to serve a collection that cannot answer as configured, rather than
+    # running degraded while the config and the header chip both claim hybrid is on.
+    # Ingest cannot catch this case: someone edits the config and restarts only the app.
+    _startup_cfg = get_config()
+    if _startup_cfg.retrieval.hybrid:
+        from kb.ingestion_pipeline import get_client, verify_hybrid_compatible
+
+        try:
+            # to_thread: the check makes blocking Qdrant calls, and this runs on the
+            # event loop during startup.
+            await asyncio.to_thread(
+                verify_hybrid_compatible,
+                get_client(),
+                _startup_cfg.vector_store.collection,
+                hybrid=True,
+            )
+        except RuntimeError:
+            raise  # a real incompatibility — refuse to serve it
+        except Exception as exc:  # noqa: BLE001
+            # Only the incompatibility is worth refusing to start over. The check
+            # talks to Qdrant, and compose only waits for that container to *start*,
+            # not to accept connections — so a cold start, a restart or a blip would
+            # otherwise take the whole app down over a healthy collection. The
+            # cached query-path check runs again later and still refuses then.
+            print(
+                f"[STARTUP] could not verify hybrid support for "
+                f"'{_startup_cfg.vector_store.collection}' yet: {exc}"
+            )
+
     from chainlit.server import app as chainlit_fastapi_app
+
+    # Registered before the DATABASE_URL early return below: this route reads the
+    # config singleton and touches no database, and auth_callback has an env-var
+    # fallback, so a no-database instance still has logged-in users who would
+    # otherwise get a header chip that never resolves.
+    if not getattr(chainlit_fastapi_app.state, "config_info_route_added", False):
+
+        @chainlit_fastapi_app.get("/config-info")
+        async def config_info(current_user=Depends(get_current_user)):
+            """The active instance configuration, for the header chip in the browser.
+
+            Answers "which config is this container actually running?" without
+            shell access: instance name, models, collection and the retrieval
+            switches. Behind auth like every other route here — the values name
+            your models, collection and document folders.
+            """
+            if current_user is None:
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            return _config_info_payload(get_config())
+
+        _ensure_route_precedes_catch_all(chainlit_fastapi_app, "/config-info")
+        chainlit_fastapi_app.state.config_info_route_added = True
+        print("[STARTUP] config info route registered at /config-info")
 
     if DATABASE_URL and CHAINLIT_INIT_DB:
         await ensure_native_schema(DATABASE_URL)
@@ -2759,7 +2910,12 @@ def _rebuild_system_prompt_in_session() -> None:
     user_profile = cl.user_session.get("user_profile")
     system_prompt = _build_full_system_prompt(chat_profile_config, user_profile)
 
-    messages = cl.user_session.get("messages") or []
+    # A copy, not the session's list: `messages` is mutated in place below and there
+    # is no try/except around chat(), so an oversized request would otherwise leave
+    # the oversized history in the session and every later question would fail the
+    # same way until reload. The only path that skips the set() at the end of main()
+    # is an exception, so success is byte-identical and only failure is forgotten.
+    messages = list(cl.user_session.get("messages") or [])
     if messages and messages[0].get("role") == "system":
         messages[0]["content"] = system_prompt or ""
     elif system_prompt:
@@ -3472,13 +3628,10 @@ async def main(message: cl.Message):
                     cached_tool_payloads[signature] = (results, tool_payload)
 
                 for item in results:
-                    key = _result_key(item)
-                    existing = aggregated_by_key.get(key)
-                    if existing is None:
-                        aggregated_by_key[key] = item
-                        continue
-                    if float(getattr(item, "score", 0.0) or 0.0) > float(getattr(existing, "score", 0.0) or 0.0):
-                        aggregated_by_key[key] = item
+                    # First writer wins. The score comparison this replaces preferred
+                    # fetch_document's placeholder 1.0 over a real similarity, so it
+                    # swapped in that tool's longer 4000-char copy of the same chunk.
+                    aggregated_by_key.setdefault(_result_key(item), item)
 
                 messages.append(
                     {
@@ -3514,11 +3667,16 @@ async def main(message: cl.Message):
                 bool(getattr(current_msg, "tool_calls", None)),
             )
 
-        last_results = sorted(
-            aggregated_by_key.values(),
-            key=lambda r: float(getattr(r, "score", 0.0) or 0.0),
-            reverse=True,
-        )
+        # Deliberately unsorted. `score` is not comparable across tools: search
+        # returns a similarity (or a fused rank under retrieval.hybrid), while
+        # fetch_document and expand_context did no relevance matching at all and
+        # report a placeholder 1.0 — which used to sort a journal header above the
+        # passage that answered the question, and past the max_source_links cut.
+        # Insertion order is meaningful instead: dicts preserve it and retrieve()
+        # appends in Qdrant's relevance order, so search hits stay ranked and land
+        # ahead of a whole-document dump. Trade-off: two separate search calls group
+        # by call rather than interleaving by similarity.
+        last_results = list(aggregated_by_key.values())
 
         # attach mode: if figures are retrieved and the active chat model can see
         # images, produce the final answer with a multimodal vision pass (mirrors
@@ -3531,7 +3689,7 @@ async def main(message: cl.Message):
                 last_results, _img_cfg, limit=_img_cfg.images.max_attach_images
             )
             if attach_figures and _model_is_vision_capable(active_model, _img_cfg):
-                vision_context = build_context(last_results[: max(TOP_K, 8)])
+                vision_context, _, _ = render_context(last_results[: max(TOP_K, 8)])
                 user_parts: list[dict[str, Any]] = [
                     {
                         "type": "text",
@@ -3578,7 +3736,7 @@ async def main(message: cl.Message):
                 "aggregated_hits=",
                 len(last_results),
             )
-            final_context = build_context(last_results[: max(TOP_K, 8)])
+            final_context, _, _ = render_context(last_results[: max(TOP_K, 8)])
             _fig_hint = _figure_marker_system_message(last_results)
             forced_messages = [
                 *messages,
@@ -3638,7 +3796,21 @@ async def main(message: cl.Message):
         if MAX_SOURCE_LINKS > 0:
             desired_sources = min(desired_sources, MAX_SOURCE_LINKS)
         allowed_pdf_names = _allowed_source_pdf_names()
-        display_counter = 1
+        # Warn once per file, not once per chunk: a missing document usually supplies
+        # several of the retrieved chunks.
+        unlinkable_files: set[str] = set()
+        # The alias number IS the retrieval index, not a separate running counter.
+        # The model cites by the number it was shown, which is the position in the
+        # tool payload's `citations` list — i.e. the position in last_results. A
+        # second counter that only advanced for *linkable* sources drifted from it
+        # the moment a chunk had no resolvable PDF: the answer said "Quelle 5" while
+        # the alias said "Quelle 4", so _normalize_source_alias_mentions looked up a
+        # number no alias carried and left the citation as plain text.
+        #
+        # Consequence, accepted deliberately: the panel can show gaps (Quelle 2, 3,
+        # 5) when a retrieved chunk cannot be linked. A number that matches what the
+        # model read is worth more than a consecutive one — and a gap is a true
+        # statement about the context.
         for idx, result in enumerate(last_results, start=1):
             file_name = extract_source_file(result.metadata)
             if not file_name:
@@ -3654,11 +3826,22 @@ async def main(message: cl.Message):
                         url_by_index[idx] = existing_url
                 continue
             file_path = _resolve_source_pdf_path(file_name, allowed_pdf_names)
+            if file_path is None and file_name not in unlinkable_files:
+                unlinkable_files.add(file_name)
+                # A retrieved chunk whose file is not on disk gets no alias, so any
+                # citation the model writes for it stays plain text — silently. That
+                # is worth saying out loud: it means the index and the document
+                # folder disagree, which no check reports today.
+                print(
+                    f"[WARN] citation_unlinkable source_file={file_name!r} "
+                    f"cited_as=Quelle {idx} — file not found under sources.data_dir, "
+                    f"so this citation cannot be made clickable"
+                )
             if file_path is not None:
                 page_end = result.metadata.get("page_end") if isinstance(result.metadata.get("page_end"), int) else None
                 section_title = _resolve_section_title(result.metadata)
                 page_start = extract_page(result.metadata)
-                alias = _source_alias(display_counter, section_title, page_start, page_end)
+                alias = _source_alias(idx, section_title, page_start, page_end)
                 pdf_url = _source_pdf_url(file_name)
                 if isinstance(page, int):
                     pdf_url = f"{pdf_url}#page={page}"
@@ -3668,7 +3851,7 @@ async def main(message: cl.Message):
                 alias_to_url[alias] = pdf_url
                 source_rows.append(
                     (
-                        display_counter,
+                        idx,
                         alias,
                         file_name,
                         page_start,
@@ -3688,7 +3871,6 @@ async def main(message: cl.Message):
                         "evidence": evidence_snippet if isinstance(evidence_snippet, str) else None,
                     }
                 )
-                display_counter += 1
                 seen_links.add(key)
             if desired_sources and len(seen_links) >= desired_sources:
                 break

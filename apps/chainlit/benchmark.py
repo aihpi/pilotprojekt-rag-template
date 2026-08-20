@@ -126,28 +126,28 @@ async def answer_question(
                 results, payload = tool_result.results, tool_result.payload
                 cached[signature] = (results, payload)
             for item in results:
-                key = _result_key(item)
-                existing = aggregated.get(key)
-                if existing is None or (
-                    float(getattr(item, "score", 0.0) or 0.0)
-                    > float(getattr(existing, "score", 0.0) or 0.0)
-                ):
-                    aggregated[key] = item
+                # First writer wins, mirroring app.py. The score comparison this
+                # replaces preferred fetch_document's placeholder 1.0 over a real
+                # similarity, so it swapped in that tool's longer 4000-char copy.
+                aggregated.setdefault(_result_key(item), item)
             history.append({"role": "tool", "tool_call_id": tool_call.id,
                             "content": json.dumps(payload, ensure_ascii=False)})
         followup = await chat(history, tools=schemas, tool_choice="auto", model=model)
         current = followup.choices[0].message
 
-    results = sorted(
-        aggregated.values(),
-        key=lambda r: float(getattr(r, "score", 0.0) or 0.0),
-        reverse=True,
-    )
+    # Deliberately unsorted, mirroring app.py — a replay has to order results the
+    # same way the app does or its scores describe a different pipeline. `score` is
+    # not comparable across tools: search returns a similarity (or a fused rank
+    # under retrieval.hybrid), while fetch_document and expand_context did no
+    # relevance matching and report a placeholder 1.0. Insertion order is
+    # meaningful instead: dicts preserve it and retrieve() appends in Qdrant's
+    # relevance order.
+    results = list(aggregated.values())
 
     if getattr(current, "tool_calls", None):
         # Round cap hit: force a final answer from what was collected, exactly as
         # the app's safety stop does (app.py, "tool_round_limit_reached").
-        from rag_tool import build_context
+        from rag_tool import render_context
 
         forced = [
             *history,
@@ -157,7 +157,7 @@ async def answer_question(
             )},
             {"role": "user", "content": (
                 f"Frage: {question}\n\n"
-                f"Kontext:\n{build_context(results[: max(TOP_K, 8)])}\n\n"
+                f"Kontext:\n{render_context(results[: max(TOP_K, 8)])[0]}\n\n"
                 "Antworte auf Deutsch mit Quellenhinweisen [1], [2], ..."
             )},
         ]
@@ -196,7 +196,11 @@ async def run_job(
     job_id = job.get("id")
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        gold = (await client.get(f"{base}/api/gold")).json()["gold"]
+        # Checked, unlike the progress posts below: a failed fetch here otherwise
+        # surfaces as KeyError('gold') from an error body, naming nothing useful.
+        gold_response = await client.get(f"{base}/api/gold")
+        gold_response.raise_for_status()
+        gold = gold_response.json()["gold"]
         total = sum(len(g["turns"]) for g in gold)
         done = failed = 0
         if report and job_id:

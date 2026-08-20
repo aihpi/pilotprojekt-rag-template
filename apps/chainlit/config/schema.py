@@ -211,6 +211,23 @@ class RetrievalConfig(BaseModel):
     """Upper bound the model may request. Defaults to ``top_k`` when unset."""
     max_source_links: int = Field(default=8, ge=0)
     score_threshold: float = Field(default=0.0, ge=0.0)
+    """Minimum cosine similarity for a hit. With ``hybrid`` on this bounds the
+    **dense leg only** — the lexical leg has no comparable score, so a chunk that
+    matches lexically can enter the fused results below this similarity."""
+    hybrid: bool = False
+    """Search dense *and* sparse (lexical) vectors and fuse the two rankings.
+    Helps where embeddings are weakest: standard numbers, compound technical
+    terms, proper names. Ingest always writes the sparse vector, so this is a
+    pure query-time switch — except for collections created before sparse
+    vectors existed, which need one re-ingest with ``--recreate`` first."""
+    fusion: Literal["rrf", "dbsf"] = "rrf"
+    """``hybrid`` only. ``rrf`` fuses on rank position, ``dbsf`` on
+    distribution-normalized scores. RRF is the safer default; DBSF can win when
+    one of the two retrievers is clearly stronger. Measure before switching."""
+    prefetch_limit: int = Field(default=30, ge=1)
+    """``hybrid`` only: candidates each leg retrieves before fusion. Must be at
+    least ``max_top_k`` (enforced when ``hybrid`` is on) — below it, two legs
+    returning the same candidates can fuse to fewer than ``top_k`` results."""
     payload_indexes: list[str] = Field(default_factory=list)
     """Metadata fields to build Qdrant keyword indexes on."""
     filterable_fields: list[str] = Field(default_factory=list)
@@ -223,6 +240,15 @@ class RetrievalConfig(BaseModel):
         elif self.max_top_k < self.top_k:
             raise ValueError(
                 f"retrieval.max_top_k ({self.max_top_k}) must be >= top_k ({self.top_k})"
+            )
+        # Only when hybrid is on: prefetch_limit is a fusion knob, and enforcing it
+        # unconditionally rejected configs that never read it — a plain
+        # `max_top_k: 50` (or MAX_TOP_K=50 in the environment) would fail at import.
+        if self.hybrid and self.prefetch_limit < self.max_top_k:
+            raise ValueError(
+                f"retrieval.prefetch_limit ({self.prefetch_limit}) must be >= "
+                f"max_top_k ({self.max_top_k}) when retrieval.hybrid is on; a smaller "
+                f"candidate pool can fuse to fewer than top_k results"
             )
         return self
 
@@ -326,7 +352,27 @@ class ToolsConfig(BaseModel):
     descriptions: dict[str, str] = Field(default_factory=dict)
     """tool_id -> OpenAI function description override (``search`` uses ``tool:``)."""
     fetch_max_chunks: int = Field(default=200, ge=1)
-    """Whole-document size cap for ``fetch_document`` (guards context blow-up)."""
+    """Whole-document chunk cap for ``fetch_document``. Bounds the Qdrant scroll —
+    it does **not** bound what reaches the model; ``max_context_chars`` does."""
+    max_context_chars: int = Field(default=120000, ge=1000)
+    """Character budget for one rendered tool context, enforced by dropping **whole
+    chunks** from the tail — never by cutting inside a chunk.
+
+    Sized from the model's context window, not from the corpus: ~30k tokens at the
+    conventional chars/4, roughly a quarter of a 128k window, leaving room for the
+    system prompt, the conversation so far and the answer. That is deliberately
+    above the largest real document this corpus produces (~99,000 chars for a
+    102-chunk paper), so ``fetch_document`` keeps its contract of returning a whole
+    document. It bounds the case no window could take: ``fetch_max_chunks`` (200) x
+    the chunker's ceiling (6000) is 1.2M chars, ~300k tokens.
+
+    **Lower it if your gateway serves a smaller window.** Nothing can detect this —
+    the gateway advertises no context length for any model — so this is the one knob
+    that has to be set by hand for a 32k deployment.
+
+    Cutting inside a chunk is what this replaces: a fixed 1200-char cut made 37% of
+    the corpus searchable but never deliverable, and a term at offset 2312 was
+    invisible even though search had ranked its chunk first."""
     expand_window: int = Field(default=1, ge=0)
     """Default neighbor window for ``expand_context``."""
 

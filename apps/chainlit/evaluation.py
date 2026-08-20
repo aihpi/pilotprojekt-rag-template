@@ -44,14 +44,21 @@ def effective_chunking(cfg: "RagConfig") -> tuple[str, str]:
     Sources that disagree are reported as they are rather than resolved to one of
     them: several sources can feed one collection, and there is then no single true
     answer to give.
+
+    The two returned lists stay **positionally aligned**: the pairs are sorted once
+    and each field is emitted in that order. Deduplicating the fields independently
+    lost which size went with which strategy, so ``semantic/1500 + heading/3000``
+    and ``semantic/3000 + heading/1500`` — two different corpora — produced one
+    signature and pooled their scores.
     """
-    used = {
-        ((s.chunking or cfg.chunking).strategy, (s.chunking or cfg.chunking).max_chars)
-        for s in cfg.data_sources
-    } or {(cfg.chunking.strategy, cfg.chunking.max_chars)}
-    strategies = sorted({s for s, _ in used})
-    sizes = sorted({str(m) for _, m in used})
-    return "+".join(strategies), "+".join(sizes)
+    used = sorted(
+        {
+            ((s.chunking or cfg.chunking).strategy, (s.chunking or cfg.chunking).max_chars)
+            for s in cfg.data_sources
+        }
+        or {(cfg.chunking.strategy, cfg.chunking.max_chars)}
+    )
+    return "+".join(s for s, _ in used), "+".join(str(m) for _, m in used)
 
 
 def config_signature(cfg: "RagConfig", chat_model: str | None = None) -> str:
@@ -72,12 +79,30 @@ def config_signature(cfg: "RagConfig", chat_model: str | None = None) -> str:
     only by collection would otherwise share one, silently pooling scores from
     different corpora.
 
+    The retrieval mode is in for the same reason one level down: the same corpus
+    searched dense and searched hybrid is a different retrieval path, and the
+    resulting scores are not even on the same scale (cosine versus a fused rank),
+    so pooling them would average incomparable numbers.
+
+    It is encoded as one part describing what *actually ran* — ``dense``, or
+    ``hybrid:<fusion>:<prefetch_limit>`` — rather than as one field per setting.
+    ``fusion`` and ``prefetch_limit`` only mean anything when ``hybrid`` is on, so
+    listing them unconditionally split two identical dense runs apart whenever the
+    inert setting differed. And ``prefetch_limit`` does belong in the hybrid case:
+    it decides which candidates fusion ever sees, so a wider pool can surface a
+    chunk that neither leg ranked in its own top-k, changing the answer.
+
     Caveat worth knowing when reading old rows: the chunking fields describe how the
     *collection was ingested*, not how this query was served. Re-ingesting the same
     collection with different chunking leaves historical rows describing a corpus
     that no longer exists.
     """
     strategy, max_chars = effective_chunking(cfg)
+    retrieval = (
+        f"hybrid:{cfg.retrieval.fusion}:{cfg.retrieval.prefetch_limit}"
+        if cfg.retrieval.hybrid
+        else "dense"
+    )
     # "|" cannot occur in a gateway model name, in a chunking strategy (a Literal)
     # or in a Qdrant collection name, so the parts stay unambiguously splittable.
     return "|".join(
@@ -88,6 +113,7 @@ def config_signature(cfg: "RagConfig", chat_model: str | None = None) -> str:
             strategy,
             max_chars,
             cfg.vector_store.collection,
+            retrieval,
         )
     )
 

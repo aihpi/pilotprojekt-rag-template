@@ -48,7 +48,7 @@ def _schema(cfg: "RagConfig") -> dict[str, Any]:
 
 @register_tool("search", build_schema=_schema)
 async def _search(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-    from rag_tool import build_context, format_citations, retrieve
+    from rag_tool import render_context, retrieve
 
     query = str(args.get("query") or ctx.query_fallback or "")
     top_k = clamp_top_k(args.get("top_k"), ctx.default_top_k, ctx.max_top_k)
@@ -57,9 +57,8 @@ async def _search(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     if document:
         filters.setdefault("source_file", document)  # applies iff source_file is filterable
     results = await retrieve(query, top_k, filters=filters, collection=ctx.collection)
-    payload = {
-        "query": query,
-        "context": build_context(results),
-        "citations": format_citations(results),
-    }
-    return ToolResult(payload=payload, results=results)
+    context, cites, kept = render_context(results)
+    payload = {"query": query, "context": context, "citations": cites}
+    # `kept`, not `results`: the citation panel and the aggregation must describe
+    # the same chunks the model was actually given.
+    return ToolResult(payload=payload, results=kept)

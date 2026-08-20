@@ -435,3 +435,346 @@
     start();
   }
 })();
+
+/*
+ * A second chip: the active configuration, next to the watcher badge.
+ *
+ * Answers "which config is this container actually running?" from the browser —
+ * instance name in the chip, the details (models, collection, chunking,
+ * retrieval switches) in a hover panel. Lives in this file because Chainlit
+ * loads exactly one custom_js (see the header comment above).
+ *
+ * Unlike the watcher badge this is static for the process lifetime, so there is
+ * no polling: fetch until the first success (401 before login is normal), then
+ * render once and stop.
+ */
+(function () {
+  "use strict";
+
+  var ENDPOINT = "/config-info";
+  var RETRY_MS = 5000;
+  var ID = "rag-config-info";
+  var ANCHOR_IDS = ["rag-ingest-status", "readme-button"];
+
+  var info = null;
+  var pinned = false;
+  var overPanel = false;
+
+  // Two offset rounded rectangles: the conventional copy glyph, so it needs no
+  // label. A checkmark replaces it briefly on success.
+  var ICON_COPY =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    '<rect x="9" y="9" width="13" height="13" rx="2"/>' +
+    '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  var ICON_DONE =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+
+  function styles() {
+    if (document.getElementById(ID + "-styles")) return;
+    var css = document.createElement("style");
+    css.id = ID + "-styles";
+    css.textContent = [
+      /* Same furniture as the watcher badge, permanently in its neutral look. */
+      "#" + ID + "{display:inline-flex;align-items:center;gap:7px;",
+      "box-sizing:border-box;vertical-align:middle;margin-left:6px;",
+      "height:30px;padding:0 11px;border-radius:15px;",
+      "font-size:12.5px;font-weight:500;line-height:1;font-family:inherit;",
+      "max-width:min(260px,32vw);border:1px solid rgba(148,163,184,.34);",
+      "background:rgba(148,163,184,.18);color:#475569;cursor:pointer;",
+      "user-select:none;-webkit-appearance:none;appearance:none}",
+      /* It is a real <button>, so it must not lose its focus ring. */
+      "#" + ID + ":focus-visible{outline:2px solid currentColor;outline-offset:2px}",
+      /* Used only when no header anchor exists — same treatment as the badge,
+       * stacked below it, since the badge may be floating at 62px itself. */
+      "#" + ID + "[data-floating='1']{position:fixed;top:100px;right:14px;",
+      "z-index:2147483000;margin-left:0;backdrop-filter:blur(6px);",
+      "-webkit-backdrop-filter:blur(6px)}",
+      "html.dark #" + ID + ",.dark #" + ID + "{background:rgba(148,163,184,.26);",
+      "color:#e2e8f0;border-color:rgba(148,163,184,.42)}",
+      "#" + ID + " .rci-label{white-space:nowrap;overflow:hidden;",
+      "text-overflow:ellipsis}",
+      "#" + ID + " .rci-gear{font-size:12px;line-height:1;opacity:.85}",
+
+      "#" + ID + "-panel{position:fixed;z-index:2147483001;",
+      "min-width:250px;max-width:min(380px,calc(100vw - 24px));",
+      "padding:10px 12px;border-radius:12px;font-size:12px;font-weight:400;",
+      "line-height:1.5;text-align:left;color:#0f172a;background:#fff;",
+      "border:1px solid #e2e8f0;box-shadow:0 10px 28px rgba(15,23,42,.16);",
+      "opacity:0;visibility:hidden;transform:translateY(-4px);pointer-events:none;",
+      "transition:opacity .15s ease,transform .15s ease,visibility .15s}",
+      "html.dark #" + ID + "-panel,.dark #" + ID + "-panel{color:#e8eef8;",
+      "background:#111826;border-color:#2b3648;box-shadow:0 10px 28px rgba(0,0,0,.5)}",
+      // pointer-events must come back when open: the base rule sets `none` so a
+      // closed panel never eats clicks, but it also made the copy icon inside
+      // impossible to hover or click. Inherited from the badge's panel, where
+      // there is nothing interactive and so nothing to notice.
+      "#" + ID + "-panel[data-open='1']{opacity:1;visibility:visible;",
+      "transform:translateY(0);pointer-events:auto}",
+      "#" + ID + "-panel .rci-title{font-weight:600;margin-bottom:6px;",
+      "padding-right:26px}",  /* clear of the copy icon */
+      "#" + ID + "-panel .rci-row{display:flex;gap:8px;margin-top:2px}",
+      "#" + ID + "-panel .rci-key{flex:0 0 92px;opacity:.7}",
+      "#" + ID + "-panel .rci-val{word-break:break-word}",
+      "#" + ID + "-panel .rci-hint{margin-top:8px;opacity:.7}",
+      "#" + ID + "-copy{position:absolute;top:8px;right:8px;display:inline-flex;",
+      "align-items:center;justify-content:center;width:24px;height:24px;padding:0;",
+      "border-radius:6px;cursor:pointer;border:1px solid transparent;",
+      "background:transparent;color:inherit;opacity:.55;",
+      "-webkit-appearance:none;appearance:none;transition:opacity .12s,background .12s}",
+      "#" + ID + "-copy:hover{opacity:1;background:rgba(148,163,184,.38);",
+      "border-color:rgba(148,163,184,.55)}",
+      "html.dark #" + ID + "-copy:hover,.dark #" + ID + "-copy:hover{",
+      "background:rgba(148,163,184,.45);border-color:rgba(148,163,184,.6)}",
+      "#" + ID + "-copy:active{transform:scale(.92)}",
+      "#" + ID + "-copy:focus-visible{opacity:1;outline:2px solid currentColor;",
+      "outline-offset:2px}",
+      "#" + ID + "-copy[data-done='1']{opacity:1;color:#15803d;background:transparent}",
+      "html.dark #" + ID + "-copy[data-done='1'],.dark #" + ID + "-copy[data-done='1']{",
+      "color:#4ade80}",
+      "@media (max-width:560px){#" + ID + "{max-width:38vw}",
+      "#" + ID + " .rci-label{display:none}}",
+    ].join("");
+    document.head.appendChild(css);
+  }
+
+  function esc(text) {
+    var d = document.createElement("div");
+    d.textContent = text == null ? "" : String(text);
+    return d.innerHTML;
+  }
+
+  function row(key, value) {
+    return (
+      '<div class="rci-row"><span class="rci-key">' + esc(key) +
+      '</span><span class="rci-val">' + esc(value) + "</span></div>"
+    );
+  }
+
+  function panelHtml() {
+    var r = info.retrieval || {};
+    var retrieval = r.hybrid
+      ? "hybrid (" + r.fusion + ", " + r.prefetch_limit + "→" + r.top_k + ")"
+      : "dense, top_k " + r.top_k;
+    var chunking = (info.sources || [])
+      .map(function (s) { return s.name + ": " + s.chunking; })
+      .join(" · ");
+    var html = '<div class="rci-title">Active configuration</div>';
+    html += row("config", info.name + " (" + info.config_path + ")");
+    html += row("collection", info.collection);
+    html += row("chat model", info.chat_model + " (default)");
+    html += row("embedding", info.embed_model);
+    if (chunking) html += row("chunking", chunking);
+    html += row("retrieval", retrieval);
+    html += row("images", info.images_mode);
+    html += row("tools", (info.tools || []).join(", "));
+    html += '<div class="rci-hint">Set via RAG_CONFIG — restart to change.</div>';
+    html =
+      '<button type="button" id="' + ID + '-copy" title="Copy as YAML" ' +
+      'aria-label="Copy configuration as YAML">' + ICON_COPY + "</button>" + html;
+    return html;
+  }
+
+  function copyText(text) {
+    // The async clipboard API needs a secure context: localhost qualifies, a plain
+    // http:// deployment on a LAN does not. Hence the textarea fallback — the whole
+    // reason this is not a one-liner.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      if (ok) { resolve(); } else { reject(new Error("copy blocked")); }
+    });
+  }
+
+  function flash(button, ok, label) {
+    button.innerHTML = ok ? ICON_DONE : ICON_COPY;
+    button.setAttribute("data-done", ok ? "1" : "0");
+    button.setAttribute("title", label);
+    setTimeout(function () {
+      button.innerHTML = ICON_COPY;
+      button.removeAttribute("data-done");
+      button.setAttribute("title", "Copy as YAML");
+    }, 1600);
+  }
+
+  function wireCopy() {
+    var button = document.getElementById(ID + "-copy");
+    if (!button || button.getAttribute("data-wired") === "1") return;
+    button.setAttribute("data-wired", "1");
+    button.addEventListener("click", function (event) {
+      // The chip's own click handler pins/unpins the panel; without this, copying
+      // would close the panel being copied from.
+      event.stopPropagation();
+      copyText((info && info.yaml) || "")
+        .then(function () { flash(button, true, "Copied"); })
+        .catch(function () { flash(button, false, "Copy blocked — select and press Ctrl+C"); });
+    });
+  }
+
+  function panelElement() {
+    var panel = document.getElementById(ID + "-panel");
+    if (panel) return panel;
+    panel = document.createElement("div");
+    panel.id = ID + "-panel";
+    // Hovering the panel keeps it open, so the pointer can travel from the chip
+    // to the copy button without the panel vanishing on the way.
+    panel.addEventListener("mouseenter", function () { overPanel = true; });
+    panel.addEventListener("mouseleave", function () {
+      overPanel = false;
+      var el = document.getElementById(ID);
+      if (el && !pinned) setOpen(el, false);
+    });
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  function positionPanel() {
+    var el = document.getElementById(ID);
+    var panel = document.getElementById(ID + "-panel");
+    if (!el || !panel) return;
+    var r = el.getBoundingClientRect();
+    panel.style.left = "0px";
+    panel.style.top = r.bottom + 8 + "px";
+    var w = panel.offsetWidth;
+    panel.style.left =
+      Math.min(
+        Math.max(8, r.left + r.width / 2 - w / 2),
+        Math.max(8, window.innerWidth - w - 8)
+      ) + "px";
+  }
+
+  function place(el) {
+    for (var i = 0; i < ANCHOR_IDS.length; i++) {
+      var anchor = document.getElementById(ANCHOR_IDS[i]);
+      // Skip an anchor that is itself floating: inserting after an out-of-flow
+      // element would drop the chip into body flow, below the whole app.
+      if (anchor && anchor.parentNode && anchor.getAttribute("data-floating") !== "1") {
+        if (el.previousElementSibling !== anchor) {
+          anchor.parentNode.insertBefore(el, anchor.nextSibling);
+        }
+        el.removeAttribute("data-floating");
+        return;
+      }
+    }
+    // No header anchor (no readme button, or the badge is floating too). Pin to
+    // a fixed corner like the badge does, rather than appending a static button
+    // to <body> where it renders below the app and is never seen.
+    if (!el.parentNode) document.body.appendChild(el);
+    el.setAttribute("data-floating", "1");
+  }
+
+  function setOpen(el, open) {
+    var panel = panelElement();
+    if (open) {
+      panel.setAttribute("data-open", "1");
+      positionPanel();
+    } else {
+      panel.removeAttribute("data-open");
+    }
+    el.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function render() {
+    styles();
+    var el = document.getElementById(ID);
+    if (!el) {
+      // A real button, not a div: hover alone leaves keyboard and touch users
+      // with no way to read the panel, and this is the only place the active
+      // configuration is shown.
+      el = document.createElement("button");
+      el.id = ID;
+      el.type = "button";
+      el.setAttribute("aria-haspopup", "true");
+      el.setAttribute("aria-expanded", "false");
+      el.innerHTML =
+        '<span class="rci-gear" aria-hidden="true">⚙</span>' +
+        '<span class="rci-label"></span>';
+      // `pinned` is what click toggles. Reading aria-expanded instead would
+      // always find "true", because mouseenter and focus both fire before click
+      // — so a click (and every tap on a browser that focuses buttons) closed
+      // the panel it had just opened.
+      el.addEventListener("mouseenter", function () { setOpen(el, true); });
+      el.addEventListener("mouseleave", function () {
+        // Deferred: the pointer may be travelling onto the panel, which sets
+        // overPanel in its own mouseenter. Closing immediately would snatch the
+        // copy button away mid-reach.
+        setTimeout(function () {
+          if (!pinned && !overPanel) setOpen(el, false);
+        }, 80);
+      });
+      el.addEventListener("focus", function () { setOpen(el, true); });
+      el.addEventListener("blur", function () {
+        pinned = false;
+        if (!overPanel) setOpen(el, false);
+      });
+      // Tap/click pins it open, so touch — which never hovers — can read it.
+      el.addEventListener("click", function () {
+        pinned = !pinned;
+        setOpen(el, pinned);
+      });
+      el.addEventListener("keydown", function (event) {
+        // `pinned` has to clear too, or the next click reads it as "open", toggles
+        // to false, and the panel stays shut.
+        if (event.key === "Escape") {
+          pinned = false;
+          setOpen(el, false);
+        }
+      });
+    }
+    el.querySelector(".rci-label").textContent = info.name;
+    el.setAttribute("aria-label", "Active configuration: " + info.name);
+    el.setAttribute("title", info.name);
+    panelElement().innerHTML = panelHtml();
+    wireCopy();
+    place(el);
+    return el;
+  }
+
+  function fetchOnce() {
+    fetch(ENDPOINT, { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        // 401 is expected before login, so keep trying. A 404 means the route is
+        // not registered in this deployment: permanent, so stop rather than poll
+        // a missing endpoint for the lifetime of the tab.
+        if (r.status === 404) return "gone";
+        return r.ok ? r.json() : null;
+      })
+      .then(function (data) {
+        if (data === "gone") return;
+        if (!data) return setTimeout(fetchOnce, RETRY_MS);
+        info = data;
+        render();
+        // The header is React-rendered and can drop the chip entirely. Unlike the
+        // watcher badge above, this fetches once, so nothing else would ever put
+        // it back — rebuild it, do not just re-place it.
+        new MutationObserver(function () {
+          if (document.getElementById(ID)) {
+            place(document.getElementById(ID));
+          } else {
+            render();
+          }
+        }).observe(document.documentElement, { childList: true, subtree: true });
+        window.addEventListener("resize", positionPanel);
+      })
+      .catch(function () { setTimeout(fetchOnce, RETRY_MS); });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", fetchOnce);
+  } else {
+    fetchOnce();
+  }
+})();

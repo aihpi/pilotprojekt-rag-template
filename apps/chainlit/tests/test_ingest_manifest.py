@@ -208,8 +208,16 @@ class FakeClient:
         for point in points:
             self.points[point.id] = _Record(payload=point.payload, vector=point.vector)
 
-    def create_collection(self, collection_name, vectors_config=None):
+    def create_collection(self, collection_name, vectors_config=None, sparse_vectors_config=None):
         self.collections.add(collection_name)
+        self.sparse_config = sparse_vectors_config
+
+    def get_collection(self, name):
+        # Collections seeded via the constructor mimic legacy dense-only ones;
+        # those created through create_collection report what was configured.
+        sparse = getattr(self, "sparse_config", None)
+        params = type("P", (), {"sparse_vectors": dict(sparse) if sparse else None})()
+        return type("I", (), {"config": type("Cfg", (), {"params": params})()})()
 
     def delete_collection(self, collection_name, timeout=None):
         self.collections.discard(collection_name)
@@ -252,6 +260,32 @@ def test_first_ingest_writes_a_manifest(tmp_path, monkeypatch, fake_embed):
     assert result["ingested"] == 1
     stored = pipeline.read_manifest(client, "documents")
     assert list(stored) == ["docs/a.txt"]
+
+
+def test_ingest_verifies_the_config_it_was_handed_not_the_singleton(
+    tmp_path, monkeypatch, fake_embed
+):
+    """`kb.ingest --config other.yaml` loads a config that need not be the process
+    singleton, so the lexical-format check must read the argument. Pinned here
+    because ingest_all is the only place it runs: ingest_chunks used to repeat it
+    with the same collection and the same flag, which the cache made a no-op."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.txt").write_text("alpha content", encoding="utf-8")
+    config = _text_config(tmp_path)
+    config.retrieval.hybrid = True
+    config.vector_store.collection = "other"
+
+    seen: list[tuple[str, bool]] = []
+
+    def spy(client, collection, *, hybrid):
+        seen.append((collection, hybrid))
+        return None
+
+    monkeypatch.setattr(pipeline, "lexical_rebuild_reason", spy)
+    _run(config, FakeClient(), monkeypatch)
+
+    assert seen == [("other", True)]
 
 
 def test_second_run_does_nothing(tmp_path, monkeypatch, fake_embed):
@@ -619,3 +653,58 @@ def test_adoption_matches_the_pdf_naming_convention(tmp_path, monkeypatch, fake_
     _run(config, client, monkeypatch)
 
     assert "WARNING" not in capsys.readouterr().out
+
+
+def test_a_dense_only_collection_is_rebuilt_instead_of_refused(
+    tmp_path, monkeypatch, fake_embed, capsys
+):
+    """Ingest is the only caller that can fix a stale lexical index, so it does.
+    Refusing here just told the reader to re-run the same command with a flag."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.txt").write_text("alpha content", encoding="utf-8")
+    config = _text_config(tmp_path)
+    config.retrieval.hybrid = True
+
+    client = FakeClient()
+    monkeypatch.setattr(
+        pipeline, "lexical_rebuild_reason", lambda *a, **k: "no lexical vector"
+    )
+    recreated: list[bool] = []
+    real = pipeline._ensure_collection
+    monkeypatch.setattr(
+        pipeline,
+        "_ensure_collection",
+        lambda c, n, s, d, recreate: (recreated.append(recreate), real(c, n, s, d, recreate))[1],
+    )
+
+    _run(config, client, monkeypatch)
+
+    assert recreated == [True], "the collection has to be rebuilt, not written into"
+    out = capsys.readouterr().out
+    assert "no lexical vector" in out, "the reason has to be stated"
+    assert "re-embedded" in out, (
+        "the cost has to be stated — this is billed gateway traffic, and silence "
+        "makes it look like an incremental run that mysteriously took an hour"
+    )
+
+
+def test_a_healthy_collection_is_not_rebuilt(tmp_path, monkeypatch, fake_embed):
+    """The rebuild is expensive, so it must fire only on a real defect."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.txt").write_text("alpha content", encoding="utf-8")
+
+    client = FakeClient()
+    monkeypatch.setattr(pipeline, "lexical_rebuild_reason", lambda *a, **k: None)
+    recreated: list[bool] = []
+    real = pipeline._ensure_collection
+    monkeypatch.setattr(
+        pipeline,
+        "_ensure_collection",
+        lambda c, n, s, d, recreate: (recreated.append(recreate), real(c, n, s, d, recreate))[1],
+    )
+
+    _run(_text_config(tmp_path), client, monkeypatch)
+
+    assert recreated == [False], "nothing was wrong; nothing should be re-embedded"

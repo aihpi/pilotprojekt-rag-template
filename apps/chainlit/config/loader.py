@@ -122,13 +122,25 @@ def _apply_source_env_overrides(raw: dict[str, Any]) -> None:
             opts["docling_json_dir"] = docling_dir
 
 
-def load_config(path: str | Path | None = None) -> RagConfig:
-    """Load and validate a config. Uncached — use for tests / explicit paths."""
+def resolve_config_path(path: str | Path | None = None) -> Path:
+    """Which config file a load would read, absolute.
+
+    Split out of :func:`load_config` so nothing has to re-derive it: anything
+    that reports the active config (``/config-info``, diagnostics) resolves it
+    the same way the loader does, including the ``BASE_DIR`` join and the
+    empty-``RAG_CONFIG``-means-default behaviour.
+    """
     if path is None:
         path = os.getenv(CONFIG_PATH_ENV) or DEFAULT_CONFIG
     path = Path(path)
     if not path.is_absolute():
         path = (BASE_DIR / path).resolve()
+    return path
+
+
+def load_config(path: str | Path | None = None) -> RagConfig:
+    """Load and validate a config. Uncached — use for tests / explicit paths."""
+    path = resolve_config_path(path)
     if not path.is_file():
         raise FileNotFoundError(
             f"RAG config not found: {path}. Set the {CONFIG_PATH_ENV} env var "

@@ -315,3 +315,46 @@ def test_list_documents_is_navigational_and_produces_no_citations(monkeypatch):
     assert result.payload["count"] == 2
     assert result.results == []
     assert result.step_output == {"documents": 2}
+
+
+# --------------------------------------------------------------------------- #
+# Every tool that renders a context must honour the budget
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("tool_id", sorted(TOOL_REGISTRY))
+def test_every_context_producing_tool_respects_the_budget(tool_id, monkeypatch):
+    """Four call sites are four chances to forget. A fifth tool that renders a
+    context without going through render_context fails the day it is registered."""
+    import rag_tool
+
+    budget = 20000
+    monkeypatch.setattr(rag_tool.get_config().tools, "max_context_chars", budget)
+
+    oversized = [
+        rag_tool.RagResult(text="z" * 8000, score=0.5, metadata={"source_file": f"d{i}.pdf"})
+        for i in range(10)
+    ]
+
+    async def fake(*args, **kwargs):
+        return oversized
+
+    async def fake_verify(*args, **kwargs):
+        return oversized, True
+
+    monkeypatch.setattr(rag_tool, "retrieve", fake)
+    monkeypatch.setattr(rag_tool, "fetch_document", fake)
+    monkeypatch.setattr(rag_tool, "expand_context", fake)
+    monkeypatch.setattr(rag_tool, "verify_claim", fake_verify)
+    async def fake_list(**kwargs):
+        return []
+
+    monkeypatch.setattr(rag_tool, "list_documents", fake_list)
+
+    args = {"query": "q", "claim": "c", "source_file": "d0.pdf", "section_index": 1}
+    result = _run(tool_id, args)
+    context = result.payload.get("context")
+    if context is None:
+        pytest.skip(f"{tool_id} renders no context")
+
+    # Budget plus the trim notice, which is deliberately appended past the limit.
+    assert len(context) <= budget + 500, f"{tool_id} rendered {len(context)} over {budget}"
+    assert len(result.results) < len(oversized), f"{tool_id} must return only what it rendered"
