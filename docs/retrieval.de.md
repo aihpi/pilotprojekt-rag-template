@@ -13,18 +13,23 @@ beim Modell ankommt.
 
 ## Was das behebt, gemessen
 
-Acht kurze deutsche Sätze zu den BSI-Standards, zweimal indexiert — einmal rein
-dense, einmal hybrid. Gleiche Anfrage, gleicher Korpus, gleiches Embedding-Modell:
+Neun Paper, einmal indexiert. Gleicher Korpus, gleiches Embedding-Modell, gleiche
+Fragen — nur der Anfrageweg unterscheidet sich:
 
-| Anfrage | Dense, Platz 1 | Hybrid, Platz 1 |
+| Art der Anfrage | Dense | Hybrid |
 |---|---|---|
-| `BSI-Standard 200-2` | ❌ 200-1 (0,5924) — 200-2 auf Platz 2 mit 0,5902 | ✅ 200-2 (0,8333) |
-| `200-3` | ❌ 200-2 (0,4058) | ✅ 200-3 (0,8333) |
+| natürliche Frage mit einem seltenen Begriff | 76% | **93%** |
+| der Begriff allein | 50% | **90%** |
 
-Dense lag beide Male auf Platz 1 daneben, im ersten Fall mit einem Abstand von
-0,0022 — reiner Zufall. Das richtige Dokument war in den Ergebnissen, nur nicht
-vorn, und ein Assistent, der den ersten Treffer liest, antwortet aus dem falschen
-Standard.
+Top-1-Trefferquote auf das richtige Dokument, über 30 Bezeichner, die je in genau
+einem Paper eines Neun-Paper-Korpus vorkommen — Katalognummern, Zelllinien,
+Fluorophore, Chemikalien. Genau das, was ein Embedding auf „irgendwas mit
+Labormethoden" abbildet, während die exakte Zeichenkette das einzige Signal ist.
+
+Der Fehler von Dense ist kein Verfehlen, sondern ein Beinahe-Treffer: Auf
+`BSI-Standard 200-2` liefert es `200-1` auf Platz 1, mit einem Abstand von 0,0022 —
+reiner Zufall. Das richtige Dokument ist in den Ergebnissen, nur nicht vorn, und ein
+Assistent, der den ersten Treffer liest, antwortet aus dem falschen Standard.
 
 ## Einschalten
 
@@ -149,7 +154,15 @@ ist ein Begriff und nicht zwei Allerweltswörter. Dieses Detail macht den Großt
 Gewinns aus und steht in `apps/chainlit/kb/sparse.py`, falls dein Korpus anders
 tokenisiert werden muss.
 
-Bei der Anfrage wird die Frage genauso tokenisiert, beide Suchen laufen mit je
-`prefetch_limit` Treffern, und Qdrant führt sie auf `top_k` zusammen. Mit
+Bei der Anfrage wird die Frage genauso tokenisiert — **ohne Funktionswörter**. Diese
+Ausnahme ist nicht kosmetisch: Lexikalische Scores summieren sich über die
+Anfragebegriffe, also lässt „Was ist X und wofür wurde es verwendet?" einen Chunk mit
+sieben Allerweltswörtern den einen Chunk überholen, der X enthält — und weil die Fusion
+beide Hälften als gleich verlässlich behandelt, verdrängt dieses Rauschen gute
+semantische Treffer. Gemessen lag Hybrid ohne das *unter* der rein semantischen Suche
+(36% gegen 76%). Gespeicherte Chunks behalten jedes Wort; gefiltert wird nur die Frage.
+
+Beide Suchen laufen dann mit je `prefetch_limit` Treffern, und Qdrant führt sie auf
+`top_k` zusammen. Mit
 `hybrid: false` bleibt die Anfrage die gewohnte einzelne Dense-Suche — der
 lexikalische Vektor liegt dann ungenutzt bereit, bis der Schalter umgelegt wird.

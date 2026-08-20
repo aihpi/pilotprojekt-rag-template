@@ -12,17 +12,23 @@ passages, and Qdrant does the merging before anything reaches the model.
 
 ## What it fixes, measured
 
-Eight short German sentences about the BSI standards, indexed twice — once dense
-only, once hybrid. Same query, same corpus, same embedding model:
+Nine papers, ingested once. Same corpus, same embedding model, same questions —
+only the query path differs:
 
-| Query | Dense, rank 1 | Hybrid, rank 1 |
+| Query shape | Dense | Hybrid |
 |---|---|---|
-| `BSI-Standard 200-2` | ❌ 200-1 (0.5924) — 200-2 second at 0.5902 | ✅ 200-2 (0.8333) |
-| `200-3` | ❌ 200-2 (0.4058) | ✅ 200-3 (0.8333) |
+| a natural question containing a rare term | 76% | **93%** |
+| the bare term on its own | 50% | **90%** |
 
-Dense got both wrong at rank 1, and in the first case the margin was 0.0022 — a coin
-flip. The right document was in the results, just not first, and an assistant that
-reads the top hit answers from the wrong standard.
+Top-1 correct-document accuracy over 30 identifiers that each appear in exactly one
+paper of a nine-paper corpus — catalogue numbers, cell lines, fluorophores, chemical
+names. The kind of thing an embedding maps to "generic lab methods" while the exact
+string is the only signal.
+
+The failure dense produces is not a miss but a near-miss: asked for
+`BSI-Standard 200-2` it returns `200-1` at rank 1 by a margin of 0.0022 — a coin flip.
+The right document is in the results, just not first, and an assistant that reads the
+top hit answers from the wrong standard.
 
 ## Turning it on
 
@@ -140,7 +146,15 @@ and hyphenated compounds stay whole, so `BSI-Standard` is one term rather than t
 common words — that detail is most of the win, and it lives in
 `apps/chainlit/kb/sparse.py` if your corpus needs different tokenizing.
 
-At query time the question is tokenized the same way, both searches run with
-`prefetch_limit` results each, and Qdrant fuses them down to `top_k`. With
+At query time the question is tokenized the same way, **minus function words**. That
+exclusion is not cosmetic: lexical scores sum across query terms, so "Was ist X und
+wofür wurde es verwendet?" lets a chunk matching seven common words outrank the one
+chunk containing X — and because fusion treats both halves as equally authoritative,
+that noise displaces good semantic hits. Measured, without it hybrid scored *below*
+semantic search alone (36% against 76%). Stored chunks keep every word; only the
+question is filtered.
+
+Both searches then run with `prefetch_limit` results each, and Qdrant fuses them down
+to `top_k`. With
 `hybrid: false` the query is the same single dense search as always — the lexical
 vector just sits unused until you flip the switch.

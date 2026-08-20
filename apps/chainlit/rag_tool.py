@@ -18,7 +18,7 @@ from qdrant_client.models import (
 import citations
 import figure_markers as figure_markers_mod
 from config import get_config
-from kb.sparse import SPARSE_VECTOR, sparse_vector
+from kb.sparse import SPARSE_VECTOR, sparse_query_vector
 from llm import embed
 from settings import (
     QDRANT_API_KEY,
@@ -202,7 +202,7 @@ async def retrieve(
                     filter=active_filter,
                 ),
                 Prefetch(
-                    query=sparse_vector(query),
+                    query=sparse_query_vector(query),
                     using=SPARSE_VECTOR,
                     limit=cfg.retrieval.prefetch_limit,
                     filter=active_filter,

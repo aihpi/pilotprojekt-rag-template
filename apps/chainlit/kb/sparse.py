@@ -79,6 +79,54 @@ def _token_id(token: str) -> int:
     return zlib.crc32(token.encode("utf-8"))
 
 
+#: Function words stripped from the **query** only, never from stored chunks.
+#: Scores sum across query terms, so a question like "Was ist X und wofür wurde es
+#: verwendet?" lets a chunk matching seven common words outrank the one chunk that
+#: actually contains X. IDF lowers each stopword's weight but does not stop seven of
+#: them adding up — and because RRF treats both legs as equally authoritative, the
+#: noisy leg's rank-0 hit scores 0.5 and displaces good dense results. Measured on
+#: natural-language questions wrapping 30 rare identifiers: dense 76%, hybrid without
+#: this 36%, hybrid with it 80%.
+#:
+#: German and English, because those are the languages the template ships prompts for.
+#: Deliberately short and not configurable yet: a longer list risks dropping a term
+#: that matters in a domain corpus. Extend it here if a corpus needs it.
+_STOPWORDS = frozenset("""
+was ist sind war waren und oder wofür wozu wie warum weshalb wer wen wem wo wann
+welche welcher welches der die das den dem des ein eine einen einem eines
+von zu mit für auf in im am an bei aus nach vor über unter durch um gegen ohne
+er sie es ich du wir ihr man sich sein seine ihre ihren
+hat habe haben hatte wird werden wurde wurden kann können soll sollen muss müssen
+nicht auch noch nur als dass ob mehr sehr beim zur zum
+what is are was were and or for how why who whom where when which
+the a an of to with in on at by from that this these those
+be been being has have had will would can could should must
+not also only as more very about into
+""".split())
+
+
+def strip_stopwords(tokens: list[str]) -> list[str]:
+    """Query-side only. Falls back to the input when everything would be dropped —
+    a question made entirely of function words should still search for something
+    rather than send an empty vector that matches nothing."""
+    kept = [t for t in tokens if t not in _STOPWORDS]
+    return kept or tokens
+
+
+def sparse_query_vector(text: str) -> "SparseVector":
+    """Sparse vector for a QUERY: content words only.
+
+    Separate from :func:`sparse_vector` on purpose. Stored chunks keep every term —
+    stripping them there would change the stored index and need a re-ingest, and a
+    chunk's own function words are harmless because the query never asks for them.
+    """
+    from qdrant_client.models import SparseVector
+
+    counts = Counter(_token_id(t) for t in strip_stopwords(tokenize(text)))
+    indices = sorted(counts)
+    return SparseVector(indices=indices, values=[float(counts[i]) for i in indices])
+
+
 def sparse_vector(text: str) -> "SparseVector":
     """Term-frequency sparse vector; Qdrant weights it by IDF at query time.
 

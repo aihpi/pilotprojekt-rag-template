@@ -448,3 +448,56 @@ def test_hybrid_off_keeps_the_original_single_vector_query(monkeypatch):
     assert "prefetch" not in call
     assert call["score_threshold"] == 0.55
     assert call["query"] == [0.1] * 8
+
+
+# --------------------------------------------------------------------------- #
+# The query side strips function words; the stored side must not
+# --------------------------------------------------------------------------- #
+def test_the_query_vector_drops_function_words():
+    """Sparse scores sum across query terms, so a question's seven common words can
+    outrank the one chunk holding the rare term — and RRF then promotes that noise
+    to rank 0, displacing good dense hits. Measured on natural-language questions
+    wrapping 30 rare identifiers: dense 76%, hybrid without this 36%, with it 93%."""
+    from kb.sparse import sparse_query_vector, sparse_vector, strip_stopwords, tokenize
+
+    question = "Was ist carbonylcyanide-m-chlorophenylhydrazone und wofür wurde es verwendet?"
+    kept = strip_stopwords(tokenize(question))
+
+    assert "carbonylcyanide-m-chlorophenylhydrazone" in kept
+    assert not {"was", "ist", "und", "wofür", "wurde", "es"} & set(kept)
+    # The query vector is strictly smaller than the naive one.
+    assert len(sparse_query_vector(question).indices) < len(sparse_vector(question).indices)
+
+
+def test_stored_chunks_keep_every_term():
+    """Stripping the stored side would change the persisted index and need a
+    re-ingest, and a chunk's own function words are harmless because the query
+    never asks for them."""
+    from kb.sparse import sparse_query_vector, sparse_vector
+
+    chunk = "Die Zellen wurden mit dem Puffer und der Lösung inkubiert."
+    assert len(sparse_vector(chunk).indices) > len(sparse_query_vector(chunk).indices)
+
+
+def test_a_question_of_only_function_words_still_searches():
+    """An empty sparse vector matches nothing, which would silently turn hybrid into
+    dense for that query. Falling back to the full token list is the lesser evil."""
+    from kb.sparse import sparse_query_vector
+
+    assert sparse_query_vector("Was ist das und wie?").indices, "must not be empty"
+
+
+def test_the_fused_query_sends_the_stripped_sparse_vector(hybrid_client):
+    """The wiring, not just the helper: retrieve() must build its sparse leg from
+    the query-side vector. Using the ingest-side one halved accuracy on natural
+    questions (76% dense -> 36% hybrid) by letting function words dominate."""
+    from kb.sparse import sparse_query_vector, sparse_vector
+
+    question = "Was ist ab15898 und wofür wurde es verwendet?"
+    asyncio.run(rag_tool.retrieve(question, top_k=5))
+
+    _, sparse_leg = hybrid_client.calls[0]["prefetch"]
+    assert sparse_leg.query.indices == sparse_query_vector(question).indices
+    assert sparse_leg.query.indices != sparse_vector(question).indices, (
+        "the leg is carrying every function word in the question"
+    )
