@@ -80,13 +80,30 @@ def _token_id(token: str) -> int:
 
 
 #: Function words stripped from the **query** only, never from stored chunks.
-#: Scores sum across query terms, so a question like "Was ist X und wofür wurde es
-#: verwendet?" lets a chunk matching seven common words outrank the one chunk that
-#: actually contains X. IDF lowers each stopword's weight but does not stop seven of
-#: them adding up — and because RRF treats both legs as equally authoritative, the
-#: noisy leg's rank-0 hit scores 0.5 and displaces good dense results. Measured on
-#: natural-language questions wrapping 30 rare identifiers: dense 76%, hybrid without
-#: this 36%, hybrid with it 80%.
+#:
+#: IDF alone does not save us here, and it is worth knowing why before shortening this
+#: list. ``Modifier.IDF`` applies BM25's *IDF* and not its other two terms: there is no
+#: TF saturation (k1) and no length normalisation (b), so a term's contribution is
+#: ``tf * idf``, linear and unbounded in tf. Measured on the 594-chunk example corpus
+#: for "Was ist carbonylcyanide-m-chlorophenylhydrazone (CCCP) und wofür wurde es
+#: verwendet?":
+#:
+#:     winning chunk (no target term):  und tf=12 idf=1.67 -> 20.09   total 33.66
+#:     chunk holding the term:          was tf= 8 idf=1.54 -> 12.32
+#:                                      the term itself tf=1 idf=5.47 ->  5.47
+#:                                                                     total 27.16
+#:
+#: IDF ranked the terms right — 5.47 against 1.67 — and twelve repetitions still won.
+#: RRF then treats that leg as equally authoritative, so its rank-0 hit scores 0.5 and
+#: displaces correct dense results. Measured over natural-language questions wrapping
+#: 30 rare identifiers: dense 76%, hybrid without this 36%, hybrid with it 93%.
+#:
+#: Saturating the stored tf would fix the whole class rather than a listed subset, but
+#: it changes the stored values, so it needs SPARSE_FORMAT+1 and a re-ingest. Filtering
+#: the query costs neither.
+#:
+#: (German function words have nonzero df in an English corpus because figure
+#: descriptions are written in German and live in the same collection.)
 #:
 #: German and English, because those are the languages the template ships prompts for.
 #: Deliberately short and not configurable yet: a longer list risks dropping a term

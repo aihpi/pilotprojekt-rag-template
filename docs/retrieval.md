@@ -146,13 +146,18 @@ and hyphenated compounds stay whole, so `BSI-Standard` is one term rather than t
 common words — that detail is most of the win, and it lives in
 `apps/chainlit/kb/sparse.py` if your corpus needs different tokenizing.
 
-At query time the question is tokenized the same way, **minus function words**. That
-exclusion is not cosmetic: lexical scores sum across query terms, so "Was ist X und
-wofür wurde es verwendet?" lets a chunk matching seven common words outrank the one
-chunk containing X — and because fusion treats both halves as equally authoritative,
-that noise displaces good semantic hits. Measured, without it hybrid scored *below*
-semantic search alone (36% against 76%). Stored chunks keep every word; only the
-question is filtered.
+At query time the question is tokenized the same way, **minus function words**. Stored
+chunks keep every word; only the question is filtered.
+
+That exclusion is not cosmetic, and IDF does not make it unnecessary. Qdrant's
+`Modifier.IDF` applies BM25's IDF term and not its other two — there is no TF
+saturation and no length normalization — so a term contributes `tf × idf`, linear and
+unbounded in `tf`. On the example corpus, "Was ist X und wofür wurde es verwendet?"
+was won by a chunk not containing X at all: `und` occurring twelve times scored
+12 × 1.67 = 20.09, against 1 × 5.47 for the rare compound that identifies the right
+document. IDF weighted the terms correctly and still lost, because it bounds a term's
+weight and not how often one term may count. Without the filtering, hybrid measured
+*below* semantic search alone: 36% against 76%.
 
 Both searches then run with `prefetch_limit` results each, and Qdrant fuses them down
 to `top_k`. With

@@ -94,8 +94,84 @@ can be pointed at a new corpus without touching Python.
   same "Connection error" message. Without that split, a typo in `LITELLM_BASE_URL`
   gets diagnosed as a VPN problem and sends people looking in the wrong place.
 
+- **Hybrid retrieval: a lexical search alongside the semantic one, off by
+  default.** Embeddings are good at meaning and bad at exact strings — asked for
+  `BSI-Standard 200-2` a dense search returns `200-1`, because to the model those
+  two sentences mean nearly the same thing. Every chunk now also carries a
+  term-frequency vector, and with `retrieval.hybrid: true` Qdrant runs both
+  searches and fuses the rankings (`fusion: rrf` or `dbsf`, `prefetch_limit`
+  candidates per leg) before anything reaches the assistant. Measured over 30
+  identifiers each occurring in exactly one paper of nine: on natural questions
+  76% → 93% top-1, on the bare term 50% → 90%.
+
+  **No model, no GPU, no new dependency.** The lexical vector is a word count;
+  Qdrant applies the IDF weighting server-side, so there is no corpus statistic to
+  compute, store or keep in sync. Hyphenated compounds stay whole, so
+  `BSI-Standard` is one term rather than two common words — that detail is most of
+  the win, and it lives in `apps/chainlit/kb/sparse.py` if your corpus needs
+  different tokenizing. Function words are dropped from the query — not from stored
+  chunks, so no re-ingest. IDF does not make that unnecessary: Qdrant applies BM25's
+  IDF term without its TF saturation or length normalization, so a term contributes
+  `tf × idf`, unbounded in `tf`. On the example corpus, "Was ist X und wofür wurde es
+  verwendet?" was won by a chunk not containing X at all — twelve occurrences of `und`
+  scored 20.09 against 5.47 for the rare compound identifying the right document.
+  Without the filtering the feature measured 36% against dense's 76%, i.e. worse than
+  not having it.
+
+  Ingest writes the vector into every collection it creates, so for those `hybrid`
+  is a pure query-time switch — flip it, restart, compare — and one collection can
+  serve a dense-vs-hybrid A/B. A collection created before this existed is
+  dense-only and cannot gain the vector retroactively; it keeps working with
+  `hybrid: false`, and the app, ingest and `make check` all **refuse to start**
+  with `hybrid: true` rather than running dense-only behind a config that claims
+  otherwise. The same refusal covers a tokenizer change, whose format version is
+  recorded per collection and compared on every run exactly as `embed_model` is.
+  [Hybrid retrieval](https://aihpi.github.io/pilotprojekt-rag-template/retrieval/)
+  covers the settings and when a reranker becomes worth its cost.
+
+  `retrieval.score_threshold` bounds only the semantic leg — a lexical match has
+  no comparable similarity score — so with `hybrid: true` a chunk can reach the
+  assistant on one shared term. If that threshold is what keeps off-topic
+  questions unanswered, re-check it after switching on. For the same reason
+  `verify_claim` deliberately stays semantic-only: it is the one place a score is
+  compared against a fixed bar, and a fused score is a rank, not a similarity.
+- **The active configuration is visible in the header, and copyable.** A chip names
+  the instance, and opens a panel listing the models, collection, chunking
+  strategy, retrieval mode and figure handling actually in effect — resolved
+  values, after environment overrides, not what the YAML file says. One icon
+  copies it as YAML, which is what you paste into an issue when an answer looks
+  wrong.
+- **`models.fallback_chat_model`.** When the primary chat model is unreachable or
+  errors, the request is retried on this one, so a gateway hiccup on one model does
+  not take the instance down.
+
 ### Fixed
 
+- **Retrieved chunks were cut at 1200 characters, so a third of the corpus was
+  searchable but never deliverable.** A term at offset 2312 of a 3434-character
+  chunk ranked that chunk first and the assistant still answered that the term did
+  not appear in the documents — correct, from what it was given. The model's own
+  escalation could not recover it either: `expand_context` widens to more chunks,
+  each also cut at 1200, and so never returns the text it already had. 31% of
+  chunks exceeded the cap; 37% of the corpus was affected. Chunks now arrive whole,
+  as the chunker sized them.
+
+  The cap was also the only bound on the payload, so `tools.max_context_chars`
+  replaces it — default 120000, derived from the model's context window rather than
+  from one corpus, and above the largest measured real payload. It drops **whole
+  chunks from the tail**, never mid-text, and tells the assistant it did. A single
+  chunk larger than the entire budget is delivered whole and over budget with a
+  loud log, because splitting it is the bug being fixed and returning nothing reads
+  as "not found". Context and citations are now rendered by one function returning
+  both, so a dropped chunk cannot leave the assistant citing a source it never
+  received.
+- **Sources were numbered by display order, so citations pointed at the wrong
+  document.** The assistant cites the retrieval index it was given, while the panel
+  renumbered from one as it rendered — with hybrid retrieval reordering results,
+  `Quelle 3` in the text and `Quelle 3` in the sidebar were routinely different
+  papers. Both now use the retrieval index. A source whose file cannot be resolved
+  is logged rather than silently rendered as plain text, which is what made the
+  original mismatch invisible.
 - **`sources.served_extensions` did nothing.** It shipped set in three configs, was
   documented in the README and both adding-data pages with a `[.pdf, .txt, .md]`
   default, and had a test asserting that default, but the route hardcoded `.pdf`. So

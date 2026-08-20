@@ -154,13 +154,18 @@ ist ein Begriff und nicht zwei Allerweltswörter. Dieses Detail macht den Großt
 Gewinns aus und steht in `apps/chainlit/kb/sparse.py`, falls dein Korpus anders
 tokenisiert werden muss.
 
-Bei der Anfrage wird die Frage genauso tokenisiert — **ohne Funktionswörter**. Diese
-Ausnahme ist nicht kosmetisch: Lexikalische Scores summieren sich über die
-Anfragebegriffe, also lässt „Was ist X und wofür wurde es verwendet?" einen Chunk mit
-sieben Allerweltswörtern den einen Chunk überholen, der X enthält — und weil die Fusion
-beide Hälften als gleich verlässlich behandelt, verdrängt dieses Rauschen gute
-semantische Treffer. Gemessen lag Hybrid ohne das *unter* der rein semantischen Suche
-(36% gegen 76%). Gespeicherte Chunks behalten jedes Wort; gefiltert wird nur die Frage.
+Bei der Anfrage wird die Frage genauso tokenisiert — **ohne Funktionswörter**.
+Gespeicherte Chunks behalten jedes Wort; gefiltert wird nur die Frage.
+
+Diese Ausnahme ist nicht kosmetisch, und IDF macht sie nicht entbehrlich. Qdrants
+`Modifier.IDF` wendet den IDF-Term von BM25 an, nicht die beiden anderen — keine
+TF-Sättigung, keine Längennormalisierung. Ein Begriff trägt also `tf × idf` bei,
+linear und in `tf` unbegrenzt. Im Beispielkorpus gewann „Was ist X und wofür wurde es
+verwendet?" ein Chunk, der X überhaupt nicht enthält: zwölfmal `und` ergibt
+12 × 1,67 = 20,09, gegen 1 × 5,47 für das seltene Kompositum, das das richtige
+Dokument ausmacht. IDF hat die Begriffe richtig gewichtet und trotzdem verloren, denn
+es begrenzt das Gewicht eines Begriffs und nicht, wie oft ein Begriff zählen darf.
+Ohne die Filterung lag Hybrid *unter* der rein semantischen Suche: 36% gegen 76%.
 
 Beide Suchen laufen dann mit je `prefetch_limit` Treffern, und Qdrant führt sie auf
 `top_k` zusammen. Mit
