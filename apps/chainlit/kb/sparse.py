@@ -130,6 +130,14 @@ def strip_stopwords(tokens: list[str]) -> list[str]:
     return kept or tokens
 
 
+def _vector(tokens: list[str]) -> "SparseVector":
+    from qdrant_client.models import SparseVector
+
+    counts = Counter(_token_id(t) for t in tokens)
+    indices = sorted(counts)
+    return SparseVector(indices=indices, values=[float(counts[i]) for i in indices])
+
+
 def sparse_query_vector(text: str) -> "SparseVector":
     """Sparse vector for a QUERY: content words only.
 
@@ -137,11 +145,7 @@ def sparse_query_vector(text: str) -> "SparseVector":
     stripping them there would change the stored index and need a re-ingest, and a
     chunk's own function words are harmless because the query never asks for them.
     """
-    from qdrant_client.models import SparseVector
-
-    counts = Counter(_token_id(t) for t in strip_stopwords(tokenize(text)))
-    indices = sorted(counts)
-    return SparseVector(indices=indices, values=[float(counts[i]) for i in indices])
+    return _vector(strip_stopwords(tokenize(text)))
 
 
 def sparse_vector(text: str) -> "SparseVector":
@@ -150,8 +154,4 @@ def sparse_vector(text: str) -> "SparseVector":
     An empty or purely punctuational text yields an empty vector, which simply
     matches nothing rather than erroring.
     """
-    from qdrant_client.models import SparseVector
-
-    counts = Counter(_token_id(token) for token in tokenize(text))
-    indices = sorted(counts)
-    return SparseVector(indices=indices, values=[float(counts[i]) for i in indices])
+    return _vector(tokenize(text))

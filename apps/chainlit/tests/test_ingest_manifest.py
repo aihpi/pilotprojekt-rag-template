@@ -262,6 +262,31 @@ def test_first_ingest_writes_a_manifest(tmp_path, monkeypatch, fake_embed):
     assert list(stored) == ["docs/a.txt"]
 
 
+def test_ingest_verifies_the_config_it_was_handed_not_the_singleton(
+    tmp_path, monkeypatch, fake_embed
+):
+    """`kb.ingest --config other.yaml` loads a config that need not be the process
+    singleton, so the lexical-format check must read the argument. Pinned here
+    because ingest_all is the only place it runs: ingest_chunks used to repeat it
+    with the same collection and the same flag, which the cache made a no-op."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.txt").write_text("alpha content", encoding="utf-8")
+    config = _text_config(tmp_path)
+    config.retrieval.hybrid = True
+    config.vector_store.collection = "other"
+
+    seen: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        pipeline,
+        "verify_hybrid_compatible",
+        lambda client, collection, *, hybrid: seen.append((collection, hybrid)),
+    )
+    _run(config, FakeClient(), monkeypatch)
+
+    assert seen == [("other", True)]
+
+
 def test_second_run_does_nothing(tmp_path, monkeypatch, fake_embed):
     docs = tmp_path / "docs"
     docs.mkdir()

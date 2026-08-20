@@ -2145,6 +2145,18 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+def _retrieval_fields(cfg) -> dict:
+    """The retrieval settings both the chip and its YAML report. One definition, so
+    the panel cannot show a mode the copied config does not."""
+    return {
+        "top_k": cfg.retrieval.top_k,
+        "score_threshold": cfg.retrieval.score_threshold,
+        "hybrid": cfg.retrieval.hybrid,
+        "fusion": cfg.retrieval.fusion,
+        "prefetch_limit": cfg.retrieval.prefetch_limit,
+    }
+
+
 def _config_yaml(cfg) -> str:
     """The active settings as a pasteable config skeleton, for the chip's copy button.
 
@@ -2153,29 +2165,16 @@ def _config_yaml(cfg) -> str:
     and ``vector_store.api_key``, and a copy button is exactly the wrong place to
     learn that. Nothing secret can reach here because nothing secret is collected.
 
-    ``data_sources`` is omitted rather than emitted — paths are instance-specific,
-    and a skeleton that names someone else's directories is worse than one that
-    says where to look. The chunking each source uses is preserved as a comment,
-    since that is the part worth comparing.
+    Each data source keeps its name, format, glob and *effective* chunking — the
+    fields worth comparing between two configs. ``path`` is dropped: it is the one
+    field that cannot transfer, and the schema requires it, so a paste fails with
+    ``data_sources.0.path — Field required``, which names what to supply.
     """
     import yaml
 
     from tools import enabled_tool_ids
 
     def source_entry(src):
-        """One data source, with its *effective* chunking spelled out.
-
-        ``path`` is omitted rather than placeheld. It is the one field that cannot
-        transfer, and inventing a value for it puts fabricated data in something
-        whose whole purpose is to be truthful — a ``CHANGE-ME`` that survives a
-        paste is worse than an absence. Because ``path`` is required by the
-        schema, leaving it out fails at load with ``data_sources.0.path — Field
-        required``, which says exactly what to supply.
-
-        Everything else is real, chunking included: it is the field worth
-        comparing between two configs, and it lives per source, not at the top
-        level.
-        """
         chunking = src.chunking or cfg.chunking
         block = {
             "strategy": chunking.strategy,
@@ -2205,19 +2204,12 @@ def _config_yaml(cfg) -> str:
         },
         "vector_store": {"collection": cfg.vector_store.collection},
         "data_sources": [source_entry(src) for src in cfg.data_sources],
-        "retrieval": {
-            "top_k": cfg.retrieval.top_k,
-            "score_threshold": cfg.retrieval.score_threshold,
-            "hybrid": cfg.retrieval.hybrid,
-            "fusion": cfg.retrieval.fusion,
-            "prefetch_limit": cfg.retrieval.prefetch_limit,
-        },
+        "retrieval": _retrieval_fields(cfg),
         "images": {"mode": cfg.images.mode, "vision_model": cfg.images.vision_model},
         "tools": {"enabled": enabled_tool_ids(cfg)},
     }
     # No header comment: the point is a config you can paste straight in, and three
-    # lines of preamble is three lines to delete every time. The one thing that
-    # genuinely cannot transfer says so in the value itself (path: CHANGE-ME).
+    # lines of preamble is three lines to delete every time.
     return yaml.safe_dump(body, sort_keys=False, default_flow_style=False, allow_unicode=True)
 
 
@@ -2245,13 +2237,7 @@ def _config_info_payload(cfg) -> dict:
             }
             for src in cfg.data_sources
         ],
-        "retrieval": {
-            "top_k": cfg.retrieval.top_k,
-            "hybrid": cfg.retrieval.hybrid,
-            "fusion": cfg.retrieval.fusion,
-            "prefetch_limit": cfg.retrieval.prefetch_limit,
-            "score_threshold": cfg.retrieval.score_threshold,
-        },
+        "retrieval": _retrieval_fields(cfg),
         "images_mode": cfg.images.mode,
         "tools": enabled_tool_ids(cfg),
         "yaml": _config_yaml(cfg),

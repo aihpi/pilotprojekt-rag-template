@@ -171,24 +171,6 @@ def test_prefetch_limit_below_max_top_k_is_rejected_only_when_hybrid_is_on():
     RetrievalConfig(top_k=40)  # max_top_k defaults to 40 > prefetch_limit 30
 
 
-def test_ingest_chunks_uses_the_hybrid_setting_it_was_given(monkeypatch):
-    """`kb.ingest --config other.yaml` loads a config that need not be the process
-    singleton. Reading get_config() here meant ingest_all checked one policy and
-    ingest_chunks another within a single run — the explicit argument is the only
-    one that describes the corpus actually being written."""
-    from kb import ingestion_pipeline
-
-    assert rag_tool.get_config().retrieval.hybrid is False, "singleton says dense"
-
-    ingestion_pipeline._verified_hybrid.clear()
-    with pytest.raises(RuntimeError, match="no lexical vector"):
-        _run_ingest(_IngestClient(existing_sparse=False), monkeypatch, hybrid=True)
-
-    # And the same run is fine when the caller really is dense.
-    ingestion_pipeline._verified_hybrid.clear()
-    _run_ingest(_IngestClient(existing_sparse=False), monkeypatch, hybrid=False)
-
-
 def test_legacy_dense_only_collections_keep_getting_plain_vectors(monkeypatch):
     """Qdrant rejects a vector name the collection does not declare — incremental
     ingest into a pre-sparse collection must not start failing."""

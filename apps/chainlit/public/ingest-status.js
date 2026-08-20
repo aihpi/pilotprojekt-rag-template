@@ -514,7 +514,8 @@
       // there is nothing interactive and so nothing to notice.
       "#" + ID + "-panel[data-open='1']{opacity:1;visibility:visible;",
       "transform:translateY(0);pointer-events:auto}",
-      "#" + ID + "-panel .rci-title{font-weight:600;margin-bottom:6px}",
+      "#" + ID + "-panel .rci-title{font-weight:600;margin-bottom:6px;",
+      "padding-right:26px}",  /* clear of the copy icon */
       "#" + ID + "-panel .rci-row{display:flex;gap:8px;margin-top:2px}",
       "#" + ID + "-panel .rci-key{flex:0 0 92px;opacity:.7}",
       "#" + ID + "-panel .rci-val{word-break:break-word}",
@@ -534,8 +535,6 @@
       "#" + ID + "-copy[data-done='1']{opacity:1;color:#15803d;background:transparent}",
       "html.dark #" + ID + "-copy[data-done='1'],.dark #" + ID + "-copy[data-done='1']{",
       "color:#4ade80}",
-      // Keep the title clear of the icon.
-      "#" + ID + "-panel .rci-title{padding-right:26px}",
       "@media (max-width:560px){#" + ID + "{max-width:38vw}",
       "#" + ID + " .rci-label{display:none}}",
     ].join("");
