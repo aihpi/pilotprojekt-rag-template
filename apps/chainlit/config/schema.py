@@ -31,7 +31,12 @@ class ModelsConfig(BaseModel):
     """LiteLLM ``provider/model`` string for the chat model. Default is OpenAI's
     Apache-2.0 open-weight release, not the hosted GPT API."""
     fallback_chat_model: str | None = None
-    """Optional model used via LiteLLM ``fallbacks=`` and the pre-flight health probe."""
+    """Model to retry a chat call on when ``chat_model`` fails, via LiteLLM
+    ``fallbacks=``. Covers an outage of one model group on the gateway: without
+    it a single unavailable model takes down answering *and* the startup prompt
+    generation, which then silently serves the bundled default prompt. Leave
+    ``null`` to disable. Not applied to embeddings (a different vector space) or
+    to the evaluation judge (deliberately pinned, so scores stay comparable)."""
     embed_model: str = "octen-embedding-8b"
     """LiteLLM ``provider/model`` string for embeddings."""
     selectable_chat_models: list[str] = Field(default_factory=list)

@@ -4,7 +4,13 @@ from typing import Any
 
 import litellm
 
-from settings import CHAT_MODEL, EMBED_MODEL, LITELLM_API_KEY, LITELLM_BASE_URL
+from settings import (
+    CHAT_MODEL,
+    EMBED_MODEL,
+    FALLBACK_CHAT_MODEL,
+    LITELLM_API_KEY,
+    LITELLM_BASE_URL,
+)
 
 # litellm prints a five-line "Give Feedback / Get Help ... _turn_on_debug()" block for
 # every single failed call. During an ingest that means hundreds of them, which buries
@@ -40,6 +46,22 @@ def _client_args(model: str | None = None) -> dict[str, Any]:
     return args
 
 
+def _fallbacks(model: str) -> list[str]:
+    """``models.fallback_chat_model`` in the shape litellm expects, or nothing.
+
+    Skipped when it *is* the model being called, so a request already targeting
+    the fallback does not list itself as its own backup.
+
+    Both models live on the same OpenAI-compatible gateway, so the ``api_base``,
+    ``api_key`` and ``custom_llm_provider`` already in the payload apply to the
+    retry too — which is why this is a plain model list rather than a second
+    client configuration.
+    """
+    if FALLBACK_CHAT_MODEL and FALLBACK_CHAT_MODEL != model:
+        return [FALLBACK_CHAT_MODEL]
+    return []
+
+
 async def chat(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
@@ -52,6 +74,8 @@ async def chat(
         "messages": messages,
         **_client_args(resolved),
     }
+    if fallbacks := _fallbacks(resolved):
+        payload["fallbacks"] = fallbacks
     if tools:
         payload["tools"] = tools
         if tool_choice:
@@ -66,6 +90,8 @@ async def stream_chat(messages: list[dict[str, Any]], tools: list[dict[str, Any]
         "stream": True,
         **_client_args(CHAT_MODEL),
     }
+    if fallbacks := _fallbacks(CHAT_MODEL):
+        payload["fallbacks"] = fallbacks
     if tools:
         payload["tools"] = tools
         if tool_choice:

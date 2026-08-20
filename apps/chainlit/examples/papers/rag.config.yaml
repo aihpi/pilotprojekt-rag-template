@@ -26,6 +26,11 @@ models:
   # Note: gpt-oss-120b is OpenAI's *open-weight* release (Apache-2.0), not the
   # hosted GPT API — the name is confusing, the licence is not.
   chat_model: gpt-oss-120b
+  # Retried on when chat_model is unavailable. Worth setting: one model group
+  # going down otherwise takes out answering AND the startup prompt generation,
+  # and the latter fails quietly — the app serves the bundled default prompt
+  # instead of one written from your corpus, which is easy to miss.
+  fallback_chat_model: gemma-4-31b
   # 4096-dim. Changing the embedding model requires a re-ingest (--recreate).
   embed_model: octen-embedding-8b
   # Empty = the settings-panel model selector fills itself from the gateway's
