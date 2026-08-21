@@ -294,5 +294,17 @@ Strategie.
 Eine Einschränkung noch: Der Assistent kann von sich aus auf ein einzelnes Dokument
 einschränken (das `search`-Tool nimmt ein `document`-Argument, wenn `source_file`
 freigegeben ist), aber keine Kategorie wählen. Die Kategorie kommt über die Rolle, die
-der Nutzer ausgewählt hat. Ein ausgearbeitetes, auskommentiertes Beispiel steht in
-`examples/papers/rag.config.yaml`.
+der Nutzer ausgewählt hat.
+
+Genau das in lauffähiger Form steht in
+`examples/papers/rag.config.multi-source.yaml`. Die Datei teilt die neun
+mitgelieferten Paper nach Erscheinungszeitraum in drei Teile, mit einer Rolle pro Teil
+und einer, die alles durchsucht:
+
+```bash
+docker compose run --rm ingest python -m kb.ingest \
+  --config examples/papers/rag.config.multi-source.yaml
+```
+
+Sie schreibt eine eigene Collection, liegt also neben dem kommentierten Beispiel statt
+es zu ersetzen.

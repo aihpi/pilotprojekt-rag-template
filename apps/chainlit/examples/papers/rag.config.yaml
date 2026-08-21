@@ -66,11 +66,6 @@ data_sources:
       # hybrid_max_tokens: 512               # for strategy: docling_hybrid
     pdf_options:
       include_tables: true          # serialize tables into their section
-    # Every key here is copied onto every chunk this source produces, which is how
-    # you label a corpus that has parts: one source per part, each with its own
-    # label (and its own chunking, since a flyer is not a paper). The worked
-    # example is under `profiles:` below.
-    # extra_metadata: { kategorie: paper }
 
 retrieval:
   top_k: 5
@@ -210,49 +205,10 @@ prompt:
 #     name: "Forscher:in"
 #     prompt_context: "Antworte knapp und technisch, nenne Messgrößen und Einheiten."
 
-# ---------------------------------------------------------------------------- #
-# Splitting one instance into parts of a corpus
-#
-# For a corpus with distinct parts (product papers, brochures, internal notes),
-# give each part its own data source with a label, then a role that filters on it.
-# Left commented because these nine papers are not divided that way; uncomment and
-# adapt. Three pieces have to agree:
-#
-#   data_sources:
-#     - name: bead-paper
-#       path: docs/bead-paper
-#       format: pdf
-#       extra_metadata: { kategorie: bead_paper }
-#     - name: flyer
-#       path: docs/flyer
-#       format: pdf
-#       extra_metadata: { kategorie: flyer }
-#       chunking: { strategy: heading }      # short documents want other chunking
-#
-#   retrieval:
-#     payload_indexes: [kategorie]           # Qdrant index, or filtering scans
-#     filterable_fields: [source_file, kategorie]   # allow-list; without it the
-#                                                   # filter below is ignored
-#
-#   profiles:
-#     - id: bead
-#       name: "Bead-Paper"
-#       retrieval_filters: { kategorie: bead_paper }
-#     - id: alles
-#       name: "Gesamter Bestand"             # no filter: searches everything
-#
-# Two things worth knowing before you rely on it:
-#
-# `retrieval_filters` scopes what is *searched*. It is not an access right. Anyone
-# who can use the app can pick a role without a filter and reach every part, and
-# there is no per-document permission anywhere in this template. If one part has a
-# different audience than the others, put it in its own collection and its own
-# instance; a filter is not a boundary.
-#
-# The model can narrow a search to a single document by itself (the `search` tool
-# takes a `document` argument when `source_file` is filterable), but it cannot pick
-# a category. Categories come from the role the user selected.
-# ---------------------------------------------------------------------------- #
+# A corpus with distinct parts (product papers, brochures, internal notes) is split
+# by giving each part its own data source and a role that filters on it. Worked
+# example, runnable against these same PDFs: rag.config.multi-source.yaml
+# (docs/adding-data.md explains it, including why a filter is not a permission).
 
 app:
   # Keyword-based "personality management": the personalization toggle, keyword

@@ -278,5 +278,17 @@ flyer and a twenty-page paper do not want the same strategy.
 
 One limit worth knowing: the assistant can narrow a search to a single document on its
 own (the `search` tool takes a `document` argument when `source_file` is filterable),
-but it cannot choose a category. Categories come from the role the user picked. A
-worked, commented example lives in `examples/papers/rag.config.yaml`.
+but it cannot choose a category. Categories come from the role the user picked.
+
+A runnable version of exactly this lives in
+`examples/papers/rag.config.multi-source.yaml`. It splits the nine shipped papers into
+three parts by publication period, with one role per part and one that searches all of
+them:
+
+```bash
+docker compose run --rm ingest python -m kb.ingest \
+  --config examples/papers/rag.config.multi-source.yaml
+```
+
+It writes its own collection, so it sits alongside the annotated example rather than
+replacing it.
