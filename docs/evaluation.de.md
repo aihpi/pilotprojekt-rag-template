@@ -95,16 +95,8 @@ jedem Schluss, der auf einer einzelnen Zahl beruht.
 
 ## Einschalten
 
-Zwei Dinge müssen zutreffen.
-
-**1. Den Evaluations-Dienst starten.** Er läuft als eigener Container und gehört
-nicht zum normalen Start:
-
-```bash
-docker compose --profile eval up -d
-```
-
-**2. In der Konfiguration einschalten.** In deiner `rag.config.yaml`:
+**In der Konfiguration einschalten.** Der Evaluations-Dienst startet mit dem
+übrigen Stack; das hier ist der einzige Schalter. In deiner `rag.config.yaml`:
 
 ```yaml
 evaluation:

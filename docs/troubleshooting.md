@@ -138,8 +138,9 @@ The badge above the chatbox shows how well each answer scored. If it never appea
 check these in order:
 
 1. **Is evaluation turned on?** It is off by default. Your settings file needs
-   `evaluation: {enabled: true}` and the evaluation service must be running
-   (`docker compose --profile eval up -d`).
+   `evaluation: {enabled: true}`, and the app has to be restarted after adding it.
+   The evaluation service itself starts with the rest of the stack — check it is up
+   with `docker compose ps` if scores never appear.
 2. **Did you ask a question that uses the knowledge base?** Evaluation only scores
    answers that looked something up. If the assistant answered from general
    knowledge or said "not in the documents", there is nothing to score.

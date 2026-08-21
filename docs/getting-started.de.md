@@ -164,10 +164,6 @@ Die Evaluation ist standardmäßig aus, weil sie zusätzliche Aufrufe pro Antwor
 kostet. Zum Einschalten den Evaluations-Dienst starten und eine Einstellung
 setzen:
 
-```bash
-docker compose --profile eval up -d
-```
-
 Dann in deiner Einstellungsdatei ergänzen:
 
 ```yaml

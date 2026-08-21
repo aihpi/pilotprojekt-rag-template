@@ -75,7 +75,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       # Answer scoring. Empty means "leave the YAML alone", so this is off unless
       # you either set EVALUATION_ENABLED=true or turn it on in rag.config.yaml.
-      # Also start the service: docker compose --profile eval up -d
+      # The eval service itself always runs; this is the only switch.
       EVALUATION_ENABLED: ${EVALUATION_ENABLED:-}
       EVALUATION_SERVICE_URL: ${EVALUATION_SERVICE_URL:-http://eval:8001}
       EVALUATION_JUDGE_MODEL: ${EVALUATION_JUDGE_MODEL:-}
@@ -158,17 +158,23 @@ services:
 
   # Answer-quality scoring and the evaluation dashboard on :8001.
   #
-  # Behind a compose profile, so a plain `docker compose up` neither builds nor runs
-  # it: this image installs ragas and its langchain chain, which is a build
-  # nobody should pay for while evaluation.enabled is false (the default). Start it
-  # with
+  # Starts with everything else, deliberately. `evaluation.enabled` in the YAML (or
+  # EVALUATION_ENABLED) is the switch, and while it is false this container idles: the
+  # app imports nothing, posts nothing and renders nothing, so no judge calls happen
+  # and nothing is billed.
   #
-  #     docker compose --profile eval up -d
+  # It used to sit behind a `profiles: ["eval"]` to avoid building ragas for people
+  # who never score anything. That traded a 744 MB build — against the 1.6 GB the app
+  # and ingest images cost anyway — for a second command nobody remembers. The
+  # documented upgrade path is `docker compose up -d --build`, which skipped a
+  # profiled service silently, so this container sat running pre-merge code for six
+  # days while the rest of the stack moved on. One switch, in the config, where the
+  # rest of this template's switches live.
   #
-  # and set `evaluation: {enabled: true}` in your rag.config.yaml. Both switches are
-  # needed; with the service down the app just records no scores and says nothing.
+  # It stays a separate service: the metric library has no business in the Chainlit
+  # image, and a judge call must never sit between the user and their answer. Nothing
+  # depends_on it, so if it is down the app just records no scores and says nothing.
   eval:
-    profiles: ["eval"]
     build:
       context: .
       dockerfile: eval_app/Dockerfile
