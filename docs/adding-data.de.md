@@ -299,7 +299,11 @@ profiles:
 ```
 
 `extra_metadata` wird auf jeden Chunk der Quelle kopiert, das Etikett reist also mit
-dem Text mit. `filterable_fields` ist eine Freigabeliste: Ein Filter auf ein Feld, das
+dem Text mit. Es ist nicht das Einzige, worauf sich filtern lässt: Die Parser legen
+ohnehin `source_file` (den Dateinamen), `page_start`, `page_end`, `section_title` und
+`section_index` auf jeden Chunk, und all das darf ebenfalls in `filterable_fields`
+stehen. Wegen `source_file` kann der Assistent eine Suche auf ein Dokument
+einschränken. `filterable_fields` ist eine Freigabeliste: Ein Filter auf ein Feld, das
 nicht darin steht, wird **stillschweigend ignoriert** — der übliche Grund, warum eine
 Rolle scheinbar nichts tut. `payload_indexes` legt den Qdrant-Index dafür an; ohne ihn
 funktioniert das Filtern weiterhin, scannt aber.

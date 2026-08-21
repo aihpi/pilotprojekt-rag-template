@@ -78,8 +78,10 @@ retrieval:
   fusion: rrf
   prefetch_limit: 30
   payload_indexes: [zeitraum]                   # Qdrant index for the label
-  filterable_fields: [source_file, zeitraum]    # allow-list: a filter on a field
-                                                # not listed here is ignored
+  # Allow-list of payload fields that may be filtered on. A filter on a field not
+  # listed here is ignored. `source_file` is the filename, which every parser puts on
+  # every chunk; `zeitraum` is ours, from extra_metadata above.
+  filterable_fields: [source_file, zeitraum]
 
 # Each role scopes retrieval to one part. A role with no filter searches all of them.
 profiles:

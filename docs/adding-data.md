@@ -284,7 +284,10 @@ profiles:
 ```
 
 `extra_metadata` is copied onto every chunk the source produces, so the label travels
-with the text. `filterable_fields` is an allow-list: a filter on a field that is not
+with the text. It is not the only thing you can filter on: the parsers already put
+`source_file` (the filename), `page_start`, `page_end`, `section_title` and
+`section_index` on every chunk, and any of those can go in `filterable_fields` too.
+`source_file` is the reason the assistant can scope a search to one document. `filterable_fields` is an allow-list: a filter on a field that is not
 listed is **silently ignored**, which is the usual reason a profile appears to do
 nothing. `payload_indexes` builds the Qdrant index for it; without one, filtering
 still works but scans.
