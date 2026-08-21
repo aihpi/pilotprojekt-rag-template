@@ -15,6 +15,33 @@ models:
 vector_store:
   collection: papers_multi_source     # its own collection, so its own ingest run
 
+# One entry per part of the corpus:
+#
+#   name            identifies the source in ingest output, and in
+#                   `python -m kb.ingest --only bis-2019`
+#   path            folder to read, relative to this file
+#   format          which parser handles it: pdf | txt | md | json | csv | custom
+#   glob            which files in `path` belong here. Python pathlib patterns, all
+#                   examples below against the nine shipped papers:
+#                     *       any run of characters, including none.
+#                             "*.pdf" takes all nine
+#                     ?       exactly one character. "*_202?_*.pdf" takes the six
+#                             from 2020 on, "*_20??_*.pdf" takes all nine
+#                     [seq]   one character from the set. "Kage_20[12]*" takes
+#                             Kage_2018 and Kage_2020
+#                     [!seq]  one character not in the set. "[!K]*.pdf" takes the
+#                             seven that do not start with K
+#                     **/     descend into subdirectories. "**/*.pdf"
+#                   Case-sensitive, so "*.pdf" skips a file named ".PDF". Brace
+#                   expansion does not work: "{a,b}*.pdf" matches nothing rather than
+#                   failing, which is easy to miss. Ignored if `path` names a single
+#                   file. The three sources below read the same folder and differ
+#                   only by pattern, which is how one directory becomes three
+#                   labelled parts
+#   extra_metadata  copied onto every chunk this source produces. This is the label
+#                   the profiles further down filter on
+#   chunking        overrides the global strategy, for this source only
+#   pdf_options     parser settings, `format: pdf` only
 data_sources:
   - name: bis-2019
     path: ../../data/documents
