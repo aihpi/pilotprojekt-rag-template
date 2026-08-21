@@ -126,6 +126,28 @@ pilotprojekt-rag-template/
       chunking: {strategy: passthrough}
     ```
 
+### Which files a source picks up: `glob`
+
+For a source whose `path` is a directory, `glob` decides which files in it belong to
+that source. The patterns are Python's `pathlib`:
+
+| Pattern | Matches | Example against the nine bundled papers |
+|---|---|---|
+| `*` | any run of characters, including none | `*.pdf` takes all nine |
+| `?` | exactly one character | `*_202?_*.pdf` takes the six from 2020 on |
+| `[seq]` | one character from the set | `Kage_20[12]*` takes Kage_2018 and Kage_2020 |
+| `[!seq]` | one character not in the set | `[!K]*.pdf` takes the seven not starting with K |
+| `**/` | descend into subdirectories | `**/*.pdf` |
+
+Two things that cost debugging time:
+
+- **Matching is case-sensitive.** `*.pdf` skips a file named `report.PDF`.
+- **Brace expansion does not work.** `{a,b}*.pdf` is not an error, it simply matches
+  nothing, so the source ingests zero files and the run looks successful. Use two
+  sources, or a character class.
+
+If `path` names a single file rather than a directory, `glob` is ignored.
+
 ## 3. Choose a chunking strategy
 
 Documents are cut into pieces before they are stored, because searching works
@@ -226,3 +248,78 @@ file name, title and page. The built-in readers fill this in automatically. If
 someone writes a [custom parser](extending.md), it should do the same. To show
 additional fields of your own in a citation, list them under
 `citation.extra_fields`.
+
+## 6. Split one instance into parts of a corpus
+
+A corpus is often made of parts you want to search separately, because they differ in
+length, have different readers, or simply do not answer the same question. Rather than
+running several instances, you can keep them in one and let the user choose which part
+is searched.
+
+Three places have to agree: each part gets its own data source with a label, the label
+is allowed to be filtered on, and a role filters on it.
+
+```yaml
+data_sources:
+  - name: handbooks
+    path: docs/handbooks
+    format: pdf
+    extra_metadata: { category: handbook }
+  - name: leaflets
+    path: docs/leaflets
+    format: pdf
+    extra_metadata: { category: leaflet }
+    chunking: { strategy: heading }   # short documents, different chunking
+
+retrieval:
+  payload_indexes: [category]                  # Qdrant index for the field
+  filterable_fields: [source_file, category]   # allow-list
+
+profiles:
+  - id: handbooks
+    name: "Handbooks"
+    retrieval_filters: { category: handbook }
+  - id: all
+    name: "All documents"                      # no filter: searches everything
+```
+
+`extra_metadata` is copied onto every chunk the source produces, so the label travels
+with the text. It is not the only thing you can filter on: the parsers already put
+`source_file` (the filename), `page_start`, `page_end`, `section_title` and
+`section_index` on every chunk, and any of those can go in `filterable_fields` too.
+`source_file` is the reason the assistant can scope a search to one document. `filterable_fields` is an allow-list: a filter on a field that is not
+listed is **silently ignored**, which is the usual reason a profile appears to do
+nothing. `payload_indexes` builds the Qdrant index for it; without one, filtering
+still works but scans.
+
+Each part can also be chunked differently, which is often the real win: a two-page
+leaflet and a twenty-page handbook do not want the same strategy.
+
+!!! warning "A filter is not a permission"
+    `retrieval_filters` scopes what is *searched*. Anyone who can use the app can pick
+    a role that has no filter and reach every part, and nothing in this template
+    grants or withholds access per document. If one part has a different audience than
+    the others, give it its own collection and its own instance. A filter is not a
+    boundary.
+
+One limit worth knowing: the assistant can narrow a search to a single document on its
+own (the `search` tool takes a `document` argument when `source_file` is filterable),
+but it cannot choose a category. Categories come from the role the user picked.
+
+A runnable version of exactly this lives in
+`examples/papers/rag.config.multi-source.yaml`. It splits the nine shipped papers into
+three parts by publication period, with one role per part and one that searches all of
+them.
+
+To run it, point `RAG_CONFIG` at it in `apps/chainlit/.env`:
+
+```bash
+RAG_CONFIG=examples/papers/rag.config.multi-source.yaml
+```
+
+then `docker compose up -d --build`. The app and the ingest service read that same
+variable, so one edit switches both, and ingest builds the collection before the app
+starts.
+
+It writes its own collection, so it sits alongside the annotated example rather than
+replacing it: switching `RAG_CONFIG` back leaves both intact.

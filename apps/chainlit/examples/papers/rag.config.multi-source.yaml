@@ -1,0 +1,115 @@
+# This config file shows how to add multiple sources.
+#
+# To run this instance, point RAG_CONFIG at it in apps/chainlit/.env:
+#
+#   RAG_CONFIG=examples/papers/rag.config.multi-source.yaml
+
+name: papers-multi-source
+language: de
+
+models:
+  chat_model: gpt-oss-120b
+  fallback_chat_model: gemma-4-31b
+  embed_model: octen-embedding-8b
+
+vector_store:
+  collection: papers_multi_source     # its own collection, so its own ingest run
+
+# One entry per part of the corpus:
+#
+#   name             (required)  what this part is called, in ingest output and logs
+#   path             (required)  folder to read, relative to this file
+#   format           (required)  parser to use: pdf | txt | md | json | csv | custom
+#   glob             (optional)  which files in `path` belong here. Without it, the
+#                                format's own pattern: "*.pdf", "*.txt", "*.md".
+#                                Python pathlib patterns, examples against the nine
+#                                shipped papers:
+#                                  *       any run of characters, including none.
+#                                          "*.pdf" takes all nine
+#                                  ?       exactly one character. "*_202?_*.pdf"
+#                                          takes the six from 2020 on
+#                                  [seq]   one from the set. "Kage_20[12]*" takes
+#                                          Kage_2018 and Kage_2020
+#                                  [!seq]  one not in the set. "[!K]*.pdf" takes the
+#                                          seven not starting with K
+#                                  **/     into subdirectories. "**/*.pdf"
+#   extra_metadata   (optional)  copied onto every chunk this source produces. The
+#                                label the profiles below filter on
+#   chunking         (optional)  overrides the global `chunking:` block, here only
+#   pdf_options      (optional)  parser settings, `format: pdf` only
+data_sources:
+  - name: bis-2019
+    path: ../../data/documents
+    format: pdf
+    glob: "*_201*.pdf"
+    extra_metadata: { zeitraum: bis_2019 }
+    # Per-source chunking: this part uses heading, the others semantic. A short
+    # document and a long one rarely want the same strategy.
+    chunking:
+      strategy: heading
+    pdf_options:
+      include_tables: true
+
+  - name: 2020-2023
+    path: ../../data/documents
+    format: pdf
+    glob: "*_202[0-3]*.pdf"
+    extra_metadata: { zeitraum: "2020_2023" }
+    chunking:
+      strategy: semantic
+      semantic_breakpoint_percentile: 95.0
+    pdf_options:
+      include_tables: true
+
+  - name: ab-2024
+    path: ../../data/documents
+    format: pdf
+    glob: "*_202[4-9]*.pdf"
+    extra_metadata: { zeitraum: ab_2024 }
+    chunking:
+      strategy: semantic
+      semantic_breakpoint_percentile: 95.0
+    pdf_options:
+      include_tables: true
+
+retrieval:
+  top_k: 5
+  hybrid: true
+  fusion: rrf
+  prefetch_limit: 30
+  payload_indexes: [zeitraum]                   # Qdrant index for the label
+  # Allow-list of payload fields that may be filtered on. A filter on a field not
+  # listed here is ignored. `source_file` is the filename, which every parser puts on
+  # every chunk; `zeitraum` is ours, from extra_metadata above.
+  filterable_fields: [source_file, zeitraum]
+
+# Each role scopes retrieval to one part. A role with no filter searches all of them.
+profiles:
+  - id: alles
+    name: "Gesamter Bestand"
+    description: "Alle neun Paper"
+
+  - id: bis-2019
+    name: "Bis 2019"
+    description: "Nur die älteren Arbeiten"
+    retrieval_filters: { zeitraum: bis_2019 }
+
+  - id: 2020-2023
+    name: "2020 bis 2023"
+    retrieval_filters: { zeitraum: "2020_2023" }
+
+  - id: ab-2024
+    name: "Ab 2024"
+    description: "Nur die neueren Arbeiten"
+    retrieval_filters: { zeitraum: ab_2024 }
+
+sources:
+  data_dir: ../../data/documents      # served files, so citations open the PDF
+  served_extensions: [.pdf]
+
+tools:
+  enabled: [search, list_documents, fetch_document, expand_context, verify_claim]
+
+app:
+  personalization_enabled: false
+  show_settings: true

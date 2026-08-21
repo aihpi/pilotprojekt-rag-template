@@ -130,6 +130,29 @@ pilotprojekt-rag-template/
       chunking: {strategy: passthrough}
     ```
 
+### Welche Dateien eine Quelle einliest: `glob`
+
+Zeigt `path` auf einen Ordner, entscheidet `glob`, welche Dateien darin zu dieser
+Quelle gehören. Die Muster sind die von Pythons `pathlib`:
+
+| Muster | Passt auf | Beispiel gegen die neun mitgelieferten Paper |
+|---|---|---|
+| `*` | beliebig viele Zeichen, auch keine | `*.pdf` nimmt alle neun |
+| `?` | genau ein Zeichen | `*_202?_*.pdf` nimmt die sechs ab 2020 |
+| `[seq]` | ein Zeichen aus der Menge | `Kage_20[12]*` nimmt Kage_2018 und Kage_2020 |
+| `[!seq]` | ein Zeichen, das nicht in der Menge ist | `[!K]*.pdf` nimmt die sieben ohne K am Anfang |
+| `**/` | in Unterordner absteigen | `**/*.pdf` |
+
+Zwei Dinge, die Zeit kosten, wenn man sie nicht weiß:
+
+- **Groß- und Kleinschreibung zählt.** `*.pdf` überspringt eine Datei namens
+  `bericht.PDF`.
+- **Klammer-Expansion gibt es nicht.** `{a,b}*.pdf` ist kein Fehler, es passt
+  einfach auf nichts. Die Quelle liest dann null Dateien ein und der Lauf sieht
+  erfolgreich aus. Nimm zwei Quellen oder eine Zeichenklasse.
+
+Zeigt `path` auf eine einzelne Datei statt auf einen Ordner, wird `glob` ignoriert.
+
 ## 3. Chunking-Strategie wählen
 
 Dokumente werden vor dem Speichern in Stücke zerteilt, weil sich kleine Stücke
@@ -239,3 +262,82 @@ Lesen notiert hat: Dateiname, Titel und Seite. Die eingebauten Leseroutinen
 füllen das automatisch aus. Wenn jemand einen [eigenen Parser](extending.md)
 schreibt, sollte er dasselbe tun. Eigene Zusatzfelder zeigst du in Zitaten über
 `citation.extra_fields` an.
+
+## 6. Eine Instanz in Teile eines Korpus aufteilen
+
+Ein Korpus besteht oft aus Teilen, die man getrennt durchsuchen will, weil sie
+unterschiedlich lang sind, unterschiedliche Leser haben oder einfach nicht dieselbe
+Frage beantworten. Statt mehrere Instanzen zu betreiben, kannst du sie in einer halten
+und die Nutzenden wählen lassen, welcher Teil gesucht wird.
+
+Drei Stellen müssen zusammenpassen: Jeder Teil bekommt eine eigene Datenquelle mit
+einem Etikett, das Etikett wird zum Filtern freigegeben, und eine Rolle filtert
+darauf.
+
+```yaml
+data_sources:
+  - name: handbuecher
+    path: docs/handbuecher
+    format: pdf
+    extra_metadata: { kategorie: handbuch }
+  - name: merkblaetter
+    path: docs/merkblaetter
+    format: pdf
+    extra_metadata: { kategorie: merkblatt }
+    chunking: { strategy: heading }   # kurze Dokumente, anderes Chunking
+
+retrieval:
+  payload_indexes: [kategorie]                  # Qdrant-Index für das Feld
+  filterable_fields: [source_file, kategorie]   # Freigabeliste
+
+profiles:
+  - id: handbuecher
+    name: "Handbücher"
+    retrieval_filters: { kategorie: handbuch }
+  - id: alles
+    name: "Alle Dokumente"                      # ohne Filter: sucht überall
+```
+
+`extra_metadata` wird auf jeden Chunk der Quelle kopiert, das Etikett reist also mit
+dem Text mit. Es ist nicht das Einzige, worauf sich filtern lässt: Die Parser legen
+ohnehin `source_file` (den Dateinamen), `page_start`, `page_end`, `section_title` und
+`section_index` auf jeden Chunk, und all das darf ebenfalls in `filterable_fields`
+stehen. Wegen `source_file` kann der Assistent eine Suche auf ein Dokument
+einschränken. `filterable_fields` ist eine Freigabeliste: Ein Filter auf ein Feld, das
+nicht darin steht, wird **stillschweigend ignoriert** — der übliche Grund, warum eine
+Rolle scheinbar nichts tut. `payload_indexes` legt den Qdrant-Index dafür an; ohne ihn
+funktioniert das Filtern weiterhin, scannt aber.
+
+Jeder Teil kann außerdem anders gechunkt werden, und das ist oft der eigentliche
+Gewinn: Ein zweiseitiges Merkblatt und ein zwanzigseitiges Handbuch wollen nicht
+dieselbe Strategie.
+
+!!! warning "Ein Filter ist kein Zugriffsrecht"
+    `retrieval_filters` begrenzt, *was gesucht wird*. Wer die App benutzen kann, kann
+    eine Rolle ohne Filter wählen und damit jeden Teil erreichen, und nichts in diesem
+    Template vergibt oder verweigert Rechte pro Dokument. Hat ein Teil einen anderen
+    Adressatenkreis als die übrigen, gib ihm eine eigene Collection und eine eigene
+    Instanz. Ein Filter ist keine Grenze.
+
+Eine Einschränkung noch: Der Assistent kann von sich aus auf ein einzelnes Dokument
+einschränken (das `search`-Tool nimmt ein `document`-Argument, wenn `source_file`
+freigegeben ist), aber keine Kategorie wählen. Die Kategorie kommt über die Rolle, die
+der Nutzer ausgewählt hat.
+
+Genau das in lauffähiger Form steht in
+`examples/papers/rag.config.multi-source.yaml`. Die Datei teilt die neun
+mitgelieferten Paper nach Erscheinungszeitraum in drei Teile, mit einer Rolle pro Teil
+und einer, die alles durchsucht.
+
+Zum Starten `RAG_CONFIG` in `apps/chainlit/.env` darauf zeigen lassen:
+
+```bash
+RAG_CONFIG=examples/papers/rag.config.multi-source.yaml
+```
+
+dann `docker compose up -d --build`. App und Ingest-Dienst lesen dieselbe Variable, ein
+Eintrag schaltet also beide um, und der Ingest baut die Collection, bevor die App
+startet.
+
+Sie schreibt eine eigene Collection, liegt also neben dem kommentierten Beispiel statt
+es zu ersetzen: Wer `RAG_CONFIG` zurückstellt, hat beide weiterhin.

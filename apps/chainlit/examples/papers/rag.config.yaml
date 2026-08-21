@@ -194,7 +194,9 @@ prompt:
       - "Which methods do these papers use?"
       - "What do the papers say about the limits of their approach?"
 
-# Optional roles: each scopes the prompt and (via retrieval_filters) retrieval.
+# Optional roles. Each one appears as a choice in the chat and can do two separate
+# things: change the prompt (`prompt_context`) and restrict what is searched
+# (`retrieval_filters`).
 # profiles:
 #   - id: beginner
 #     name: "Einsteiger:in"
@@ -202,6 +204,11 @@ prompt:
 #   - id: researcher
 #     name: "Forscher:in"
 #     prompt_context: "Antworte knapp und technisch, nenne Messgrößen und Einheiten."
+
+# A corpus with distinct parts (product papers, brochures, internal notes) is split
+# by giving each part its own data source and a role that filters on it. Worked
+# example, runnable against these same PDFs: rag.config.multi-source.yaml
+# (docs/adding-data.md explains it, including why a filter is not a permission).
 
 app:
   # Keyword-based "personality management": the personalization toggle, keyword
