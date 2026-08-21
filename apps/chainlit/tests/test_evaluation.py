@@ -16,6 +16,7 @@ silently pool scores from different corpora.
 from __future__ import annotations
 
 import asyncio
+import types
 
 import httpx
 import pytest
@@ -468,3 +469,49 @@ def test_an_already_gold_answer_never_nags_again():
 def test_a_null_threshold_disables_the_suggestion():
     ev = _enabled(gold_min_faithfulness=None).evaluation
     assert not evaluation.gold_suggested(_summary(), ev)
+
+
+# --------------------------------------------------------------------------- #
+# The judge has to be able to resolve the citations the answer actually carries
+# --------------------------------------------------------------------------- #
+def test_judge_contexts_carry_the_alias_the_answer_cites():
+    """The answer is post-processed: the model's "[1]" becomes
+    "Quelle 1: Methods (S.7-8)". A context labelled only "Source: ... p. 7" makes the
+    judge report the citation unsupported — correctly, since that string is absent —
+    and every cited answer loses a claim."""
+    import app
+
+    results = [
+        types.SimpleNamespace(
+            text="anti-staphylococcal enterotoxin B IgG (#ab15898) from abcam",
+            metadata={"source_file": "Schmidt_2022_SciReports.pdf", "page": 7,
+                      "section_title": "Methods"},
+        )
+    ]
+    aliases = {1: "Quelle 1: Methods (S.7-8)"}
+
+    contexts = app._judge_contexts(results, aliases)
+
+    assert len(contexts) == 1
+    assert "Quelle 1: Methods (S.7-8)" in contexts[0], (
+        "the judge cannot verify a citation it was never shown the name of"
+    )
+    assert "ab15898" in contexts[0], "the evidence itself must survive"
+    assert "Schmidt_2022_SciReports.pdf" in contexts[0], (
+        "and the file provenance stays — that was the previous fix, not a replacement"
+    )
+
+
+def test_a_result_without_an_alias_is_not_given_a_number():
+    """An unresolvable file gets no alias, so the answer never cites it by number.
+    Inventing one would point the judge at a label the answer does not use."""
+    import app
+
+    results = [
+        types.SimpleNamespace(text="orphan chunk", metadata={"source_file": "gone.pdf"}),
+    ]
+
+    contexts = app._judge_contexts(results, {})
+
+    assert "Quelle" not in contexts[0]
+    assert "orphan chunk" in contexts[0]

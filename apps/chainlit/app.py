@@ -1008,6 +1008,31 @@ def _page_label(page_start: int | None, page_end: int | None) -> str:
     return "S.?"
 
 
+def _judge_contexts(results: list[Any], alias_by_index: dict[int, str]) -> list[str]:
+    """Contexts labelled the way the finished answer cites them.
+
+    The answer a judge scores is post-processed: the model writes ``[1]`` and
+    :func:`_normalize_source_alias_mentions` expands it into
+    ``Quelle 1: Methods (S.7-8)``. Sending contexts labelled only
+    ``Source: Methods — Schmidt_2022_SciReports.pdf — p. 7`` therefore asks the judge
+    to verify an attribution in a vocabulary the context never contained, and it
+    answers, correctly, that the context "does not explicitly label it as 'Quelle 1'".
+    Every cited answer loses a claim that way — the same failure ``context_with_source``
+    was introduced to fix, one layer further in: the judge could see *where* a chunk
+    came from, but not by the name the answer calls it.
+
+    A result with no alias (its file could not be resolved, so the citation was never
+    made clickable) is passed through unlabelled rather than given a number the answer
+    does not use.
+    """
+    labelled: list[str] = []
+    for idx, result in enumerate(results, start=1):
+        body = context_with_source(result)
+        alias = alias_by_index.get(idx)
+        labelled.append(f"{alias}\n{body}" if alias else body)
+    return labelled
+
+
 def _source_alias(source_number: int, section_title: str | None, page_start: int | None, page_end: int | None) -> str:
     section = (section_title or "Abschnitt unbekannt").strip()
     section = re.sub(r"\s+", " ", section)
@@ -4167,10 +4192,12 @@ async def main(message: cl.Message):
                     await post_score(
                         question=message.content,
                         answer=content,
-                        # With the source line, not bare text: the answer ends by
-                        # naming its sources, and a judge that cannot see where a
-                        # chunk came from marks that sentence unsupported every time.
-                        contexts=[context_with_source(r) for r in last_results],
+                        # Labelled with the aliases the answer actually cites, not
+                        # just the source line: `content` here is post-processed, so
+                        # it says "Quelle 1: Methods (S.7-8)" where the context says
+                        # "Source: Methods — file.pdf — p. 7". Same fact, different
+                        # vocabulary, and the judge marked the citation unsupported.
+                        contexts=_judge_contexts(last_results, alias_by_index),
                         thread_id=session_id,
                         message_id=assistant_reply.id,
                         chat_model=answered_by,
