@@ -1,18 +1,8 @@
-# A corpus that has parts: one data source per part, a label on every chunk, and a
-# role that scopes retrieval to it. Deliberately terse — `rag.config.yaml` next to
-# this file is the annotated one that explains each setting.
+# This config file shows how to add multiple sources.
 #
 # To run this instance, point RAG_CONFIG at it in apps/chainlit/.env:
 #
 #   RAG_CONFIG=examples/papers/rag.config.multi-source.yaml
-#
-# then `docker compose up -d --build`. That one variable is read by both the app and
-# the ingest service, so the ingest fills the collection this file names and the app
-# serves the same one.
-#
-# The nine shipped papers have no product categories, so this splits them by
-# publication period. That is real metadata from the filenames rather than a taxonomy
-# invented for a demo. Swap the globs and labels for your own parts.
 
 name: papers-multi-source
 language: de
