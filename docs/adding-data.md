@@ -317,8 +317,16 @@ profiles:
 ```
 
 `category` and `period` are example names here: they are the labels you set yourself in
-`extra_metadata`. Several values for one field need the list form, because YAML cannot
-take the same key twice — the second one simply wins.
+`extra_metadata`.
+
+The two forms pull in opposite directions. A list on one field is an OR and makes the
+search **wider** — a chunk matches if any of the values does. Several fields are an AND
+and make it **narrower**, because a chunk then has to satisfy every condition.
+
+That is why AND only makes sense across *different* fields. A chunk has exactly one
+period, so "period up_to_2019 and period 2020_2023" would always be empty: no chunk can
+be both. Two values of the same field need the list form. Writing the key twice does not
+help either — YAML simply keeps the second one.
 
 Each part can also be chunked differently, which is often the real win: a two-page
 leaflet and a twenty-page handbook do not want the same strategy.

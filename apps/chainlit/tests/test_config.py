@@ -223,3 +223,36 @@ def test_a_profile_can_filter_on_several_values_and_several_fields():
     finally:
         cfg.retrieval.filterable_fields = original_allowed
         rag_tool._get_client, rag_tool.embed = original_client, original_embed
+
+
+def test_and_on_one_field_cannot_match_and_or_can():
+    """Documented in adding-data.md: OR widens, AND narrows, and AND across one field
+    is always empty because a chunk holds a single value per field. Asserted against
+    Qdrant's own filter semantics with an in-memory collection, so it stays true if the
+    conditions we build ever change shape."""
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import (
+        Distance, FieldCondition, Filter, MatchAny, MatchValue, PointStruct, VectorParams,
+    )
+
+    client = QdrantClient(":memory:")
+    client.create_collection("t", vectors_config=VectorParams(size=2, distance=Distance.COSINE))
+    client.upsert("t", points=[
+        PointStruct(id=1, vector=[1.0, 0.0], payload={"zeitraum": "bis_2019", "art": "paper"}),
+        PointStruct(id=2, vector=[0.0, 1.0], payload={"zeitraum": "2020_2023", "art": "paper"}),
+        PointStruct(id=3, vector=[1.0, 1.0], payload={"zeitraum": "bis_2019", "art": "flyer"}),
+    ])
+    count = lambda *c: client.count("t", count_filter=Filter(must=list(c))).count
+
+    one = FieldCondition(key="zeitraum", match=MatchValue(value="bis_2019"))
+    other = FieldCondition(key="zeitraum", match=MatchValue(value="2020_2023"))
+
+    assert count(one) == 2
+    # OR: the union, wider than either value alone
+    assert count(FieldCondition(key="zeitraum", match=MatchAny(any=["bis_2019", "2020_2023"]))) == 3
+    # AND across different fields: the intersection, narrower
+    assert count(one, FieldCondition(key="art", match=MatchValue(value="paper"))) == 1
+    # AND on the same field: nothing can hold two values, so it is always empty
+    assert count(one, other) == 0, (
+        "if this ever passes, the docs' reason for the list form is wrong"
+    )

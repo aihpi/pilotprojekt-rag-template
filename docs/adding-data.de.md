@@ -332,10 +332,18 @@ profiles:
     name: "Alle Dokumente"
 ```
 
-`kategorie` und `zeitraum` sind hier nur Beispielnamen; es sind die Etiketten, die du
-selbst in `extra_metadata` gesetzt hast. Für mehrere Werte in einem Feld brauchst du
-die Listenform: Zweimal denselben Schlüssel zu schreiben ist in YAML nicht möglich,
-der zweite gewinnt einfach.
+`kategorie` und `zeitraum` sind hier nur Beispielnamen: Es sind die Etiketten, die du
+selbst in `extra_metadata` gesetzt hast.
+
+Die beiden Formen ziehen in verschiedene Richtungen. Eine Liste in einem Feld ist ein
+ODER und macht die Suche **größer** — ein Chunk passt, wenn einer der Werte zutrifft.
+Mehrere Felder sind ein UND und machen sie **kleiner**, denn ein Chunk muss dann alle
+Bedingungen erfüllen.
+
+Deshalb ist UND nur über *verschiedene* Felder sinnvoll. Ein Chunk hat genau einen
+Zeitraum, also wäre „zeitraum bis_2019 und zeitraum 2020_2023" immer leer: Kein Chunk
+kann beides sein. Zwei Werte desselben Feldes brauchen die Listenform. Zweimal
+denselben Schlüssel zu schreiben hilft nicht, in YAML gewinnt schlicht der zweite.
 
 Jeder Teil kann außerdem anders gechunkt werden, und das ist oft der eigentliche
 Gewinn: Ein zweiseitiges Merkblatt und ein zwanzigseitiges Handbuch wollen nicht
