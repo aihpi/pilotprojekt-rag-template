@@ -164,3 +164,62 @@ def test_multi_source_example_demonstrates_parts_of_a_corpus():
         assert files, f"source {src.name} matches no files"
         assert not (files & seen), f"source {src.name} overlaps another part"
         seen |= files
+
+
+def test_a_profile_can_filter_on_several_values_and_several_fields():
+    """Documented in adding-data.md: a list is OR within one field, several keys are
+    AND across fields. Both go through retrieve()'s filter builder, so this pins the
+    shapes the docs promise rather than the YAML that describes them."""
+    import asyncio
+
+    import rag_tool
+    from qdrant_client.models import MatchAny, MatchValue
+
+    class Recording:
+        def __init__(self):
+            self.filters = []
+
+        def get_collections(self):
+            return type("R", (), {"collections": [type("C", (), {"name": "kb"})]})()
+
+        def get_collection(self, name):
+            params = type("P", (), {"sparse_vectors": None})()
+            return type("I", (), {"config": type("C", (), {"params": params})()})()
+
+        def query_points(self, **kw):
+            self.filters.append(kw.get("query_filter"))
+            return type("R", (), {"points": []})()
+
+    async def fake_embed(texts):
+        return [[0.1] * 8 for _ in texts]
+
+    original_client, original_embed = rag_tool._get_client, rag_tool.embed
+    cfg = rag_tool.get_config()
+    original_allowed = list(cfg.retrieval.filterable_fields)
+    try:
+        cfg.retrieval.filterable_fields = ["zeitraum", "kategorie"]
+        rag_tool.embed = fake_embed
+
+        def conditions(filters):
+            rec = Recording()
+            rag_tool._get_client = lambda: rec
+            asyncio.run(rag_tool.retrieve("q", top_k=3, filters=filters, collection="kb"))
+            return rec.filters[0].must or []
+
+        several_values = conditions({"zeitraum": ["bis_2019", "2020_2023"]})
+        assert len(several_values) == 1
+        assert isinstance(several_values[0].match, MatchAny)
+        assert several_values[0].match.any == ["bis_2019", "2020_2023"]
+
+        several_fields = conditions({"zeitraum": "bis_2019", "kategorie": "handbuch"})
+        assert len(several_fields) == 2, "several keys must AND, not overwrite"
+        assert all(isinstance(c.match, MatchValue) for c in several_fields)
+        assert {c.key for c in several_fields} == {"zeitraum", "kategorie"}
+
+        assert conditions({"autor": "kage"}) == [], (
+            "a field outside filterable_fields is dropped — the silent failure the "
+            "docs warn about"
+        )
+    finally:
+        cfg.retrieval.filterable_fields = original_allowed
+        rag_tool._get_client, rag_tool.embed = original_client, original_embed
