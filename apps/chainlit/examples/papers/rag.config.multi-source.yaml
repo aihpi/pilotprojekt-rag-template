@@ -31,12 +31,6 @@ vector_store:
 #                     [!seq]  one character not in the set. "[!K]*.pdf" takes the
 #                             seven that do not start with K
 #                     **/     descend into subdirectories. "**/*.pdf"
-#                   Case-sensitive, so "*.pdf" skips a file named ".PDF". Brace
-#                   expansion does not work: "{a,b}*.pdf" matches nothing rather than
-#                   failing, which is easy to miss. Ignored if `path` names a single
-#                   file. The three sources below read the same folder and differ
-#                   only by pattern, which is how one directory becomes three
-#                   labelled parts
 #   extra_metadata  copied onto every chunk this source produces. This is the label
 #                   the profiles further down filter on
 #   chunking        overrides the global strategy, for this source only

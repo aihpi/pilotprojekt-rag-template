@@ -126,6 +126,28 @@ pilotprojekt-rag-template/
       chunking: {strategy: passthrough}
     ```
 
+### Which files a source picks up: `glob`
+
+For a source whose `path` is a directory, `glob` decides which files in it belong to
+that source. The patterns are Python's `pathlib`:
+
+| Pattern | Matches | Example against the nine bundled papers |
+|---|---|---|
+| `*` | any run of characters, including none | `*.pdf` takes all nine |
+| `?` | exactly one character | `*_202?_*.pdf` takes the six from 2020 on |
+| `[seq]` | one character from the set | `Kage_20[12]*` takes Kage_2018 and Kage_2020 |
+| `[!seq]` | one character not in the set | `[!K]*.pdf` takes the seven not starting with K |
+| `**/` | descend into subdirectories | `**/*.pdf` |
+
+Two things that cost debugging time:
+
+- **Matching is case-sensitive.** `*.pdf` skips a file named `report.PDF`.
+- **Brace expansion does not work.** `{a,b}*.pdf` is not an error, it simply matches
+  nothing, so the source ingests zero files and the run looks successful. Use two
+  sources, or a character class.
+
+If `path` names a single file rather than a directory, `glob` is ignored.
+
 ## 3. Choose a chunking strategy
 
 Documents are cut into pieces before they are stored, because searching works

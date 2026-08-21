@@ -130,6 +130,29 @@ pilotprojekt-rag-template/
       chunking: {strategy: passthrough}
     ```
 
+### Welche Dateien eine Quelle einliest: `glob`
+
+Zeigt `path` auf einen Ordner, entscheidet `glob`, welche Dateien darin zu dieser
+Quelle gehören. Die Muster sind die von Pythons `pathlib`:
+
+| Muster | Passt auf | Beispiel gegen die neun mitgelieferten Paper |
+|---|---|---|
+| `*` | beliebig viele Zeichen, auch keine | `*.pdf` nimmt alle neun |
+| `?` | genau ein Zeichen | `*_202?_*.pdf` nimmt die sechs ab 2020 |
+| `[seq]` | ein Zeichen aus der Menge | `Kage_20[12]*` nimmt Kage_2018 und Kage_2020 |
+| `[!seq]` | ein Zeichen, das nicht in der Menge ist | `[!K]*.pdf` nimmt die sieben ohne K am Anfang |
+| `**/` | in Unterordner absteigen | `**/*.pdf` |
+
+Zwei Dinge, die Zeit kosten, wenn man sie nicht weiß:
+
+- **Groß- und Kleinschreibung zählt.** `*.pdf` überspringt eine Datei namens
+  `bericht.PDF`.
+- **Klammer-Expansion gibt es nicht.** `{a,b}*.pdf` ist kein Fehler, es passt
+  einfach auf nichts. Die Quelle liest dann null Dateien ein und der Lauf sieht
+  erfolgreich aus. Nimm zwei Quellen oder eine Zeichenklasse.
+
+Zeigt `path` auf eine einzelne Datei statt auf einen Ordner, wird `glob` ignoriert.
+
 ## 3. Chunking-Strategie wählen
 
 Dokumente werden vor dem Speichern in Stücke zerteilt, weil sich kleine Stücke
