@@ -48,9 +48,52 @@ LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL") or None
 LITELLM_API_KEY = os.getenv("LITELLM_API_KEY") or None
 
 
+def _require_writable(path) -> None:
+    """Fail loudly at startup if the database cannot be written.
+
+    ``init_db`` opening the file proves only that it is *readable*. Every write then
+    fails per request with ``attempt to write a readonly database`` and a 500, while
+    startup has already logged "database ready" — so the logs say healthy and every
+    score, rating and benchmark claim silently dies.
+
+    The way this happens in practice: ``/app/.evaldb`` is a named volume, so the
+    image's build-time ``chown eval:eval`` is masked by the mount. A volume first
+    written by an older image that ran as root keeps root-owned files, and this
+    container (uid 999) cannot write them. Nothing detects that on its own, which is
+    why it is checked here rather than left to the first request.
+    """
+    import sqlite3
+
+    # Rewriting user_version with the value it already has: a real write to the
+    # database header that changes nothing. `BEGIN IMMEDIATE` is NOT enough — SQLite
+    # defers acquiring the write lock, so it succeeds on a read-only file and the
+    # check passes while every actual write still fails. Measured both ways.
+    probe = sqlite3.connect(path)
+    try:
+        version = probe.execute("PRAGMA user_version").fetchone()[0]
+        probe.execute(f"PRAGMA user_version = {int(version)}")
+    except sqlite3.OperationalError as exc:
+        raise RuntimeError(
+            f"The evaluation database at {path} is not writable ({exc}). Its files are "
+            f"probably owned by another user: the volume was first written by an image "
+            f"that ran as root, and this service runs as uid 999. Fix the ownership "
+            f"(`run`, not `exec` — this service is refusing to start, so there is no "
+            f"container to exec into):\n"
+            f"    docker compose run --rm -u 0 --entrypoint sh eval "
+            f"-c 'chown -R eval:eval /app/.evaldb'\n"
+            f"or, if the stored scores are no longer worth keeping (a changed "
+            f"config_signature or a re-ingested corpus makes old rows incomparable "
+            f"anyway), discard them:\n"
+            f"    docker compose down && docker volume rm chainlit_eval_db"
+        ) from exc
+    finally:
+        probe.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     storage.init_db(DB_PATH)
+    _require_writable(DB_PATH)
     logger.info("[EVAL] database ready at %s", DB_PATH)
     yield
 

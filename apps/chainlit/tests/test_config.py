@@ -41,6 +41,10 @@ def test_papers_example_enables_all_features():
     assert cfg.retrieval.hybrid is True
     assert cfg.retrieval.fusion == "rrf"
     assert cfg.retrieval.prefetch_limit >= cfg.retrieval.max_top_k
+    # answer-quality scoring — the reference instance is where the badge is
+    # demonstrated, so it stays on here even though the schema default is off
+    assert cfg.evaluation.enabled is True
+    assert cfg.evaluation.judge_model, "a pinned judge, or models grade their own work"
     # figure handling incl. inline placement
     assert cfg.images.mode == "describe"
     assert cfg.images.inline_figures is True

@@ -234,9 +234,11 @@ Jede einzelne Option steht in der [Konfiguration](docs/configuration.de.md).
 
 ### Evaluation einschalten
 
-Die Evaluation ist standardmäßig aus, weil sie zusätzliche Aufrufe pro Antwort
-kostet. Der Evaluations-Dienst startet mit dem übrigen Stack, eine Einstellung in
-deiner Konfigurationsdatei ist also der ganze Schalter:
+Die mitgelieferte `examples/papers`-Instanz hat die Evaluation **an**, damit ein
+frischer Clone das Abzeichen auch sieht. In der Schema-Vorgabe ist sie aus, eine
+eigene Instanz bewertet also nichts, bis du es einschaltest. Der Evaluations-Dienst
+startet mit dem übrigen Stack, eine Einstellung in deiner Konfigurationsdatei ist
+der ganze Schalter:
 
 ```yaml
 evaluation:

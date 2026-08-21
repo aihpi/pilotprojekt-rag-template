@@ -92,8 +92,10 @@ conclusion drawn from a single number.
 
 Two things have to be true.
 
-**Turn it on in your config.** The evaluation service starts with the rest of the
-stack; this is the only switch. In your `rag.config.yaml`:
+**Turn it on in your config.** The bundled `examples/papers` instance already has
+it on. For your own instance the schema default is off, and this is the only switch
+— the evaluation service starts with the rest of the stack either way. In your
+`rag.config.yaml`:
 
 ```yaml
 evaluation:

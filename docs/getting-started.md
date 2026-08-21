@@ -152,8 +152,10 @@ Both are checked by a second AI model (the *judge*) that reads the answer and th
 sources and decides. No hand-written "correct answers" are needed, so it works on
 the questions people are already asking.
 
-Evaluation is off by default because it costs extra calls per answer. The service
-runs either way; one flag in your settings file decides whether anything is scored:
+The bundled `examples/papers` instance ships with evaluation on, so you should see
+the badge on your first question. It costs a judge call per answer, so the schema
+default is off for your own instances. The service runs either way; one flag in your
+settings file decides whether anything is scored:
 
 ```yaml
 evaluation:

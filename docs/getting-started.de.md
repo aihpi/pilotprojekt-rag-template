@@ -160,11 +160,10 @@ und die Quellen liest und entscheidet. Von Hand geschriebene „richtige Antwort
 braucht es nicht, deshalb funktioniert es auf den Fragen, die sowieso schon
 gestellt werden.
 
-Die Evaluation ist standardmäßig aus, weil sie zusätzliche Aufrufe pro Antwort
-kostet. Zum Einschalten den Evaluations-Dienst starten und eine Einstellung
-setzen:
-
-Dann in deiner Einstellungsdatei ergänzen:
+Die mitgelieferte `examples/papers`-Instanz hat die Evaluation an, du solltest das
+Abzeichen also schon bei der ersten Frage sehen. Sie kostet einen Judge-Aufruf pro
+Antwort, deshalb ist die Schema-Vorgabe für eigene Instanzen aus. Der Dienst läuft
+in beiden Fällen; eine Einstellung entscheidet, ob bewertet wird:
 
 ```yaml
 evaluation:
