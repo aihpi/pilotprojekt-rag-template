@@ -1,10 +1,11 @@
 # Hybrid retrieval
 
-Semantic search is good at meaning and bad at exact strings. Ask it for
-`BSI-Standard 200-2` and it will happily hand you `200-1`, because to an embedding
-model those two sentences mean almost the same thing. For a corpus built on standard
-numbers, compound technical terms and proper names, that is the difference between a
-correct answer and a confident wrong one.
+Semantic search is good at meaning and bad at exact strings. Ask the bundled paper
+corpus for `ab15898`, an antibody catalogue number, and it hands you passages from a
+different paper — to an embedding model the number is barely a signal, and passages on a
+plausibly related topic exist in every one of the papers. For a corpus built on catalogue numbers,
+chemical names, cell lines and proper names, that is the difference between a correct
+answer and a confident wrong one.
 
 Hybrid retrieval runs a second, purely lexical search alongside the semantic one and
 merges the two rankings. Nothing else changes: the assistant still gets `top_k`
@@ -25,10 +26,12 @@ paper of a nine-paper corpus — catalogue numbers, cell lines, fluorophores, ch
 names. The kind of thing an embedding maps to "generic lab methods" while the exact
 string is the only signal.
 
-The failure dense produces is not a miss but a near-miss: asked for
-`BSI-Standard 200-2` it returns `200-1` at rank 1 by a margin of 0.0022 — a coin flip.
-The right document is in the results, just not first, and an assistant that reads the
-top hit answers from the wrong standard.
+The failure dense produces is not a narrow one. Asked for `ab15898` it ranks
+Lin 2024 first and does not return the chunk containing the number at all; hybrid puts
+Schmidt 2022 on top, the paper the number is actually in. Same pattern for
+`carbonylcyanide-m-chlorophenylhydrazone`: dense lands on Schmidt 2022, hybrid on
+Schauer 2018. An assistant that reads the top hit therefore answers from the wrong
+paper, and does so confidently, because the passage is on a plausible topic.
 
 ## Turning it on
 
@@ -151,9 +154,10 @@ between usable and not.
 ## How it works
 
 At ingest, each chunk gets a second vector: its terms, counted. Terms are lowercased
-and hyphenated compounds stay whole, so `BSI-Standard` is one term rather than two
-common words — that detail is most of the win, and it lives in
-`apps/chainlit/kb/sparse.py` if your corpus needs different tokenizing.
+and hyphenated compounds stay whole, so `carbonylcyanide-m-chlorophenylhydrazone` is
+one term rather than three fragments, one of which is a bare `m` — that detail is most
+of the win, and it lives in `apps/chainlit/kb/sparse.py` if your corpus needs different
+tokenizing.
 
 At query time the question is tokenized the same way, **minus function words**. Stored
 chunks keep every word; only the question is filtered.
