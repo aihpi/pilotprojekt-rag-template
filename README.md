@@ -127,6 +127,15 @@ Das `--build` am Ende ist wichtig. Ohne `--build` startet Docker wieder deine al
 App und du siehst keine der Änderungen, ohne dass eine Fehlermeldung dich warnt. Der
 Neubau dauert etwa eine halbe Minute. (`make up` macht dasselbe.)
 
+Der Ingest läuft dabei mit und ist normalerweise in Sekunden fertig, weil er nur
+geänderte Dateien anfasst. Zwei Fälle sind teurer, und sie verhalten sich absichtlich
+unterschiedlich. Ändert ein Update den lexikalischen Tokenizer, baut der Ingest die
+Collection von selbst neu auf: er nennt den Grund und die Zahl der betroffenen Punkte
+und embeddet den Korpus neu, was bei vielen Dokumenten Zeit und abgerechnete
+Gateway-Aufrufe kostet. Wechselst du dagegen das Embedding-Modell, verweigert er den
+Lauf und verlangt ein ausdrückliches `--recreate`. Das ist deine Entscheidung, nicht
+die Nebenwirkung eines Updates.
+
 Ohne Docker:
 
 ```bash
