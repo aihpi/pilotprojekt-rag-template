@@ -239,3 +239,60 @@ Lesen notiert hat: Dateiname, Titel und Seite. Die eingebauten Leseroutinen
 füllen das automatisch aus. Wenn jemand einen [eigenen Parser](extending.md)
 schreibt, sollte er dasselbe tun. Eigene Zusatzfelder zeigst du in Zitaten über
 `citation.extra_fields` an.
+
+## 6. Eine Instanz in Teile eines Korpus aufteilen
+
+Ein Korpus hat oft Teile, die man nicht vermischen will: Produkt-Paper, Broschüren,
+interne Notizen. Du kannst sie in einer Instanz halten und die Nutzenden wählen
+lassen, welcher Teil durchsucht wird.
+
+Drei Stellen müssen zusammenpassen. Jeder Teil bekommt eine eigene Datenquelle mit
+einem Etikett, das Etikett wird zum Filtern freigegeben, und eine Rolle filtert
+darauf:
+
+```yaml
+data_sources:
+  - name: bead-paper
+    path: docs/bead-paper
+    format: pdf
+    extra_metadata: { kategorie: bead_paper }
+  - name: flyer
+    path: docs/flyer
+    format: pdf
+    extra_metadata: { kategorie: flyer }
+    chunking: { strategy: heading }   # ein Flyer ist kein Paper
+
+retrieval:
+  payload_indexes: [kategorie]                  # Qdrant-Index für das Feld
+  filterable_fields: [source_file, kategorie]   # Freigabeliste
+
+profiles:
+  - id: bead
+    name: "Bead-Paper"
+    retrieval_filters: { kategorie: bead_paper }
+  - id: alles
+    name: "Gesamter Bestand"                    # ohne Filter: sucht überall
+```
+
+`extra_metadata` wird auf jeden Chunk der Quelle kopiert, das Etikett reist also mit
+dem Text mit. `filterable_fields` ist eine Freigabeliste: Ein Filter auf ein Feld, das
+nicht darin steht, wird **stillschweigend ignoriert** — der übliche Grund, warum eine
+Rolle scheinbar nichts tut. `payload_indexes` legt den Qdrant-Index dafür an; ohne ihn
+funktioniert das Filtern weiterhin, scannt aber.
+
+Jeder Teil kann außerdem anders gechunkt werden, und das ist oft der eigentliche
+Gewinn. Ein zweiseitiger Flyer und ein zwanzigseitiges Paper wollen nicht dieselbe
+Strategie.
+
+!!! warning "Ein Filter ist kein Zugriffsrecht"
+    `retrieval_filters` begrenzt, *was gesucht wird*. Wer die App benutzen kann, kann
+    eine Rolle ohne Filter wählen und damit jeden Teil erreichen, und nichts in diesem
+    Template vergibt oder verweigert Rechte pro Dokument. Hat ein Teil einen anderen
+    Adressatenkreis als die übrigen, gib ihm eine eigene Collection und eine eigene
+    Instanz. Ein Filter ist keine Grenze.
+
+Eine Einschränkung noch: Der Assistent kann von sich aus auf ein einzelnes Dokument
+einschränken (das `search`-Tool nimmt ein `document`-Argument, wenn `source_file`
+freigegeben ist), aber keine Kategorie wählen. Die Kategorie kommt über die Rolle, die
+der Nutzer ausgewählt hat. Ein ausgearbeitetes, auskommentiertes Beispiel steht in
+`examples/papers/rag.config.yaml`.

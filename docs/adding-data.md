@@ -226,3 +226,57 @@ file name, title and page. The built-in readers fill this in automatically. If
 someone writes a [custom parser](extending.md), it should do the same. To show
 additional fields of your own in a citation, list them under
 `citation.extra_fields`.
+
+## 6. Split one instance into parts of a corpus
+
+A corpus often has parts that a reader would not mix: product papers, brochures,
+internal notes. You can keep them in one instance and let the user choose which part
+is searched.
+
+Three pieces have to agree. Give each part its own data source with a label, allow the
+label to be filtered on, and add a role that filters:
+
+```yaml
+data_sources:
+  - name: bead-paper
+    path: docs/bead-paper
+    format: pdf
+    extra_metadata: { kategorie: bead_paper }
+  - name: flyer
+    path: docs/flyer
+    format: pdf
+    extra_metadata: { kategorie: flyer }
+    chunking: { strategy: heading }   # a flyer is not a paper
+
+retrieval:
+  payload_indexes: [kategorie]                  # Qdrant index for the field
+  filterable_fields: [source_file, kategorie]   # allow-list
+
+profiles:
+  - id: bead
+    name: "Bead-Paper"
+    retrieval_filters: { kategorie: bead_paper }
+  - id: all
+    name: "Everything"                          # no filter: searches all parts
+```
+
+`extra_metadata` is copied onto every chunk the source produces, so the label travels
+with the text. `filterable_fields` is an allow-list: a filter on a field that is not
+listed is **silently ignored**, which is the usual reason a profile appears to do
+nothing. `payload_indexes` builds the Qdrant index for it; without one, filtering
+still works but scans.
+
+Each part can also be chunked differently, which is often the real win. A two-page
+flyer and a twenty-page paper do not want the same strategy.
+
+!!! warning "A filter is not a permission"
+    `retrieval_filters` scopes what is *searched*. Anyone who can use the app can pick
+    a role that has no filter and reach every part, and nothing in this template
+    grants or withholds access per document. If one part has a different audience than
+    the others, give it its own collection and its own instance. A filter is not a
+    boundary.
+
+One limit worth knowing: the assistant can narrow a search to a single document on its
+own (the `search` tool takes a `document` argument when `source_file` is filterable),
+but it cannot choose a category. Categories come from the role the user picked. A
+worked, commented example lives in `examples/papers/rag.config.yaml`.
