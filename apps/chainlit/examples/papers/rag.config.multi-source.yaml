@@ -17,24 +17,26 @@ vector_store:
 
 # One entry per part of the corpus:
 #
-#   name            what this part is called, in ingest output and in logs
-#   path            folder to read, relative to this file
-#   format          which parser handles it: pdf | txt | md | json | csv | custom
-#   glob            which files in `path` belong here. Python pathlib patterns, all
-#                   examples below against the nine shipped papers:
-#                     *       any run of characters, including none.
-#                             "*.pdf" takes all nine
-#                     ?       exactly one character. "*_202?_*.pdf" takes the six
-#                             from 2020 on, "*_20??_*.pdf" takes all nine
-#                     [seq]   one character from the set. "Kage_20[12]*" takes
-#                             Kage_2018 and Kage_2020
-#                     [!seq]  one character not in the set. "[!K]*.pdf" takes the
-#                             seven that do not start with K
-#                     **/     descend into subdirectories. "**/*.pdf"
-#   extra_metadata  copied onto every chunk this source produces. This is the label
-#                   the profiles further down filter on
-#   chunking        overrides the global strategy, for this source only
-#   pdf_options     parser settings, `format: pdf` only
+#   name             (required)  what this part is called, in ingest output and logs
+#   path             (required)  folder to read, relative to this file
+#   format           (required)  parser to use: pdf | txt | md | json | csv | custom
+#   glob             (optional)  which files in `path` belong here. Without it, the
+#                                format's own pattern: "*.pdf", "*.txt", "*.md".
+#                                Python pathlib patterns, examples against the nine
+#                                shipped papers:
+#                                  *       any run of characters, including none.
+#                                          "*.pdf" takes all nine
+#                                  ?       exactly one character. "*_202?_*.pdf"
+#                                          takes the six from 2020 on
+#                                  [seq]   one from the set. "Kage_20[12]*" takes
+#                                          Kage_2018 and Kage_2020
+#                                  [!seq]  one not in the set. "[!K]*.pdf" takes the
+#                                          seven not starting with K
+#                                  **/     into subdirectories. "**/*.pdf"
+#   extra_metadata   (optional)  copied onto every chunk this source produces. The
+#                                label the profiles below filter on
+#   chunking         (optional)  overrides the global `chunking:` block, here only
+#   pdf_options      (optional)  parser settings, `format: pdf` only
 data_sources:
   - name: bis-2019
     path: ../../data/documents
