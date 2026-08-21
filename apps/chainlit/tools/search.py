@@ -53,10 +53,14 @@ async def _search(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     query = str(args.get("query") or ctx.query_fallback or "")
     top_k = clamp_top_k(args.get("top_k"), ctx.default_top_k, ctx.max_top_k)
     filters = dict(ctx.filters)
+    # The model chose `document`, so it rides as a soft filter: if the name it wrote
+    # matches nothing, retrieve() retries without it and keeps the profile's scope.
+    # (Applies iff source_file is filterable.)
     document = args.get("document")
-    if document:
-        filters.setdefault("source_file", document)  # applies iff source_file is filterable
-    results = await retrieve(query, top_k, filters=filters, collection=ctx.collection)
+    soft = {"source_file": document} if document else None
+    results = await retrieve(
+        query, top_k, filters=filters, soft_filters=soft, collection=ctx.collection
+    )
     context, cites, kept = render_context(results)
     payload = {"query": query, "context": context, "citations": cites}
     # `kept`, not `results`: the citation panel and the aggregation must describe
