@@ -217,9 +217,10 @@ class RetrievalConfig(BaseModel):
     hybrid: bool = False
     """Search dense *and* sparse (lexical) vectors and fuse the two rankings.
     Helps where embeddings are weakest: standard numbers, compound technical
-    terms, proper names. Ingest always writes the sparse vector, so this is a
-    pure query-time switch — except for collections created before sparse
-    vectors existed, which need one re-ingest with ``--recreate`` first."""
+    terms, proper names. Ingest always writes the sparse vector, whether this is on
+    or off, so it is a pure query-time switch: no re-ingest either way, and one
+    collection can serve a dense-vs-hybrid comparison. Off here as the schema
+    default; the bundled ``examples/papers`` instance turns it on."""
     fusion: Literal["rrf", "dbsf"] = "rrf"
     """``hybrid`` only. ``rrf`` fuses on rank position, ``dbsf`` on
     distribution-normalized scores. RRF is the safer default; DBSF can win when

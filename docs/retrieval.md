@@ -46,42 +46,16 @@ The bundled `examples/papers` instance ships with these set, so a fresh clone ru
 hybrid retrieval and can compare it against `hybrid: false` by restarting. The schema
 default stays off, so an existing instance keeps its behaviour until you opt in.
 
-Ingest writes the lexical vector into every collection it *creates* — it is a locally
-computed word count and costs nothing — so for those, `hybrid` is a pure query-time
-switch: flip it, restart, compare, flip it back. No re-ingest, and one collection can
-serve a dense-vs-hybrid A/B. A collection created before this feature is dense-only,
-and stays that way until the next ingest rebuilds it (see below) — until then,
-ingesting into it keeps writing plain dense vectors rather than failing.
-
-!!! warning "Collections from before this feature rebuild themselves once"
-    A collection created before lexical vectors existed is dense-only, and its
-    points cannot carry one retroactively. Ingest detects that and rebuilds it —
-    no flag to remember:
-
-    ```bash
-    docker compose run --rm ingest python -m kb.ingest
-    ```
-
-    It prints why, and how many points it is discarding, because a rebuild
-    re-embeds the whole corpus and that is billed gateway traffic. It fires only
-    on a real defect: with `hybrid: false` a dense-only collection is perfectly
-    usable and is left alone.
-
-    **Until you run it, the app refuses to start** rather than running dense-only
-    behind a config that says otherwise — it cannot ingest, so it cannot fix this
-    itself. `make check` and app startup both name the same one command. The
-    alternative was a silent downgrade, where hybrid appears enabled and simply
-    never contributes anything.
-
-    The same refusal covers a **lexical format change**: the tokenizer decides
-    which terms are stored, so an upgrade that changes it makes existing terms
-    unmatchable. The format version is recorded per collection at ingest and
-    compared on every run, exactly as the embedding model is.
+Ingest writes the lexical vector into every collection, whether `hybrid` is on or off
+— it is a locally computed word count and costs nothing. So `hybrid` is a pure
+query-time switch: flip it, restart, compare, flip it back. No re-ingest either way,
+and one collection can serve a dense-vs-hybrid A/B.
 
 ## The three settings
 
-**`hybrid`** — off by default. Query-time only: two searches instead of one, then a
-merge. The data underneath is the same either way.
+**`hybrid`** — on in `examples/papers`, off in a config that does not set it.
+Query-time only: two searches instead of one, then a merge. The data underneath is
+the same either way.
 
 **`fusion`** — how the two rankings become one.
 

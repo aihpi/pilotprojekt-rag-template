@@ -122,6 +122,14 @@ The `--build` at the end matters. Without it, Docker starts your old app again a
 you will not see any of the changes, and no error warns you. Rebuilding takes about
 half a minute. (`make up` does the same thing.)
 
+Ingest runs as part of this and normally finishes in seconds, since it only touches
+files that changed. Two cases cost more, and they deliberately behave differently. If
+an update changes the lexical tokenizer, ingest rebuilds the collection by itself: it
+names the reason and the number of points affected, then re-embeds the corpus, which on
+a large one costs time and billed gateway calls. Switching the embedding model instead
+makes it refuse the run and ask for an explicit `--recreate`, because that is your
+decision rather than a side effect of updating.
+
 Without Docker:
 
 ```bash
