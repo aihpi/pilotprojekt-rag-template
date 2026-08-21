@@ -1008,6 +1008,49 @@ def _page_label(page_start: int | None, page_end: int | None) -> str:
     return "S.?"
 
 
+def _judge_contexts(
+    results: list[Any],
+    source_rows: list[tuple[int, str, str, int | None, int | None, str | None, str]],
+) -> list[str]:
+    """The sources the user sees, labelled the way the answer cites them.
+
+    The answer a judge scores is post-processed: the model's ``[1]`` becomes
+    ``Quelle 1: Methods (S.7-8)``. Sending contexts labelled only
+    ``Source: Methods — file.pdf — p. 7`` asked the judge to verify an attribution in
+    a vocabulary the context never contained, and it answered — correctly — that the
+    context "does not explicitly label it as 'Quelle 1'".
+
+    Each alias is paired with its own chunk here, taken from the same ``source_rows``
+    Chainlit renders in the panel, *after* ``_align_aliases_to_source_ids``. That
+    pairing is the point: three numberings exist in this path — per-tool-call
+    citations, the aggregated ``last_results`` position, and the displayed alias — and
+    a judge context built by zipping two of them can put ``Quelle 1`` next to the
+    chunk that belongs to another row. Pairing alias to chunk by construction cannot
+    disagree, whatever the numbering does.
+
+    Retrieved chunks with no panel row still go in, unlabelled and last: the panel
+    dedupes by (file, page) and is capped by ``max_source_links``, so a claim can be
+    supported by a chunk the model read and the panel never showed. Dropping those
+    would trade a citation-verification bug for a content-verification one.
+    """
+    seen: set[int] = set()
+    labelled: list[str] = []
+    for source_id, alias, *_rest in source_rows:
+        if not isinstance(source_id, int) or not 0 < source_id <= len(results):
+            continue
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        labelled.append(f"{alias}\n{context_with_source(results[source_id - 1])}")
+
+    unshown = [
+        context_with_source(result)
+        for idx, result in enumerate(results, start=1)
+        if idx not in seen
+    ]
+    return labelled + unshown
+
+
 def _source_alias(source_number: int, section_title: str | None, page_start: int | None, page_end: int | None) -> str:
     section = (section_title or "Abschnitt unbekannt").strip()
     section = re.sub(r"\s+", " ", section)
@@ -4167,10 +4210,12 @@ async def main(message: cl.Message):
                     await post_score(
                         question=message.content,
                         answer=content,
-                        # With the source line, not bare text: the answer ends by
-                        # naming its sources, and a judge that cannot see where a
-                        # chunk came from marks that sentence unsupported every time.
-                        contexts=[context_with_source(r) for r in last_results],
+                        # Labelled with the aliases the answer actually cites, not
+                        # just the source line: `content` here is post-processed, so
+                        # it says "Quelle 1: Methods (S.7-8)" where the context says
+                        # "Source: Methods — file.pdf — p. 7". Same fact, different
+                        # vocabulary, and the judge marked the citation unsupported.
+                        contexts=_judge_contexts(last_results, source_rows),
                         thread_id=session_id,
                         message_id=assistant_reply.id,
                         chat_model=answered_by,

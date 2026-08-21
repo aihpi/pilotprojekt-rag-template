@@ -16,6 +16,7 @@ silently pool scores from different corpora.
 from __future__ import annotations
 
 import asyncio
+import types
 
 import httpx
 import pytest
@@ -468,3 +469,108 @@ def test_an_already_gold_answer_never_nags_again():
 def test_a_null_threshold_disables_the_suggestion():
     ev = _enabled(gold_min_faithfulness=None).evaluation
     assert not evaluation.gold_suggested(_summary(), ev)
+
+
+# --------------------------------------------------------------------------- #
+# The judge has to be able to resolve the citations the answer actually carries
+# --------------------------------------------------------------------------- #
+def _res(text, file, page, section):
+    return types.SimpleNamespace(
+        text=text,
+        metadata={"source_file": file, "page": page, "section_title": section},
+    )
+
+
+def test_each_alias_is_paired_with_its_own_chunk():
+    """The bug this exists to stop: the answer cited `Quelle 1: Methods (S.7-8)` while
+    position 1 of the judge payload was a different paper entirely, so the judge
+    reported the citation unsupported. Aliases come from the panel rows and carry
+    their own chunk, so the two cannot drift apart however the numbering behaves."""
+    import app
+
+    results = [
+        _res("unrelated deviation analysis", "Lin_2024_SciReports.pdf", 5, "Figure 3"),
+        _res("anti-staphylococcal enterotoxin B IgG (#ab15898) from abcam",
+             "Schmidt_2022_SciReports.pdf", 7, "Methods"),
+    ]
+    # The panel shows the Schmidt chunk as Quelle 2 — source_id 2, not position 1.
+    source_rows = [(2, "Quelle 2: Methods (S.7-8)", "Schmidt_2022_SciReports.pdf", 7, 8, "Methods", "")]
+
+    contexts = app._judge_contexts(results, source_rows)
+
+    first = contexts[0]
+    assert "Quelle 2: Methods (S.7-8)" in first
+    assert "ab15898" in first, "the alias must sit on the chunk it names"
+    assert "Lin_2024" not in first, "and never on somebody else's chunk"
+
+
+def test_chunks_the_panel_never_showed_are_still_sent():
+    """The panel dedupes by (file, page) and is capped by max_source_links, so the
+    model can legitimately use a chunk that was never displayed. Dropping it would
+    trade a citation bug for a content bug."""
+    import app
+
+    results = [
+        _res("shown text", "A.pdf", 1, "Intro"),
+        _res("undisplayed but used", "B.pdf", 2, "Methods"),
+    ]
+    source_rows = [(1, "Quelle 1: Intro (S.1)", "A.pdf", 1, None, "Intro", "")]
+
+    contexts = app._judge_contexts(results, source_rows)
+
+    assert len(contexts) == 2
+    assert "Quelle 1" in contexts[0]
+    assert "undisplayed but used" in contexts[1]
+    assert "Quelle" not in contexts[1], "an unshown chunk gets no number the answer uses"
+
+
+def test_a_duplicate_panel_row_does_not_duplicate_the_context():
+    import app
+
+    results = [_res("once", "A.pdf", 1, "Intro")]
+    rows = [(1, "Quelle 1: Intro (S.1)", "A.pdf", 1, None, "Intro", "")] * 2
+
+    assert len(app._judge_contexts(results, rows)) == 1
+
+
+def test_judge_contexts_carry_the_alias_the_answer_cites():
+    """The answer is post-processed: the model's "[1]" becomes
+    "Quelle 1: Methods (S.7-8)". A context labelled only "Source: ... p. 7" makes the
+    judge report the citation unsupported — correctly, since that string is absent —
+    and every cited answer loses a claim."""
+    import app
+
+    results = [
+        types.SimpleNamespace(
+            text="anti-staphylococcal enterotoxin B IgG (#ab15898) from abcam",
+            metadata={"source_file": "Schmidt_2022_SciReports.pdf", "page": 7,
+                      "section_title": "Methods"},
+        )
+    ]
+    rows = [(1, "Quelle 1: Methods (S.7-8)", "Schmidt_2022_SciReports.pdf", 7, 8, "Methods", "")]
+
+    contexts = app._judge_contexts(results, rows)
+
+    assert len(contexts) == 1
+    assert "Quelle 1: Methods (S.7-8)" in contexts[0], (
+        "the judge cannot verify a citation it was never shown the name of"
+    )
+    assert "ab15898" in contexts[0], "the evidence itself must survive"
+    assert "Schmidt_2022_SciReports.pdf" in contexts[0], (
+        "and the file provenance stays — that was the previous fix, not a replacement"
+    )
+
+
+def test_a_result_without_an_alias_is_not_given_a_number():
+    """An unresolvable file gets no alias, so the answer never cites it by number.
+    Inventing one would point the judge at a label the answer does not use."""
+    import app
+
+    results = [
+        types.SimpleNamespace(text="orphan chunk", metadata={"source_file": "gone.pdf"}),
+    ]
+
+    contexts = app._judge_contexts(results, [])
+
+    assert "Quelle" not in contexts[0]
+    assert "orphan chunk" in contexts[0]
