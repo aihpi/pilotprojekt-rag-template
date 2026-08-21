@@ -2,13 +2,23 @@
 # role that scopes retrieval to it. Deliberately terse — `rag.config.yaml` next to
 # this file is the annotated one that explains each setting.
 #
-#   docker compose run --rm ingest python -m kb.ingest \
-#     --config examples/papers/rag.config.multi-source.yaml
+# To run this instance, point RAG_CONFIG at it in apps/chainlit/.env:
+#
 #   RAG_CONFIG=examples/papers/rag.config.multi-source.yaml
 #
+# then `docker compose up -d --build`. The app and the ingest service read that same
+# variable, so they cannot end up serving one collection while filling another, and
+# ingest runs first and builds the collection below before the app starts.
+#
+# To build it without switching the instance you are running, leave .env alone and
+# hand the config to a one-off ingest instead:
+#
+#   docker compose run --rm ingest python -m kb.ingest \
+#     --config examples/papers/rag.config.multi-source.yaml
+#
 # The nine shipped papers have no product categories, so this splits them by
-# publication period. That is real metadata from the filenames rather than a
-# taxonomy invented for a demo. Swap the globs and labels for your own parts.
+# publication period. That is real metadata from the filenames rather than a taxonomy
+# invented for a demo. Swap the globs and labels for your own parts.
 
 name: papers-multi-source
 language: de

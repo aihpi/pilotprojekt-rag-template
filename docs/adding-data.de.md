@@ -301,10 +301,21 @@ Genau das in lauffähiger Form steht in
 mitgelieferten Paper nach Erscheinungszeitraum in drei Teile, mit einer Rolle pro Teil
 und einer, die alles durchsucht:
 
+Zum Starten `RAG_CONFIG` in `apps/chainlit/.env` darauf zeigen lassen:
+
+```bash
+RAG_CONFIG=examples/papers/rag.config.multi-source.yaml
+```
+
+dann `docker compose up -d --build`. App und Ingest-Dienst lesen dieselbe Variable, ein
+Eintrag schaltet also beide um, und der Ingest baut die Collection, bevor die App
+startet.
+
+Sie schreibt eine eigene Collection, liegt also neben dem kommentierten Beispiel statt
+es zu ersetzen. Wenn du sie bauen willst, *ohne* die laufende Instanz umzustellen, lass
+`.env` unangetastet und gib die Config einem einmaligen Ingest mit:
+
 ```bash
 docker compose run --rm ingest python -m kb.ingest \
   --config examples/papers/rag.config.multi-source.yaml
 ```
-
-Sie schreibt eine eigene Collection, liegt also neben dem kommentierten Beispiel statt
-es zu ersetzen.

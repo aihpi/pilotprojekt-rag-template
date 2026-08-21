@@ -285,10 +285,21 @@ A runnable version of exactly this lives in
 three parts by publication period, with one role per part and one that searches all of
 them:
 
+To run it, point `RAG_CONFIG` at it in `apps/chainlit/.env`:
+
+```bash
+RAG_CONFIG=examples/papers/rag.config.multi-source.yaml
+```
+
+then `docker compose up -d --build`. The app and the ingest service read that same
+variable, so one edit switches both, and ingest builds the collection before the app
+starts.
+
+It writes its own collection, so it sits alongside the annotated example rather than
+replacing it. To build it *without* switching the instance you are running, leave
+`.env` alone and pass the config to a one-off ingest instead:
+
 ```bash
 docker compose run --rm ingest python -m kb.ingest \
   --config examples/papers/rag.config.multi-source.yaml
 ```
-
-It writes its own collection, so it sits alongside the annotated example rather than
-replacing it.
