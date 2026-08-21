@@ -224,9 +224,10 @@ Every single option is listed in [Configuration](docs/configuration.md).
 
 ### Turning evaluation on
 
-Evaluation is off by default because it costs extra calls per answer. The
-evaluation service starts with the rest of the stack, so one flag in your settings
-file is the whole switch:
+The bundled `examples/papers` instance has evaluation **on**, so a fresh clone
+actually sees the badge. The schema default is off, so your own instance scores
+nothing until you opt in. The evaluation service starts with the rest of the stack,
+so one flag in your settings file is the whole switch:
 
 ```yaml
 evaluation:

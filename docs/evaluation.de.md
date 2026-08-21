@@ -95,8 +95,10 @@ jedem Schluss, der auf einer einzelnen Zahl beruht.
 
 ## Einschalten
 
-**In der Konfiguration einschalten.** Der Evaluations-Dienst startet mit dem
-übrigen Stack; das hier ist der einzige Schalter. In deiner `rag.config.yaml`:
+**In der Konfiguration einschalten.** Die mitgelieferte `examples/papers`-Instanz
+hat sie schon an. Für eine eigene Instanz ist die Schema-Vorgabe aus, und das hier
+ist der einzige Schalter — der Evaluations-Dienst startet ohnehin mit dem übrigen
+Stack. In deiner `rag.config.yaml`:
 
 ```yaml
 evaluation:

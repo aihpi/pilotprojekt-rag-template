@@ -149,7 +149,17 @@ images:
 # 0.87 -> 0.71 after a chunking change says a lot. The dashboard on :8001 groups
 # scores by configuration so that comparison is the easy thing to do.
 evaluation:
-  enabled: false
+  # On here so a fresh clone actually sees the badge — a feature nobody sees is a
+  # feature nobody tunes. The eval service starts with the rest of the stack, so
+  # this is the whole switch.
+  #
+  # COST, and the one line to read before copying this into production: unlike the
+  # figure descriptions above, this is *not* a one-time ingest charge. Each scored
+  # answer costs one judge call, plus one embedding call for `relevance`, for as
+  # long as it is on. On a nine-paper demo that is noise; on an instance serving
+  # real traffic it is a per-question tax. Set `false` there, or keep it on and
+  # sample — the numbers are only worth having if you compare them between runs.
+  enabled: true
   metrics: [faithfulness, relevance]
   # faithfulness = are the answer's claims backed by the retrieved chunks
   # relevance    = does the answer address the question that was asked

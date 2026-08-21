@@ -227,3 +227,59 @@ def test_stats_keep_replay_rows_out_of_configs_but_in_benchmark(client, monkeypa
     (run,) = payload["benchmark"]["runs"]
     assert run["run_label"] == "run-1" and run["similarity"] == 0.9
     assert payload["benchmark"]["gold_turns_total"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# The startup writability probe
+# --------------------------------------------------------------------------- #
+def test_a_writable_database_passes_the_probe(tmp_path):
+    from eval_app.main import _require_writable
+    from eval_app import storage
+
+    db = tmp_path / "eval.sqlite3"
+    storage.init_db(db)
+    _require_writable(db)  # must not raise
+
+
+def test_an_unwritable_database_refuses_startup_with_a_usable_remedy(tmp_path, monkeypatch):
+    """A read-only volume used to log "database ready" and then 500 on every write.
+    The message is the whole value here, so it is asserted: `exec` cannot work when
+    the service is refusing to start, and an unrunnable remedy is worse than none."""
+    import sqlite3
+
+    from eval_app.main import _require_writable
+    from eval_app import storage
+
+    db = tmp_path / "eval.sqlite3"
+    storage.init_db(db)
+
+    real_connect = sqlite3.connect
+
+    class ReadOnly:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def execute(self, sql, *a):
+            if "user_version =" in sql:
+                raise sqlite3.OperationalError("attempt to write a readonly database")
+            return self._inner.execute(sql, *a)
+
+        def close(self):
+            self._inner.close()
+
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **k: ReadOnly(real_connect(*a, **k)))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _require_writable(db)
+
+    message = str(excinfo.value)
+    assert "not writable" in message
+    assert "docker compose run --rm" in message, (
+        "the remedy must use `run`: `exec` needs a running container, and this check "
+        "is what stopped the service from starting"
+    )
+    assert "docker compose exec" not in message
+    assert "chown -R eval:eval" in message and "volume rm" in message, (
+        "both ways out belong in the message — repair the ownership, or discard rows "
+        "that a changed config_signature made incomparable anyway"
+    )
