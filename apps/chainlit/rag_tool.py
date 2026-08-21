@@ -118,6 +118,7 @@ async def retrieve(
     *,
     collection: str | None = None,
     filters: dict[str, Any] | None = None,
+    soft_filters: dict[str, Any] | None = None,
     source_scope: str | None = None,
     standard_id: str | None = None,
     include_vectors: bool = False,
@@ -130,7 +131,13 @@ async def retrieve(
         top_k: Number of results to return
         collection: Override the configured Qdrant collection
         filters: Generic metadata filters (field -> value or list of values);
-            only fields listed in ``retrieval.filterable_fields`` are applied
+            only fields listed in ``retrieval.filterable_fields`` are applied.
+            **Never dropped.** This is the caller's scope — a chat profile's
+            ``retrieval_filters`` — so an empty result is returned as empty.
+        soft_filters: Same shape, but discarded and retried without if the combined
+            filter matches nothing. For values *guessed by the model*, such as the
+            ``document`` argument of the ``search`` tool: a name it invented should
+            not sink the answer, while an operator's scope must hold.
         source_scope: Deprecated shim, folded into ``filters``
         standard_id: Deprecated shim, folded into ``filters``
         include_vectors: If True, include embedding vectors in results (for personalization)
@@ -154,15 +161,26 @@ async def retrieve(
     if standard_id:
         requested.setdefault("standard_id", standard_id)
     allowed = set(cfg.retrieval.filterable_fields)
-    must: list[FieldCondition] = []
-    for key, value in requested.items():
-        if key not in allowed:
-            continue
-        if isinstance(value, (list, tuple, set)):
-            must.append(FieldCondition(key=key, match=MatchAny(any=list(value))))
-        else:
-            must.append(FieldCondition(key=key, match=MatchValue(value=value)))
-    query_filter = Filter(must=must, must_not=_EXCLUDE_META) if must else _META_FILTER
+
+    def _conditions(wanted: dict[str, Any]) -> list[FieldCondition]:
+        built: list[FieldCondition] = []
+        for key, value in wanted.items():
+            if key not in allowed:
+                continue
+            if isinstance(value, (list, tuple, set)):
+                built.append(FieldCondition(key=key, match=MatchAny(any=list(value))))
+            else:
+                built.append(FieldCondition(key=key, match=MatchValue(value=value)))
+        return built
+
+    hard = _conditions(requested)
+    soft = _conditions(dict(soft_filters or {}))
+    must = hard + soft
+
+    def _filter_for(conds: list[FieldCondition]):
+        return Filter(must=conds, must_not=_EXCLUDE_META) if conds else _META_FILTER
+
+    query_filter = _filter_for(must)
 
     use_hybrid = cfg.retrieval.hybrid if hybrid is None else hybrid
     if use_hybrid:
@@ -216,10 +234,25 @@ async def retrieve(
 
     response = _query(query_filter)
     points = list(response.points or [])
-    if not points and must:
-        # Compatibility fallback for collections without the filtered fields.
-        response = _query(_META_FILTER)
+    if not points and soft:
+        # Retry without the model's guesses, keeping the caller's scope. A `document`
+        # name the model invented should not sink the answer.
+        response = _query(_filter_for(hard))
         points = list(response.points or [])
+    if not points and hard:
+        # Deliberately NOT retried without `hard`. That fallback used to exist for
+        # collections predating a filterable field, and it silently turned every
+        # empty scope into an unscoped search: a profile filtering on a value that
+        # matches nothing — a typo, an empty part, or an AND across two real fields
+        # that never co-occur — answered from the whole corpus instead. Measured on
+        # the multi-source example: `zeitraum=bis_2019 AND source_file=Alam_2026`
+        # (both valid, never together) returned six chunks, all violating both
+        # conditions. Empty is the honest answer; this line makes it diagnosable.
+        print(
+            f"[WARN] retrieval_scope_empty collection={target!r} "
+            f"fields={sorted(k for k in requested if k in allowed)} — the scope "
+            f"matched no chunks, returning nothing rather than ignoring it"
+        )
 
     hits: list[RagResult] = []
     for hit in points:

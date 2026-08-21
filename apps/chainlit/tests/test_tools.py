@@ -143,8 +143,11 @@ def captured_retrieve(monkeypatch):
     """Stand in for the Qdrant round-trip, recording what the handler asked for."""
     seen: dict = {}
 
-    async def fake_retrieve(query, top_k, filters=None, collection=None):
-        seen.update(query=query, top_k=top_k, filters=filters, collection=collection)
+    async def fake_retrieve(query, top_k, filters=None, soft_filters=None, collection=None):
+        seen.update(
+            query=query, top_k=top_k, filters=filters,
+            soft_filters=soft_filters, collection=collection,
+        )
         return _results(2)
 
     monkeypatch.setattr(rag_tool, "retrieve", fake_retrieve)
@@ -168,14 +171,16 @@ def test_search_clamps_top_k_to_the_context_maximum(captured_retrieve):
 
 def test_search_scopes_by_document_without_mutating_the_shared_filters(captured_retrieve):
     """ctx is reused across every tool call in a turn. A handler that writes into
-    ctx.filters would silently scope all later calls to the first document."""
+    ctx.filters would silently scope all later calls to the first document.
+
+    `document` also travels as a *soft* filter, separate from the profile's scope: the
+    model chose that name, so retrieve() may drop it when it matches nothing, while
+    the scope has to hold."""
     ctx = ToolContext(filters={"source_scope": "public"})
     _run("search", {"query": "q", "document": "report.pdf"}, ctx)
 
-    assert captured_retrieve["filters"] == {
-        "source_scope": "public",
-        "source_file": "report.pdf",
-    }
+    assert captured_retrieve["filters"] == {"source_scope": "public"}
+    assert captured_retrieve["soft_filters"] == {"source_file": "report.pdf"}
     assert ctx.filters == {"source_scope": "public"}, "ctx.filters was mutated"
 
 

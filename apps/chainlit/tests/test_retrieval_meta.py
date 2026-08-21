@@ -92,9 +92,10 @@ def test_a_small_top_k_still_returns_documents(patched, monkeypatch):
     assert not any(r.metadata.get("_meta") for r in results)
 
 
-def test_the_unfiltered_fallback_also_excludes_meta(patched, monkeypatch):
-    """The retry for collections lacking the filtered fields dropped the filter."""
-    # A filter on an allowed field that matches nothing forces the fallback path.
+def test_the_soft_filter_retry_also_excludes_meta(patched, monkeypatch):
+    """Only a *soft* filter is retried without, and that retry still hides the meta
+    points. A caller's scope is never dropped — see
+    test_a_scope_that_matches_nothing_returns_nothing."""
     cfg = rag_tool.get_config()
     monkeypatch.setattr(cfg.retrieval, "filterable_fields", ["source_scope"])
 
@@ -110,7 +111,9 @@ def test_the_unfiltered_fallback_also_excludes_meta(patched, monkeypatch):
     client = EmptyThenFull(_tie_at_top())
     monkeypatch.setattr(rag_tool, "_get_client", lambda: client)
 
-    results = asyncio.run(rag_tool.retrieve("query", top_k=2, filters={"source_scope": "nope"}))
+    results = asyncio.run(
+        rag_tool.retrieve("query", top_k=2, soft_filters={"source_scope": "nope"})
+    )
 
     assert len(client.filters) == 2, "expected the fallback query to run"
     fallback = client.filters[1]
@@ -152,3 +155,64 @@ def test_a_chunk_carries_its_source_line_for_both_the_model_and_the_judge():
     # The model's numbered context is the same string with an index in front. If this
     # ever fails, the two have drifted and the judge is scoring against the wrong text.
     assert rag_tool.build_context([result], figure_markers=False) == f"[1] {entry}"
+
+
+# --------------------------------------------------------------------------- #
+# A caller's scope is not a suggestion
+# --------------------------------------------------------------------------- #
+def test_a_scope_that_matches_nothing_returns_nothing(patched, monkeypatch, capsys):
+    """The bug this replaces: an empty scope was retried without the filter, so a
+    profile scoped to a part answered from the whole corpus. Measured on the
+    multi-source example — `zeitraum=bis_2019 AND source_file=Alam_2026`, both real
+    values that never co-occur, returned six chunks violating both conditions."""
+    cfg = rag_tool.get_config()
+    monkeypatch.setattr(cfg.retrieval, "filterable_fields", ["kategorie"])
+
+    class NeverMatches(FakeClient):
+        def query_points(self, collection_name, query, limit, query_filter=None, **kw):
+            self.filters.append(query_filter)
+            return type("R", (), {"points": []})()
+
+    client = NeverMatches(_tie_at_top())
+    monkeypatch.setattr(rag_tool, "_get_client", lambda: client)
+
+    results = asyncio.run(rag_tool.retrieve("q", top_k=3, filters={"kategorie": "intern"}))
+
+    assert results == [], "an empty scope must stay empty, not widen to everything"
+    assert len(client.filters) == 1, "no retry may drop the caller's scope"
+    assert any(c.key == "kategorie" for c in client.filters[0].must or [])
+    assert "retrieval_scope_empty" in capsys.readouterr().out, (
+        "silence is what made this invisible; the empty scope has to be diagnosable"
+    )
+
+
+def test_a_soft_filter_is_dropped_but_the_scope_survives(patched, monkeypatch):
+    """A `document` name the model invented should not sink the answer, and must not
+    take the profile's scope down with it."""
+    cfg = rag_tool.get_config()
+    monkeypatch.setattr(cfg.retrieval, "filterable_fields", ["kategorie", "source_file"])
+
+    class EmptyThenFull(FakeClient):
+        def query_points(self, collection_name, query, limit, query_filter=None, **kw):
+            self.filters.append(query_filter)
+            if len(self.filters) == 1:
+                return type("R", (), {"points": []})()
+            return self._select(query_filter, limit)
+
+    client = EmptyThenFull(_tie_at_top())
+    monkeypatch.setattr(rag_tool, "_get_client", lambda: client)
+
+    asyncio.run(
+        rag_tool.retrieve(
+            "q", top_k=2,
+            filters={"kategorie": "handbuch"},
+            soft_filters={"source_file": "erfunden.pdf"},
+        )
+    )
+
+    assert len(client.filters) == 2, "expected one retry"
+    first, retry = client.filters
+    assert {c.key for c in first.must} == {"kategorie", "source_file"}
+    assert {c.key for c in retry.must} == {"kategorie"}, (
+        "the retry drops only the model's guess"
+    )
