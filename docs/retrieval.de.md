@@ -1,10 +1,11 @@
 # Hybride Suche
 
 Semantische Suche ist gut in Bedeutung und schlecht in exakten Zeichenketten. Frag
-sie nach `BSI-Standard 200-2`, und sie liefert bereitwillig `200-1` — für ein
-Embedding-Modell bedeuten diese beiden Sätze fast dasselbe. Bei einem Korpus aus
-Normnummern, Fachkomposita und Eigennamen ist das der Unterschied zwischen einer
-richtigen Antwort und einer selbstbewusst falschen.
+sie im mitgelieferten Paper-Korpus nach `ab15898`, der Katalognummer eines Antikörpers,
+und sie liefert Textstellen aus einem anderen Paper — für ein Embedding-Modell ist eine
+Katalognummer kaum Signal, und thematisch ähnliche Absätze gibt es in jedem der Paper.
+Bei einem Korpus aus Katalognummern, Chemikalien, Zelllinien und Eigennamen ist das der
+Unterschied zwischen einer richtigen Antwort und einer selbstbewusst falschen.
 
 Die hybride Suche stellt der semantischen eine zweite, rein lexikalische Suche zur
 Seite und führt beide Ranglisten zusammen. Sonst ändert sich nichts: Der Assistent
@@ -26,10 +27,13 @@ einem Paper eines Neun-Paper-Korpus vorkommen — Katalognummern, Zelllinien,
 Fluorophore, Chemikalien. Genau das, was ein Embedding auf „irgendwas mit
 Labormethoden" abbildet, während die exakte Zeichenkette das einzige Signal ist.
 
-Der Fehler von Dense ist kein Verfehlen, sondern ein Beinahe-Treffer: Auf
-`BSI-Standard 200-2` liefert es `200-1` auf Platz 1, mit einem Abstand von 0,0022 —
-reiner Zufall. Das richtige Dokument ist in den Ergebnissen, nur nicht vorn, und ein
-Assistent, der den ersten Treffer liest, antwortet aus dem falschen Standard.
+Der Fehler von Dense ist dabei kein knappes Danebenliegen. Auf `ab15898` steht
+Lin 2024 auf Platz 1, und der Chunk mit der Nummer ist überhaupt nicht unter den
+ersten fünf; mit Hybrid steht Schmidt 2022 vorn, das Paper, in dem die Nummer
+tatsächlich steht. Bei `carbonylcyanide-m-chlorophenylhydrazone` dasselbe Muster:
+Dense landet auf Schmidt 2022, Hybrid auf Schauer 2018. Ein Assistent, der den ersten
+Treffer liest, antwortet also aus dem falschen Paper — und tut das selbstbewusst,
+weil die Textstelle thematisch durchaus passt.
 
 ## Einschalten
 
@@ -159,10 +163,11 @@ Unterschied zwischen benutzbar und nicht.
 ## Wie es funktioniert
 
 Beim Ingest bekommt jeder Chunk einen zweiten Vektor: seine Begriffe, gezählt.
-Begriffe werden kleingeschrieben, und Bindestrich-Komposita bleiben ganz — `BSI-Standard`
-ist ein Begriff und nicht zwei Allerweltswörter. Dieses Detail macht den Großteil des
-Gewinns aus und steht in `apps/chainlit/kb/sparse.py`, falls dein Korpus anders
-tokenisiert werden muss.
+Begriffe werden kleingeschrieben, und Bindestrich-Komposita bleiben ganz —
+`carbonylcyanide-m-chlorophenylhydrazone` ist ein Begriff und nicht drei Bruchstücke,
+von denen eines ein einzelnes `m` ist. Dieses Detail macht den Großteil des Gewinns
+aus und steht in `apps/chainlit/kb/sparse.py`, falls dein Korpus anders tokenisiert
+werden muss.
 
 Bei der Anfrage wird die Frage genauso tokenisiert — **ohne Funktionswörter**.
 Gespeicherte Chunks behalten jedes Wort; gefiltert wird nur die Frage.
