@@ -251,35 +251,36 @@ additional fields of your own in a citation, list them under
 
 ## 6. Split one instance into parts of a corpus
 
-A corpus often has parts that a reader would not mix: product papers, brochures,
-internal notes. You can keep them in one instance and let the user choose which part
+A corpus is often made of parts you want to search separately, because they differ in
+length, have different readers, or simply do not answer the same question. Rather than
+running several instances, you can keep them in one and let the user choose which part
 is searched.
 
-Three pieces have to agree. Give each part its own data source with a label, allow the
-label to be filtered on, and add a role that filters:
+Three places have to agree: each part gets its own data source with a label, the label
+is allowed to be filtered on, and a role filters on it.
 
 ```yaml
 data_sources:
-  - name: bead-paper
-    path: docs/bead-paper
+  - name: handbooks
+    path: docs/handbooks
     format: pdf
-    extra_metadata: { kategorie: bead_paper }
-  - name: flyer
-    path: docs/flyer
+    extra_metadata: { category: handbook }
+  - name: leaflets
+    path: docs/leaflets
     format: pdf
-    extra_metadata: { kategorie: flyer }
-    chunking: { strategy: heading }   # a flyer is not a paper
+    extra_metadata: { category: leaflet }
+    chunking: { strategy: heading }   # short documents, different chunking
 
 retrieval:
-  payload_indexes: [kategorie]                  # Qdrant index for the field
-  filterable_fields: [source_file, kategorie]   # allow-list
+  payload_indexes: [category]                  # Qdrant index for the field
+  filterable_fields: [source_file, category]   # allow-list
 
 profiles:
-  - id: bead
-    name: "Bead-Paper"
-    retrieval_filters: { kategorie: bead_paper }
+  - id: handbooks
+    name: "Handbooks"
+    retrieval_filters: { category: handbook }
   - id: all
-    name: "Everything"                          # no filter: searches all parts
+    name: "All documents"                      # no filter: searches everything
 ```
 
 `extra_metadata` is copied onto every chunk the source produces, so the label travels
@@ -288,8 +289,8 @@ listed is **silently ignored**, which is the usual reason a profile appears to d
 nothing. `payload_indexes` builds the Qdrant index for it; without one, filtering
 still works but scans.
 
-Each part can also be chunked differently, which is often the real win. A two-page
-flyer and a twenty-page paper do not want the same strategy.
+Each part can also be chunked differently, which is often the real win: a two-page
+leaflet and a twenty-page handbook do not want the same strategy.
 
 !!! warning "A filter is not a permission"
     `retrieval_filters` scopes what is *searched*. Anyone who can use the app can pick
@@ -305,7 +306,7 @@ but it cannot choose a category. Categories come from the role the user picked.
 A runnable version of exactly this lives in
 `examples/papers/rag.config.multi-source.yaml`. It splits the nine shipped papers into
 three parts by publication period, with one role per part and one that searches all of
-them:
+them.
 
 To run it, point `RAG_CONFIG` at it in `apps/chainlit/.env`:
 

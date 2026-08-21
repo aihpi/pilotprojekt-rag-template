@@ -265,36 +265,37 @@ schreibt, sollte er dasselbe tun. Eigene Zusatzfelder zeigst du in Zitaten über
 
 ## 6. Eine Instanz in Teile eines Korpus aufteilen
 
-Ein Korpus hat oft Teile, die man nicht vermischen will: Produkt-Paper, Broschüren,
-interne Notizen. Du kannst sie in einer Instanz halten und die Nutzenden wählen
-lassen, welcher Teil durchsucht wird.
+Ein Korpus besteht oft aus Teilen, die man getrennt durchsuchen will, weil sie
+unterschiedlich lang sind, unterschiedliche Leser haben oder einfach nicht dieselbe
+Frage beantworten. Statt mehrere Instanzen zu betreiben, kannst du sie in einer halten
+und die Nutzenden wählen lassen, welcher Teil gesucht wird.
 
-Drei Stellen müssen zusammenpassen. Jeder Teil bekommt eine eigene Datenquelle mit
+Drei Stellen müssen zusammenpassen: Jeder Teil bekommt eine eigene Datenquelle mit
 einem Etikett, das Etikett wird zum Filtern freigegeben, und eine Rolle filtert
-darauf:
+darauf.
 
 ```yaml
 data_sources:
-  - name: bead-paper
-    path: docs/bead-paper
+  - name: handbuecher
+    path: docs/handbuecher
     format: pdf
-    extra_metadata: { kategorie: bead_paper }
-  - name: flyer
-    path: docs/flyer
+    extra_metadata: { kategorie: handbuch }
+  - name: merkblaetter
+    path: docs/merkblaetter
     format: pdf
-    extra_metadata: { kategorie: flyer }
-    chunking: { strategy: heading }   # ein Flyer ist kein Paper
+    extra_metadata: { kategorie: merkblatt }
+    chunking: { strategy: heading }   # kurze Dokumente, anderes Chunking
 
 retrieval:
   payload_indexes: [kategorie]                  # Qdrant-Index für das Feld
   filterable_fields: [source_file, kategorie]   # Freigabeliste
 
 profiles:
-  - id: bead
-    name: "Bead-Paper"
-    retrieval_filters: { kategorie: bead_paper }
+  - id: handbuecher
+    name: "Handbücher"
+    retrieval_filters: { kategorie: handbuch }
   - id: alles
-    name: "Gesamter Bestand"                    # ohne Filter: sucht überall
+    name: "Alle Dokumente"                      # ohne Filter: sucht überall
 ```
 
 `extra_metadata` wird auf jeden Chunk der Quelle kopiert, das Etikett reist also mit
@@ -304,8 +305,8 @@ Rolle scheinbar nichts tut. `payload_indexes` legt den Qdrant-Index dafür an; o
 funktioniert das Filtern weiterhin, scannt aber.
 
 Jeder Teil kann außerdem anders gechunkt werden, und das ist oft der eigentliche
-Gewinn. Ein zweiseitiger Flyer und ein zwanzigseitiges Paper wollen nicht dieselbe
-Strategie.
+Gewinn: Ein zweiseitiges Merkblatt und ein zwanzigseitiges Handbuch wollen nicht
+dieselbe Strategie.
 
 !!! warning "Ein Filter ist kein Zugriffsrecht"
     `retrieval_filters` begrenzt, *was gesucht wird*. Wer die App benutzen kann, kann
@@ -322,7 +323,7 @@ der Nutzer ausgewählt hat.
 Genau das in lauffähiger Form steht in
 `examples/papers/rag.config.multi-source.yaml`. Die Datei teilt die neun
 mitgelieferten Paper nach Erscheinungszeitraum in drei Teile, mit einer Rolle pro Teil
-und einer, die alles durchsucht:
+und einer, die alles durchsucht.
 
 Zum Starten `RAG_CONFIG` in `apps/chainlit/.env` darauf zeigen lassen:
 
