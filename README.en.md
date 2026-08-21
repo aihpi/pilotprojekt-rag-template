@@ -224,20 +224,9 @@ Every single option is listed in [Configuration](docs/configuration.md).
 
 ### Turning evaluation on
 
-Evaluation is off by default because it costs extra calls per answer. To turn it
-on, start the evaluation service and set one flag:
-
-```bash
-docker compose --profile eval up -d
-```
-
-The `--profile eval` flag starts an extra container that handles scoring only. It
-runs separately from the chat app so the heavy scoring library does not slow down
-answers, and so a failed score never loses an answer. Without `--profile eval`
-this container is neither built nor started. If you do not need scoring, you pay
-nothing for it.
-
-Then add this to your settings file:
+Evaluation is off by default because it costs extra calls per answer. The
+evaluation service starts with the rest of the stack, so one flag in your settings
+file is the whole switch:
 
 ```yaml
 evaluation:

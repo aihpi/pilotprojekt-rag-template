@@ -146,7 +146,9 @@ Wenn es nie auftaucht, prüfe der Reihe nach:
 
 1. **Ist die Evaluation eingeschaltet?** Sie ist standardmäßig aus. In deiner
    Einstellungsdatei muss `evaluation: {enabled: true}` stehen, und der
-   Evaluations-Dienst muss laufen (`docker compose --profile eval up -d`).
+   und die App muss danach neu gestartet werden. Der Evaluations-Dienst selbst
+   startet mit dem übrigen Stack — prüfe mit `docker compose ps`, ob er läuft,
+   falls nie Werte erscheinen.
 2. **Hast du eine Frage gestellt, die die Wissensbasis nutzt?** Die Evaluation
    bewertet nur Antworten, bei denen etwas nachgeschlagen wurde. Hat der Assistent
    aus allgemeinem Wissen geantwortet oder gesagt „steht nicht in den Dokumenten",

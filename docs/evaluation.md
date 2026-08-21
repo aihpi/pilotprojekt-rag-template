@@ -92,14 +92,8 @@ conclusion drawn from a single number.
 
 Two things have to be true.
 
-**1. Start the evaluation service.** It runs as its own container and is not part
-of the normal startup:
-
-```bash
-docker compose --profile eval up -d
-```
-
-**2. Turn it on in your config.** In your `rag.config.yaml`:
+**Turn it on in your config.** The evaluation service starts with the rest of the
+stack; this is the only switch. In your `rag.config.yaml`:
 
 ```yaml
 evaluation:

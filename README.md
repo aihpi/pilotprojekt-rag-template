@@ -235,21 +235,8 @@ Jede einzelne Option steht in der [Konfiguration](docs/configuration.de.md).
 ### Evaluation einschalten
 
 Die Evaluation ist standardmäßig aus, weil sie zusätzliche Aufrufe pro Antwort
-kostet. Zum Einschalten den Evaluations-Dienst starten und eine Einstellung
-setzen:
-
-```bash
-docker compose --profile eval up -d
-```
-
-Das `--profile eval` startet einen zusätzlichen Container, der nur für die
-Bewertung zuständig ist. Er läuft getrennt von der Chat-App, damit die schwere
-Bewertungsbibliothek den Antwortweg nicht bremst und damit eine Bewertung, die
-fehlschlägt, nie eine Antwort verliert. Ohne `--profile eval` wird dieser
-Container weder gebaut noch gestartet. Wer die Bewertung nicht braucht, zahlt
-also nichts dafür.
-
-Dann in deiner Einstellungsdatei ergänzen:
+kostet. Der Evaluations-Dienst startet mit dem übrigen Stack, eine Einstellung in
+deiner Konfigurationsdatei ist also der ganze Schalter:
 
 ```yaml
 evaluation:
