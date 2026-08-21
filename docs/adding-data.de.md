@@ -308,6 +308,35 @@ nicht darin steht, wird **stillschweigend ignoriert** — der übliche Grund, wa
 Rolle scheinbar nichts tut. `payload_indexes` legt den Qdrant-Index dafür an; ohne ihn
 funktioniert das Filtern weiterhin, scannt aber.
 
+Ein Profil kann auf eine Kategorie filtern oder auf mehrere gleichzeitig:
+
+```yaml
+profiles:
+  # eine Kategorie
+  - id: handbuecher
+    name: "Handbücher"
+    retrieval_filters: { kategorie: handbuch }
+
+  # mehrere Kategorien, ODER-verknüpft
+  - id: bis-2023
+    name: "Bis 2023"
+    retrieval_filters: { zeitraum: [bis_2019, "2020_2023"] }
+
+  # mehrere Felder, UND-verknüpft
+  - id: alte-handbuecher
+    name: "Ältere Handbücher"
+    retrieval_filters: { zeitraum: bis_2019, kategorie: handbuch }
+
+  # ohne Filter: sucht alles
+  - id: alles
+    name: "Alle Dokumente"
+```
+
+`kategorie` und `zeitraum` sind hier nur Beispielnamen; es sind die Etiketten, die du
+selbst in `extra_metadata` gesetzt hast. Für mehrere Werte in einem Feld brauchst du
+die Listenform: Zweimal denselben Schlüssel zu schreiben ist in YAML nicht möglich,
+der zweite gewinnt einfach.
+
 Jeder Teil kann außerdem anders gechunkt werden, und das ist oft der eigentliche
 Gewinn: Ein zweiseitiges Merkblatt und ein zwanzigseitiges Handbuch wollen nicht
 dieselbe Strategie.

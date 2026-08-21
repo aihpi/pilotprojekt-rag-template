@@ -292,6 +292,34 @@ listed is **silently ignored**, which is the usual reason a profile appears to d
 nothing. `payload_indexes` builds the Qdrant index for it; without one, filtering
 still works but scans.
 
+A profile can filter on one category or on several at once:
+
+```yaml
+profiles:
+  # one category
+  - id: handbooks
+    name: "Handbooks"
+    retrieval_filters: { category: handbook }
+
+  # several categories, OR
+  - id: up-to-2023
+    name: "Up to 2023"
+    retrieval_filters: { period: [up_to_2019, "2020_2023"] }
+
+  # several fields, AND
+  - id: older-handbooks
+    name: "Older handbooks"
+    retrieval_filters: { period: up_to_2019, category: handbook }
+
+  # no filter: searches everything
+  - id: all
+    name: "All documents"
+```
+
+`category` and `period` are example names here: they are the labels you set yourself in
+`extra_metadata`. Several values for one field need the list form, because YAML cannot
+take the same key twice — the second one simply wins.
+
 Each part can also be chunked differently, which is often the real win: a two-page
 leaflet and a twenty-page handbook do not want the same strategy.
 
