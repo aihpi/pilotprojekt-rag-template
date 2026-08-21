@@ -139,14 +139,12 @@ images:
   max_attach_images: 3              # only used by mode: attach
   vision_capable_models: [gemma-4-31b]
 
-# Automatic answer scoring. Off by default because every scored answer costs two
-# judge calls plus one embedding call, and because it needs the separate `eval`
-# service running (`docker compose up eval`). With this off the app behaves exactly
-# as it would without this block.
+# Automatic answer scoring. With `enabled: false` the app behaves exactly as it
+# would without this block: nothing is imported, posted or stored.
 #
 # Read the numbers as deltas, not as grades: 0.87 on its own says very little,
-# 0.87 -> 0.71 after a chunking change says a lot. The dashboard on :8001 groups
-# scores by configuration so that comparison is the easy thing to do.
+# 0.87 -> 0.71 after a chunking change says a lot. The badge's `Vergleich` tab
+# groups scores by configuration so that comparison is the easy thing to do.
 evaluation:
   # On here so a fresh clone actually sees the badge — a feature nobody sees is a
   # feature nobody tunes. The eval service starts with the rest of the stack, so

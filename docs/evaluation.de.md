@@ -8,8 +8,10 @@ Die Evaluation gibt jeder Antwort zwei Kennzahlen und sammelt sie pro
 Konfiguration. Damit wird aus „ist das besser?" etwas, das du anschauen kannst,
 statt etwas, worüber man diskutiert.
 
-Sie ist **standardmäßig aus**. Es wird nichts gemessen, gesendet oder gespeichert,
-solange du sie nicht einschaltest.
+Der **Schema-Standard ist aus**: In deiner eigenen Instanz wird nichts gemessen,
+gesendet oder gespeichert, solange du sie nicht einschaltest. Die mitgelieferte
+Instanz `examples/papers` ist die Ausnahme und hat sie **an**, damit ein frischer
+Clone das Abzeichen ohne Konfiguration sieht.
 
 ## Die zwei Kennzahlen
 

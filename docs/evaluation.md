@@ -7,8 +7,10 @@ Evaluation gives every answer two scores and collects them per configuration, so
 "is this better?" becomes something you can look at instead of something you argue
 about.
 
-It is **off by default**. Nothing is measured, sent or stored until you switch it
-on.
+The **schema default is off**: your own instance measures, sends and stores
+nothing until you switch it on. The bundled `examples/papers` instance is the
+exception and ships with it **on**, so a fresh clone sees the badge without
+configuring anything.
 
 ## The two numbers
 
