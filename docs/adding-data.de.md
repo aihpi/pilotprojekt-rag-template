@@ -312,10 +312,4 @@ Eintrag schaltet also beide um, und der Ingest baut die Collection, bevor die Ap
 startet.
 
 Sie schreibt eine eigene Collection, liegt also neben dem kommentierten Beispiel statt
-es zu ersetzen. Wenn du sie bauen willst, *ohne* die laufende Instanz umzustellen, lass
-`.env` unangetastet und gib die Config einem einmaligen Ingest mit:
-
-```bash
-docker compose run --rm ingest python -m kb.ingest \
-  --config examples/papers/rag.config.multi-source.yaml
-```
+es zu ersetzen: Wer `RAG_CONFIG` zurückstellt, hat beide weiterhin.

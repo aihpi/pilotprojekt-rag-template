@@ -6,15 +6,9 @@
 #
 #   RAG_CONFIG=examples/papers/rag.config.multi-source.yaml
 #
-# then `docker compose up -d --build`. The app and the ingest service read that same
-# variable, so they cannot end up serving one collection while filling another, and
-# ingest runs first and builds the collection below before the app starts.
-#
-# To build it without switching the instance you are running, leave .env alone and
-# hand the config to a one-off ingest instead:
-#
-#   docker compose run --rm ingest python -m kb.ingest \
-#     --config examples/papers/rag.config.multi-source.yaml
+# then `docker compose up -d --build`. That one variable is read by both the app and
+# the ingest service, so the ingest fills the collection this file names and the app
+# serves the same one.
 #
 # The nine shipped papers have no product categories, so this splits them by
 # publication period. That is real metadata from the filenames rather than a taxonomy

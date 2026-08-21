@@ -296,10 +296,4 @@ variable, so one edit switches both, and ingest builds the collection before the
 starts.
 
 It writes its own collection, so it sits alongside the annotated example rather than
-replacing it. To build it *without* switching the instance you are running, leave
-`.env` alone and pass the config to a one-off ingest instead:
-
-```bash
-docker compose run --rm ingest python -m kb.ingest \
-  --config examples/papers/rag.config.multi-source.yaml
-```
+replacing it: switching `RAG_CONFIG` back leaves both intact.
