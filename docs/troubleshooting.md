@@ -137,10 +137,12 @@ read when it stopped was not saved. Running it again reads those files once more
 The badge above the chatbox shows how well each answer scored. If it never appears,
 check these in order:
 
-1. **Is evaluation turned on?** It is off by default. Your settings file needs
-   `evaluation: {enabled: true}`, and the app has to be restarted after adding it.
-   The evaluation service itself starts with the rest of the stack — check it is up
-   with `docker compose ps` if scores never appear.
+1. **Is evaluation turned on?** The schema default is off, but the bundled
+   `examples/papers` instance ships it on — so check which config you are running
+   before changing anything. For your own config, `evaluation: {enabled: true}`, and
+   the app has to be restarted after adding it. The evaluation service starts with
+   the rest of the stack — check it is up with `docker compose ps` if scores never
+   appear.
 2. **Did you ask a question that uses the knowledge base?** Evaluation only scores
    answers that looked something up. If the assistant answered from general
    knowledge or said "not in the documents", there is nothing to score.
