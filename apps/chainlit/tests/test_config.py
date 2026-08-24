@@ -256,3 +256,20 @@ def test_and_on_one_field_cannot_match_and_or_can():
     assert count(one, other) == 0, (
         "if this ever passes, the docs' reason for the list form is wrong"
     )
+
+
+def test_the_two_papers_examples_agree_on_scoring():
+    """They sit in one folder and a reader switches between them to compare retrieval.
+    Disagreeing about whether answers are scored makes the switch look like a
+    regression — the badge simply stops appearing. `examples/minimal` is exempt: its
+    job is to show the schema defaults."""
+    annotated, multi = load_config(PAPERS).evaluation, load_config(MULTI).evaluation
+
+    assert annotated.enabled == multi.enabled
+    assert annotated.metrics == multi.metrics
+    for cfg in (annotated, multi):
+        if cfg.enabled:
+            assert cfg.judge_model, (
+                "pin the judge: left null it follows whichever model answered, so every "
+                "model grades its own work and scores stop being comparable"
+            )

@@ -107,6 +107,13 @@ sources:
   data_dir: ../../data/documents      # served files, so citations open the PDF
   served_extensions: [.pdf]
 
+# On, like the annotated example, so switching between the two does not silently
+# change what you see. The judge is pinned for the reason spelled out there: left
+# null it follows whichever model answered, so every model grades its own work.
+evaluation:
+  enabled: true
+  judge_model: gemma-4-31b
+
 tools:
   enabled: [search, list_documents, fetch_document, expand_context, verify_claim]
 
