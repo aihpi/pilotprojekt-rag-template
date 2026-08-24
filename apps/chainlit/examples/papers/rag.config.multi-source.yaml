@@ -107,6 +107,10 @@ sources:
   data_dir: ../../data/documents      # served files, so citations open the PDF
   served_extensions: [.pdf]
 
+evaluation:
+  enabled: true
+  judge_model: gemma-4-31b
+
 tools:
   enabled: [search, list_documents, fetch_document, expand_context, verify_claim]
 
