@@ -144,11 +144,12 @@ Dateien noch einmal gelesen.
 Das Abzeichen über dem Eingabefeld zeigt, wie gut jede Antwort abgeschnitten hat.
 Wenn es nie auftaucht, prüfe der Reihe nach:
 
-1. **Ist die Evaluation eingeschaltet?** Sie ist standardmäßig aus. In deiner
-   Einstellungsdatei muss `evaluation: {enabled: true}` stehen, und der
-   und die App muss danach neu gestartet werden. Der Evaluations-Dienst selbst
-   startet mit dem übrigen Stack — prüfe mit `docker compose ps`, ob er läuft,
-   falls nie Werte erscheinen.
+1. **Ist die Evaluation eingeschaltet?** Die Schema-Vorgabe ist aus, die
+   mitgelieferte Instanz `examples/papers` hat sie aber an — prüfe also zuerst,
+   welche Config du fährst. In einer eigenen Config muss
+   `evaluation: {enabled: true}` stehen, und die App muss danach neu gestartet
+   werden. Der Evaluations-Dienst startet mit dem übrigen Stack — prüfe mit
+   `docker compose ps`, ob er läuft, falls nie Werte erscheinen.
 2. **Hast du eine Frage gestellt, die die Wissensbasis nutzt?** Die Evaluation
    bewertet nur Antworten, bei denen etwas nachgeschlagen wurde. Hat der Assistent
    aus allgemeinem Wissen geantwortet oder gesagt „steht nicht in den Dokumenten",
