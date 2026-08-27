@@ -67,6 +67,7 @@ from tools import (  # noqa: E402,F401
     expand_context,
     fetch_document,
     list_documents,
+    panda_db,
     search,
     verify_claim,
 )
