@@ -1,0 +1,57 @@
+# panda-db test config: the papers example corpus + the search_bead_literature tool.
+# Based on examples/papers/rag.config.yaml.
+name: panda-rag
+language: en
+
+models:
+  chat_model: gpt-oss-120b
+  fallback_chat_model: gemma-4-31b
+  embed_model: octen-embedding-8b
+
+vector_store:
+  collection: papers
+
+data_sources:
+  - name: papers
+    path: ../data/documents
+    format: pdf
+    glob: "*.pdf"
+    chunking:
+      strategy: semantic
+
+retrieval:
+  top_k: 5
+  hybrid: true
+  fusion: rrf
+  prefetch_limit: 30
+  filterable_fields: [source_file]
+
+sources:
+  data_dir: ../data/documents
+  served_extensions: [.pdf]
+
+tools:
+  enabled: [search, list_documents, search_bead_literature]
+  descriptions:
+    search_bead_literature: >
+      Search the PolyAn bead literature database. Returns papers that used beads
+      matching the given attributes (surface, diameter, dye, or product number),
+      along with the exact quote from the paper. Use when the user asks which
+      papers used a specific bead type or product.
+      Always present ALL results as a markdown table with columns: title,
+      first_author, year, doi, surface, diameter, dye, product_id, confirmed,
+      page, quote. Never omit or summarize rows.
+
+prompt:
+  auto_generate: true
+  starter_questions:
+    - "Which papers used PolyAn beads with product number 11000006?"
+    - "Which papers used streptavidin-coated beads?"
+    - "Which papers are in the knowledge base?"
+
+evaluation:
+  enabled: false
+
+app:
+  personalization_enabled: false
+  show_settings: true

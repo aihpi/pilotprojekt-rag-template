@@ -77,8 +77,11 @@ def _schema(cfg: "RagConfig") -> dict[str, Any]:
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of results to return.",
-                        "default": 10,
+                        "description": (
+                            "Maximum results to return. Only set this if the user explicitly "
+                            "asks for a specific number, e.g. 'find me 5 papers'. "
+                            "Omit otherwise -- all matching papers are returned."
+                        ),
                     },
                 },
                 "required": [],
@@ -88,23 +91,22 @@ def _schema(cfg: "RagConfig") -> dict[str, Any]:
 
 
 def _query(db_path: str, surface: str | None, diameter: str | None,
-           dye: str | None, product_id: str | None, limit: int) -> list[dict]:
+           dye: str | None, product_id: str | None, limit: int | None) -> list[dict]:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
     try:
         params = {
             "surface": surface,
             "diameter": diameter,
             "dye": dye,
             "product_id": product_id,
-            "limit": limit,
         }
 
         if product_id is not None:
-            # Filter through mention_product to match on a specific catalog ID.
-            # confirmed=1 means the pipeline extracted this exact product number
-            # from the text; confirmed=0 means it is a resolved candidate.
-            sql = """
+            # confirmed=1: product number was explicitly in the paper text.
+            # confirmed=0: pipeline-resolved candidate.
+            sql = f"""
                 SELECT DISTINCT
                     p.title, p.year, p.doi, p.first_author,
                     m.surface_catalog, m.diameter_catalog, m.dye_catalog,
@@ -119,13 +121,10 @@ def _query(db_path: str, surface: str | None, diameter: str | None,
                   AND (m.surface_catalog = :surface OR :surface IS NULL)
                   AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
                   AND (m.dye_catalog = :dye OR :dye IS NULL)
-                LIMIT :limit
+                {limit_clause}
             """
-            rows = conn.execute(sql, params).fetchall()
         else:
-            # No product_id: search by attributes, include mentions with no
-            # resolved product (candidate_count = 0) as well as those that do.
-            sql = """
+            sql = f"""
                 SELECT DISTINCT
                     p.title, p.year, p.doi, p.first_author,
                     m.surface_catalog, m.diameter_catalog, m.dye_catalog,
@@ -139,9 +138,9 @@ def _query(db_path: str, surface: str | None, diameter: str | None,
                 WHERE (m.surface_catalog = :surface OR :surface IS NULL)
                   AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
                   AND (m.dye_catalog = :dye OR :dye IS NULL)
-                LIMIT :limit
+                {limit_clause}
             """
-            rows = conn.execute(sql, params).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     finally:
         conn.close()
 
@@ -168,6 +167,18 @@ def _query(db_path: str, surface: str | None, diameter: str | None,
     return results
 
 
+def _as_markdown_table(rows: list[dict]) -> str:
+    headers = ["title", "first_author", "year", "doi", "surface", "diameter",
+               "dye", "product_id", "confirmed", "page", "quote"]
+    header_row = "| " + " | ".join(headers) + " |"
+    sep = "| " + " | ".join("---" for _ in headers) + " |"
+    lines = [header_row, sep]
+    for r in rows:
+        cells = [str(r.get(h) or "") for h in headers]
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
 @register_tool("search_bead_literature", build_schema=_schema)
 async def _search_bead_literature(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     db_path = os.environ.get("PANDA_DB_PATH", "")
@@ -182,17 +193,23 @@ async def _search_bead_literature(args: dict[str, Any], ctx: ToolContext) -> Too
     diameter = args.get("diameter") or None
     dye = args.get("dye") or None
     product_id = args.get("product_id") or None
-    limit = max(1, min(int(args.get("limit") or 10), 50))
+    raw_limit = args.get("limit")
+    limit = max(1, int(raw_limit)) if raw_limit is not None else None
 
-    results = _query(db_path, surface, diameter, dye, product_id, limit)
+    filters = {k: v for k, v in {
+        "product_id": product_id, "surface": surface,
+        "diameter": diameter, "dye": dye,
+    }.items() if v}
+
+    rows = _query(db_path, surface, diameter, dye, product_id, limit)
+    table = _as_markdown_table(rows)
     return ToolResult(
         payload={
-            "query": {k: v for k, v in {
-                "surface": surface, "diameter": diameter,
-                "dye": dye, "product_id": product_id,
-            }.items() if v},
-            "count": len(results),
-            "results": results,
+            "filters_applied": filters,
+            "count": len(rows),
+            "markdown_table": table,
+            "instruction": "Present the markdown_table verbatim, preceded by the filters_applied and count.",
         },
         results=[],
+        step_output={"filters": filters, "count": len(rows), "results": rows},
     )
