@@ -24,11 +24,11 @@ if TYPE_CHECKING:
 
 _DISCOVERY_HEADERS = [
     "title", "first_author", "year", "doi",
-    "surface", "diameter", "dye", "source", "mention_count",
+    "surface", "diameter", "dye", "source", "mention_count", "review_decision",
 ]
 _VERIFICATION_HEADERS = [
     "title", "first_author", "year", "doi",
-    "surface", "diameter", "dye", "product_id", "confirmed", "page", "quote", "source",
+    "surface", "diameter", "dye", "product_id", "confirmed", "page", "quote", "source", "review_decision",
 ]
 
 _DESC = {
@@ -110,12 +110,14 @@ def _query_discovery(conn: sqlite3.Connection, params: dict, limit: int | None) 
     p.title, p.year, p.doi, p.first_author,
     m.surface_catalog, m.diameter_catalog, m.dye_catalog,
     MIN(m.source) AS source,
-    COUNT(*) AS mention_count
+    COUNT(*) AS mention_count,
+    MIN(m.review_decision) AS review_decision
 FROM paper p
 JOIN mention m ON m.paper_id = p.id
 WHERE (m.surface_catalog = :surface OR :surface IS NULL)
   AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
   AND (m.dye_catalog = :dye OR :dye IS NULL)
+  AND (m.review_decision != 'rejected' OR m.review_decision IS NULL)
 GROUP BY p.doi, m.surface_catalog, m.diameter_catalog, m.dye_catalog
 ORDER BY p.year DESC
 LIMIT {cap}"""
@@ -125,7 +127,7 @@ LIMIT {cap}"""
             "first_author": r["first_author"],
             "surface": r["surface_catalog"], "diameter": r["diameter_catalog"],
             "dye": r["dye_catalog"], "source": r["source"],
-            "mention_count": r["mention_count"],
+            "mention_count": r["mention_count"], "review_decision": r["review_decision"],
         }
         for r in conn.execute(sql, params).fetchall()
     ]
@@ -143,7 +145,8 @@ def _query_verification(conn: sqlite3.Connection, params: dict,
     MAX(CASE WHEN m.product_number_catalog = :product_id THEN 1 ELSE 0 END) AS confirmed,
     MIN(e.page) AS page,
     MIN(e.quote) AS quote,
-    m.source
+    m.source,
+    m.review_decision
 FROM paper p
 JOIN mention m ON m.paper_id = p.id
 JOIN evidence e ON e.mention_id = m.id
@@ -152,7 +155,8 @@ WHERE mp.product_id = :product_id
   AND (m.surface_catalog = :surface OR :surface IS NULL)
   AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
   AND (m.dye_catalog = :dye OR :dye IS NULL)
-GROUP BY p.doi, mp.product_id, m.surface_catalog, m.diameter_catalog, m.dye_catalog, m.source
+  AND (m.review_decision != 'rejected' OR m.review_decision IS NULL)
+GROUP BY p.doi, mp.product_id, m.surface_catalog, m.diameter_catalog, m.dye_catalog, m.source, m.review_decision
 ORDER BY p.year DESC
 {limit_clause}"""
     else:
@@ -163,7 +167,8 @@ ORDER BY p.year DESC
     MAX(CASE WHEN m.product_number_catalog IS NOT NULL THEN 1 ELSE 0 END) AS confirmed,
     MIN(e.page) AS page,
     MIN(e.quote) AS quote,
-    m.source
+    m.source,
+    m.review_decision
 FROM paper p
 JOIN mention m ON m.paper_id = p.id
 JOIN evidence e ON e.mention_id = m.id
@@ -171,7 +176,8 @@ LEFT JOIN mention_product mp ON mp.mention_id = m.id
 WHERE (m.surface_catalog = :surface OR :surface IS NULL)
   AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
   AND (m.dye_catalog = :dye OR :dye IS NULL)
-GROUP BY p.doi, m.surface_catalog, m.diameter_catalog, m.dye_catalog, mp.product_id, m.source
+  AND (m.review_decision != 'rejected' OR m.review_decision IS NULL)
+GROUP BY p.doi, m.surface_catalog, m.diameter_catalog, m.dye_catalog, mp.product_id, m.source, m.review_decision
 ORDER BY p.year DESC
 {limit_clause}"""
     rows = [
@@ -182,6 +188,7 @@ ORDER BY p.year DESC
             "dye": r["dye_catalog"], "product_id": r["product_id"],
             "confirmed": bool(r["confirmed"]),
             "page": r["page"], "quote": r["quote"], "source": r["source"],
+            "review_decision": r["review_decision"],
         }
         for r in conn.execute(sql, params).fetchall()
     ]
