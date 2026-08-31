@@ -36,7 +36,7 @@ tools:
 prompt:
   auto_generate: true
   starter_questions:
-    - "Which papers used PolyAn beads with product number 11000006?"
+    - "Which papers used PolyAn beads with product number 10512011?"
     - "Which papers used streptavidin-coated beads?"
     - "Which papers are in the knowledge base?"
 

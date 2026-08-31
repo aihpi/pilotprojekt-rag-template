@@ -21,23 +21,32 @@ from tools.base import ToolContext, ToolResult
 if TYPE_CHECKING:
     from config.schema import RagConfig
 
+_DISCOVERY_HEADERS = [
+    "title", "first_author", "year", "doi",
+    "surface", "diameter", "dye", "source", "mention_count",
+]
+_VERIFICATION_HEADERS = [
+    "title", "first_author", "year", "doi",
+    "surface", "diameter", "dye", "product_id", "confirmed", "page", "quote", "source",
+]
+
 _DESC = {
     "de": (
-        "Durchsuche die PolyAn-Beads-Literaturdatenbank nach Papieren, die Beads "
-        "mit bestimmten Eigenschaften verwendet haben (Oberfläche, Durchmesser, Dye, "
-        "Produktnummer). Die vollständige Ergebnistabelle wird bereits im Tool-Schritt "
-        "angezeigt. Schreibe eine kurze Zusammenfassung: wie viele Treffer, wie viele "
-        "mit bestätigter Zitation (confirmed=true bedeutet, die Produktnummer stand "
-        "explizit im Paper), und auffällige Muster. Die Tabelle nicht wiederholen."
+        "Durchsuche die PolyAn-Beads-Literaturdatenbank. "
+        "Breite Anfragen (eine Eigenschaft, z.B. nur Oberfläche) geben eine Papierliste zurück – "
+        "Zitate sind im Tool-Schritt sichtbar, nicht in der Antwort. "
+        "Enge Anfragen (Produkt-ID oder mind. 2 Eigenschaften) geben volle Details inkl. Zitate zurück. "
+        "Schreibe eine kurze Zusammenfassung; reproduziere die Tabelle nicht."
     ),
     "en": (
-        "Search the PolyAn bead literature database. Returns papers that used beads "
-        "matching the given attributes (surface coating, diameter, dye, or product number). "
-        "The full results table is already displayed in the tool step panel for the user "
-        "to verify. Write a concise natural-language summary: how many papers matched, "
-        "how many had a confirmed citation (confirmed=true means the product number was "
-        "explicitly written in the paper), and any notable patterns. "
-        "Do not reproduce the table in your response. "
+        "Search the PolyAn bead literature database. "
+        "Broad queries (0-1 attribute, no product_id) return a compact paper list -- "
+        "quotes are shown in the tool step panel, not in the payload. "
+        "Narrow queries (product_id given OR 2+ of surface/diameter/dye specified) return full detail "
+        "including quotes and the confirmed flag (true = product number was explicitly written in the paper). "
+        "The full results table is already displayed in the tool step panel for the user to verify. "
+        "Write a concise natural-language summary: how many papers matched, how many had a confirmed "
+        "citation, and any notable patterns. Do not reproduce the table. "
         "Use when the user asks which papers used a specific bead type or product."
     ),
 }
@@ -94,87 +103,91 @@ def _schema(cfg: "RagConfig") -> dict[str, Any]:
     }
 
 
-def _query(db_path: str, surface: str | None, diameter: str | None,
-           dye: str | None, product_id: str | None, limit: int | None) -> list[dict]:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
-    try:
-        params = {
-            "surface": surface,
-            "diameter": diameter,
-            "dye": dye,
-            "product_id": product_id,
+def _query_discovery(conn: sqlite3.Connection, params: dict, limit: int | None) -> tuple[list[dict], str]:
+    """Broad query: one row per (paper x bead-type combo), no quotes, hard cap 100."""
+    cap = min(limit, 100) if limit else 100
+    sql = f"""SELECT
+    p.title, p.year, p.doi, p.first_author,
+    m.surface_catalog, m.diameter_catalog, m.dye_catalog,
+    m.source,
+    COUNT(*) AS mention_count
+FROM paper p
+JOIN mention m ON m.paper_id = p.id
+WHERE (m.surface_catalog = :surface OR :surface IS NULL)
+  AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
+  AND (m.dye_catalog = :dye OR :dye IS NULL)
+GROUP BY p.doi, m.surface_catalog, m.diameter_catalog, m.dye_catalog
+ORDER BY p.year DESC
+LIMIT {cap}"""
+    rows = [
+        {
+            "title": r["title"], "year": r["year"], "doi": r["doi"],
+            "first_author": r["first_author"],
+            "surface": r["surface_catalog"], "diameter": r["diameter_catalog"],
+            "dye": r["dye_catalog"], "source": r["source"],
+            "mention_count": r["mention_count"],
         }
-
-        if product_id is not None:
-            # confirmed=1: product number was explicitly in the paper text.
-            # confirmed=0: pipeline-resolved candidate.
-            sql = f"""
-                SELECT DISTINCT
-                    p.title, p.year, p.doi, p.first_author,
-                    m.surface_catalog, m.diameter_catalog, m.dye_catalog,
-                    mp.product_id,
-                    CASE WHEN m.product_number_catalog = :product_id THEN 1 ELSE 0 END AS confirmed,
-                    e.quote, e.page, m.source
-                FROM paper p
-                JOIN mention m ON m.paper_id = p.id
-                JOIN evidence e ON e.mention_id = m.id
-                JOIN mention_product mp ON mp.mention_id = m.id
-                WHERE mp.product_id = :product_id
-                  AND (m.surface_catalog = :surface OR :surface IS NULL)
-                  AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
-                  AND (m.dye_catalog = :dye OR :dye IS NULL)
-                {limit_clause}
-            """
-        else:
-            sql = f"""
-                SELECT DISTINCT
-                    p.title, p.year, p.doi, p.first_author,
-                    m.surface_catalog, m.diameter_catalog, m.dye_catalog,
-                    mp.product_id,
-                    0 AS confirmed,
-                    e.quote, e.page, m.source
-                FROM paper p
-                JOIN mention m ON m.paper_id = p.id
-                JOIN evidence e ON e.mention_id = m.id
-                LEFT JOIN mention_product mp ON mp.mention_id = m.id
-                WHERE (m.surface_catalog = :surface OR :surface IS NULL)
-                  AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
-                  AND (m.dye_catalog = :dye OR :dye IS NULL)
-                {limit_clause}
-            """
-        rows = conn.execute(sql, params).fetchall()
-    finally:
-        conn.close()
-
-    seen: set[tuple] = set()
-    results = []
-    for row in rows:
-        key = (row["doi"], row["product_id"])
-        if key in seen:
-            continue
-        seen.add(key)
-        results.append({
-            "title": row["title"],
-            "year": row["year"],
-            "doi": row["doi"],
-            "first_author": row["first_author"],
-            "surface": row["surface_catalog"],
-            "diameter": row["diameter_catalog"],
-            "dye": row["dye_catalog"],
-            "product_id": row["product_id"],
-            "confirmed": bool(row["confirmed"]),
-            "page": row["page"],
-            "quote": row["quote"],
-            "source": row["source"],
-        })
-    return results
+        for r in conn.execute(sql, params).fetchall()
+    ]
+    return rows, sql
 
 
-def _as_markdown_table(rows: list[dict]) -> str:
-    headers = ["title", "first_author", "year", "doi", "surface", "diameter",
-               "dye", "product_id", "confirmed", "page", "quote", "source"]
+def _query_verification(conn: sqlite3.Connection, params: dict,
+                        product_id: str | None, limit: int | None) -> tuple[list[dict], str]:
+    """Narrow query: full detail with quotes. One row per (doi, product_id) or (doi, bead-type)."""
+    limit_clause = f"LIMIT {int(limit)}" if limit else ""
+    if product_id is not None:
+        sql = f"""SELECT
+    p.title, p.year, p.doi, p.first_author,
+    m.surface_catalog, m.diameter_catalog, m.dye_catalog,
+    mp.product_id,
+    MAX(CASE WHEN m.product_number_catalog = :product_id THEN 1 ELSE 0 END) AS confirmed,
+    MIN(e.page) AS page,
+    MIN(e.quote) AS quote,
+    m.source
+FROM paper p
+JOIN mention m ON m.paper_id = p.id
+JOIN evidence e ON e.mention_id = m.id
+JOIN mention_product mp ON mp.mention_id = m.id
+WHERE mp.product_id = :product_id
+  AND (m.surface_catalog = :surface OR :surface IS NULL)
+  AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
+  AND (m.dye_catalog = :dye OR :dye IS NULL)
+GROUP BY p.doi, mp.product_id
+{limit_clause}"""
+    else:
+        sql = f"""SELECT
+    p.title, p.year, p.doi, p.first_author,
+    m.surface_catalog, m.diameter_catalog, m.dye_catalog,
+    mp.product_id,
+    0 AS confirmed,
+    MIN(e.page) AS page,
+    MIN(e.quote) AS quote,
+    m.source
+FROM paper p
+JOIN mention m ON m.paper_id = p.id
+JOIN evidence e ON e.mention_id = m.id
+LEFT JOIN mention_product mp ON mp.mention_id = m.id
+WHERE (m.surface_catalog = :surface OR :surface IS NULL)
+  AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
+  AND (m.dye_catalog = :dye OR :dye IS NULL)
+GROUP BY p.doi, m.surface_catalog, m.diameter_catalog, m.dye_catalog, mp.product_id
+{limit_clause}"""
+    rows = [
+        {
+            "title": r["title"], "year": r["year"], "doi": r["doi"],
+            "first_author": r["first_author"],
+            "surface": r["surface_catalog"], "diameter": r["diameter_catalog"],
+            "dye": r["dye_catalog"], "product_id": r["product_id"],
+            "confirmed": bool(r["confirmed"]),
+            "page": r["page"], "quote": r["quote"], "source": r["source"],
+        }
+        for r in conn.execute(sql, params).fetchall()
+    ]
+    return rows, sql
+
+
+def _as_markdown_table(rows: list[dict], headers: list[str]) -> str:
     header_row = "| " + " | ".join(headers) + " |"
     sep = "| " + " | ".join("---" for _ in headers) + " |"
     lines = [header_row, sep]
@@ -206,9 +219,42 @@ async def _search_bead_literature(args: dict[str, Any], ctx: ToolContext) -> Too
         "diameter": diameter, "dye": dye,
     }.items() if v}
 
-    rows = _query(db_path, surface, diameter, dye, product_id, limit)
+    attr_count = sum(1 for x in [surface, diameter, dye] if x)
+    is_narrow = product_id is not None or attr_count >= 2
+    mode = "verification" if is_narrow else "discovery"
+
+    params = {"surface": surface, "diameter": diameter, "dye": dye, "product_id": product_id}
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        if is_narrow:
+            rows, sql = _query_verification(conn, params, product_id, limit)
+            headers = _VERIFICATION_HEADERS
+        else:
+            rows, sql = _query_discovery(conn, params, limit)
+            headers = _DISCOVERY_HEADERS
+    finally:
+        conn.close()
+
+    if is_narrow:
+        reason = "product_id given" if product_id else f"{attr_count} attributes specified"
+        mode_line = f"**Mode: verification** ({reason} -- full detail, no cap)"
+    else:
+        mode_line = f"**Mode: discovery** ({attr_count} attribute(s) -- compact overview, capped at 100)"
+
+    # Substitute bound parameters into the SQL for display (values only, not executable)
+    sql_display = sql
+    for key, val in params.items():
+        sql_display = sql_display.replace(f":{key}", repr(val))
+
+    step = (
+        mode_line + "\n\n"
+        + "```sql\n" + sql_display + "\n```\n\n"
+        + _as_markdown_table(rows, headers)
+    )
+
     return ToolResult(
-        payload={"filters_applied": filters, "count": len(rows), "results": rows},
+        payload={"mode": mode, "filters_applied": filters, "count": len(rows), "results": rows},
         results=[],
-        step_output=_as_markdown_table(rows),
+        step_output=step,
     )
