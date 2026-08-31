@@ -32,15 +32,6 @@ sources:
 
 tools:
   enabled: [search, list_documents, search_bead_literature]
-  descriptions:
-    search_bead_literature: >
-      Search the PolyAn bead literature database. Returns papers that used beads
-      matching the given attributes (surface, diameter, dye, or product number),
-      along with the exact quote from the paper. Use when the user asks which
-      papers used a specific bead type or product.
-      Always present ALL results as a markdown table with columns: title,
-      first_author, year, doi, surface, diameter, dye, product_id, confirmed,
-      page, quote. Never omit or summarize rows.
 
 prompt:
   auto_generate: true

@@ -40,7 +40,7 @@ class ToolContext:
 class ToolResult:
     payload: dict[str, Any]                          # JSON-serializable -> tool message
     results: list["RagResult"] = field(default_factory=list)  # -> aggregation + citations
-    step_output: dict[str, Any] | None = None        # optional cl.Step.output override
+    step_output: dict[str, Any] | str | None = None  # optional cl.Step.output override
 
 
 SchemaBuilder = Callable[["RagConfig"], dict[str, Any]]

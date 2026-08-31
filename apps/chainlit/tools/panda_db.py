@@ -25,16 +25,20 @@ _DESC = {
     "de": (
         "Durchsuche die PolyAn-Beads-Literaturdatenbank nach Papieren, die Beads "
         "mit bestimmten Eigenschaften verwendet haben (Oberfläche, Durchmesser, Dye, "
-        "Produktnummer). Gibt Papiere, Bead-Attribute und das wörtliche Zitat aus "
-        "dem Papier zurück."
+        "Produktnummer). Die vollständige Ergebnistabelle wird bereits im Tool-Schritt "
+        "angezeigt. Schreibe eine kurze Zusammenfassung: wie viele Treffer, wie viele "
+        "mit bestätigter Zitation (confirmed=true bedeutet, die Produktnummer stand "
+        "explizit im Paper), und auffällige Muster. Die Tabelle nicht wiederholen."
     ),
     "en": (
         "Search the PolyAn bead literature database. Returns papers that used beads "
-        "matching the given attributes (surface coating, diameter, dye, or product "
-        "number), along with the exact quote from the paper. Each result has a "
-        "'confirmed' flag: true means the product number was explicitly written in "
-        "the paper; false means it is a pipeline-resolved candidate. Use when the "
-        "user asks which papers used a specific bead type or product."
+        "matching the given attributes (surface coating, diameter, dye, or product number). "
+        "The full results table is already displayed in the tool step panel for the user "
+        "to verify. Write a concise natural-language summary: how many papers matched, "
+        "how many had a confirmed citation (confirmed=true means the product number was "
+        "explicitly written in the paper), and any notable patterns. "
+        "Do not reproduce the table in your response. "
+        "Use when the user asks which papers used a specific bead type or product."
     ),
 }
 
@@ -112,7 +116,7 @@ def _query(db_path: str, surface: str | None, diameter: str | None,
                     m.surface_catalog, m.diameter_catalog, m.dye_catalog,
                     mp.product_id,
                     CASE WHEN m.product_number_catalog = :product_id THEN 1 ELSE 0 END AS confirmed,
-                    e.quote, e.page
+                    e.quote, e.page, m.source
                 FROM paper p
                 JOIN mention m ON m.paper_id = p.id
                 JOIN evidence e ON e.mention_id = m.id
@@ -130,7 +134,7 @@ def _query(db_path: str, surface: str | None, diameter: str | None,
                     m.surface_catalog, m.diameter_catalog, m.dye_catalog,
                     mp.product_id,
                     0 AS confirmed,
-                    e.quote, e.page
+                    e.quote, e.page, m.source
                 FROM paper p
                 JOIN mention m ON m.paper_id = p.id
                 JOIN evidence e ON e.mention_id = m.id
@@ -163,13 +167,14 @@ def _query(db_path: str, surface: str | None, diameter: str | None,
             "confirmed": bool(row["confirmed"]),
             "page": row["page"],
             "quote": row["quote"],
+            "source": row["source"],
         })
     return results
 
 
 def _as_markdown_table(rows: list[dict]) -> str:
     headers = ["title", "first_author", "year", "doi", "surface", "diameter",
-               "dye", "product_id", "confirmed", "page", "quote"]
+               "dye", "product_id", "confirmed", "page", "quote", "source"]
     header_row = "| " + " | ".join(headers) + " |"
     sep = "| " + " | ".join("---" for _ in headers) + " |"
     lines = [header_row, sep]
@@ -202,14 +207,8 @@ async def _search_bead_literature(args: dict[str, Any], ctx: ToolContext) -> Too
     }.items() if v}
 
     rows = _query(db_path, surface, diameter, dye, product_id, limit)
-    table = _as_markdown_table(rows)
     return ToolResult(
-        payload={
-            "filters_applied": filters,
-            "count": len(rows),
-            "markdown_table": table,
-            "instruction": "Present the markdown_table verbatim, preceded by the filters_applied and count.",
-        },
+        payload={"filters_applied": filters, "count": len(rows), "results": rows},
         results=[],
-        step_output={"filters": filters, "count": len(rows), "results": rows},
+        step_output=_as_markdown_table(rows),
     )
