@@ -12,6 +12,7 @@ Configuration:
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
@@ -104,12 +105,11 @@ def _schema(cfg: "RagConfig") -> dict[str, Any]:
 
 
 def _query_discovery(conn: sqlite3.Connection, params: dict, limit: int | None) -> tuple[list[dict], str]:
-    """Broad query: one row per (paper x bead-type combo), no quotes, hard cap 100."""
     cap = min(limit, 100) if limit else 100
     sql = f"""SELECT
     p.title, p.year, p.doi, p.first_author,
     m.surface_catalog, m.diameter_catalog, m.dye_catalog,
-    m.source,
+    MIN(m.source) AS source,
     COUNT(*) AS mention_count
 FROM paper p
 JOIN mention m ON m.paper_id = p.id
@@ -134,8 +134,7 @@ LIMIT {cap}"""
 
 def _query_verification(conn: sqlite3.Connection, params: dict,
                         product_id: str | None, limit: int | None) -> tuple[list[dict], str]:
-    """Narrow query: full detail with quotes. One row per (doi, product_id) or (doi, bead-type)."""
-    limit_clause = f"LIMIT {int(limit)}" if limit else ""
+    limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
     if product_id is not None:
         sql = f"""SELECT
     p.title, p.year, p.doi, p.first_author,
@@ -153,14 +152,15 @@ WHERE mp.product_id = :product_id
   AND (m.surface_catalog = :surface OR :surface IS NULL)
   AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
   AND (m.dye_catalog = :dye OR :dye IS NULL)
-GROUP BY p.doi, mp.product_id
+GROUP BY p.doi, mp.product_id, m.surface_catalog, m.diameter_catalog, m.dye_catalog, m.source
+ORDER BY p.year DESC
 {limit_clause}"""
     else:
         sql = f"""SELECT
     p.title, p.year, p.doi, p.first_author,
     m.surface_catalog, m.diameter_catalog, m.dye_catalog,
     mp.product_id,
-    0 AS confirmed,
+    MAX(CASE WHEN m.product_number_catalog IS NOT NULL THEN 1 ELSE 0 END) AS confirmed,
     MIN(e.page) AS page,
     MIN(e.quote) AS quote,
     m.source
@@ -171,7 +171,8 @@ LEFT JOIN mention_product mp ON mp.mention_id = m.id
 WHERE (m.surface_catalog = :surface OR :surface IS NULL)
   AND (m.diameter_catalog = :diameter OR :diameter IS NULL)
   AND (m.dye_catalog = :dye OR :dye IS NULL)
-GROUP BY p.doi, m.surface_catalog, m.diameter_catalog, m.dye_catalog, mp.product_id
+GROUP BY p.doi, m.surface_catalog, m.diameter_catalog, m.dye_catalog, mp.product_id, m.source
+ORDER BY p.year DESC
 {limit_clause}"""
     rows = [
         {
@@ -187,13 +188,18 @@ GROUP BY p.doi, m.surface_catalog, m.diameter_catalog, m.dye_catalog, mp.product
     return rows, sql
 
 
+def _cell(v: Any) -> str:
+    if v is None:
+        return ""
+    return str(v).replace("|", "\\|").replace("\n", " ").replace("\r", "")
+
+
 def _as_markdown_table(rows: list[dict], headers: list[str]) -> str:
     header_row = "| " + " | ".join(headers) + " |"
     sep = "| " + " | ".join("---" for _ in headers) + " |"
     lines = [header_row, sep]
     for r in rows:
-        cells = [str(r.get(h) or "") for h in headers]
-        lines.append("| " + " | ".join(cells) + " |")
+        lines.append("| " + " | ".join(_cell(r.get(h)) for h in headers) + " |")
     return "\n".join(lines)
 
 
@@ -214,16 +220,12 @@ async def _search_bead_literature(args: dict[str, Any], ctx: ToolContext) -> Too
     raw_limit = args.get("limit")
     limit = max(1, int(raw_limit)) if raw_limit is not None else None
 
-    filters = {k: v for k, v in {
-        "product_id": product_id, "surface": surface,
-        "diameter": diameter, "dye": dye,
-    }.items() if v}
+    params = {"surface": surface, "diameter": diameter, "dye": dye, "product_id": product_id}
+    filters = {k: v for k, v in params.items() if v}
 
     attr_count = sum(1 for x in [surface, diameter, dye] if x)
     is_narrow = product_id is not None or attr_count >= 2
     mode = "verification" if is_narrow else "discovery"
-
-    params = {"surface": surface, "diameter": diameter, "dye": dye, "product_id": product_id}
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
@@ -242,10 +244,8 @@ async def _search_bead_literature(args: dict[str, Any], ctx: ToolContext) -> Too
     else:
         mode_line = f"**Mode: discovery** ({attr_count} attribute(s) -- compact overview, capped at 100)"
 
-    # Substitute bound parameters into the SQL for display (values only, not executable)
-    sql_display = sql
-    for key, val in params.items():
-        sql_display = sql_display.replace(f":{key}", repr(val))
+    # Substitute bound parameters into the SQL for display (single-pass, values only, not executable)
+    sql_display = re.sub(r":(\w+)", lambda m: repr(params[m.group(1)]) if m.group(1) in params else m.group(0), sql)
 
     step = (
         mode_line + "\n\n"
