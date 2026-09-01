@@ -1,4 +1,4 @@
-.PHONY: help init-env up check logs down ps reingest local-install local-run
+.PHONY: help init-env up check logs down ps reingest panda-extract panda-recreate local-install local-run
 
 help:
 	@echo "Targets:"
@@ -9,6 +9,8 @@ help:
 	@echo "  make down          # stop stack"
 	@echo "  make ps            # list compose services"
 	@echo "  make reingest      # force recreate qdrant collection + restart chainlit"
+	@echo "  make panda-extract # add new PDFs to panda.db (incremental, safe to re-run)"
+	@echo "  make panda-recreate # wipe panda.db and rebuild from scratch (destructive!)"
 	@echo "  make local-install # install app into .venv with uv (not pip)"
 	@echo "  make local-run     # run chainlit locally"
 
@@ -29,6 +31,12 @@ down:
 
 ps:
 	docker compose ps
+
+panda-extract:
+	docker compose --profile panda run --rm --no-deps --build panda-extract
+
+panda-recreate:
+	docker compose --profile panda run --rm --no-deps --build -e PANDA_RECREATE=true panda-extract
 
 reingest:
 	INGEST_RECREATE=true docker compose run --rm ingest
