@@ -297,7 +297,13 @@ class SourcesConfig(BaseModel):
     """Where served source files live and which types are served."""
 
     data_dir: str = "data"
-    """Directory of served source files (env ``DATA_RAW_DIR`` overrides)."""
+    """Primary directory of served source files (env ``DATA_RAW_DIR`` overrides).
+
+    Not the only one served: the ``/sources`` routes also serve from every
+    ``data_sources[].path``, so a corpus assembled from several folders has all of
+    its citations clickable without listing those paths a second time here. This
+    one is searched first, so it wins a duplicate filename, and it stays the anchor
+    for ``<data_dir>/figures`` and ``<data_dir>/descriptions``."""
     served_extensions: list[str] = Field(
         default_factory=lambda: [".pdf", ".txt", ".md"]
     )

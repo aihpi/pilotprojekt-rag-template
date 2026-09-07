@@ -21,6 +21,49 @@ data_sources:
     start at the root of the disk are used as written. Inside Docker, use the
     mounted paths (`/data/...`) or the `INGEST_DOCLING_JSON_DIR` setting.
 
+## Several folders at once
+
+Two folders, nothing optional, copy-pasteable. Add one `- name:` block per
+folder:
+
+```yaml
+data_sources:
+  - name: handbook
+    path: ./data/handbook
+    format: pdf
+    glob: "*.pdf"
+
+  - name: notes
+    path: ./data/notes
+    format: pdf
+    glob: "*.pdf"
+
+sources:
+  data_dir: ./data/handbook
+  served_extensions: [.pdf]
+```
+
+Both folders are read, searched together, and clicking a citation opens the file
+from whichever folder it came from.
+
+**You do not list your folders under `sources:`.** That block is only about
+clicking citations: `served_extensions` says which file types may open, and
+`data_dir` is just the folder checked first if the same filename exists twice
+(it is also where figure images are written). Point it at your main folder and
+leave it.
+
+A third folder is another block:
+
+```yaml
+  - name: contracts
+    path: ./data/contracts
+    format: pdf
+    glob: "*.pdf"
+```
+
+Folders may hold different file types. One can be PDFs and another Markdown;
+just set each block's own `format`.
+
 ## 1. Put the files somewhere
 
 Put your documents anywhere on your machine and point `path` at them. For
@@ -233,15 +276,23 @@ within seconds of a change, so in normal use you never call this manually. Set
 
 ## 5. Make citations open the source file
 
-For a click on a source to open the actual document, two things must be true: the
-file has to sit inside the folder named in `sources.data_dir`, and its file type
-has to be listed as allowed.
+For a click on a source to open the actual document, its file type has to be
+listed as allowed:
 
 ```yaml
 sources:
   data_dir: ../../data/handbook
   served_extensions: [.pdf, .txt, .md]
 ```
+
+**You do not have to list your folders here.** Files are served from `data_dir`
+*and* from every folder in `data_sources[]`, so a corpus split across several
+folders has all of its citations clickable with no extra configuration. `data_dir`
+is searched first, so if the same filename exists in two folders, the copy in
+`data_dir` is the one that opens.
+
+`data_dir` still matters for two other things: it is where figure images and
+figure descriptions are written (`<data_dir>/figures`, `<data_dir>/descriptions`).
 
 The reference under an answer is assembled from what the app noted while reading:
 file name, title and page. The built-in readers fill this in automatically. If

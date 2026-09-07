@@ -6,6 +6,7 @@ adding-data pages, asserted in a test, and read by nothing. The route hardcoded
 """
 
 import mimetypes
+from pathlib import Path
 
 import app as chainlit_app
 
@@ -52,3 +53,77 @@ def test_the_media_type_matches_the_file():
     """Everything used to be served as application/pdf."""
     assert mimetypes.guess_type("a.md")[0] == "text/markdown"
     assert mimetypes.guess_type("a.pdf")[0] == "application/pdf"
+
+
+def _with_sources(monkeypatch, data_dir, source_paths, extensions=(".pdf",)):
+    """Stub the whole config: `resolve_path` is a method, so pydantic refuses to
+    let monkeypatch set it on a real instance."""
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(
+        sources=SimpleNamespace(served_extensions=list(extensions)),
+        data_sources=[SimpleNamespace(path=str(p)) for p in source_paths],
+        resolve_path=lambda p: Path(p),
+    )
+    monkeypatch.setattr(chainlit_app, "get_config", lambda: cfg)
+    monkeypatch.setattr(chainlit_app, "DATA_RAW_DIR", data_dir)
+    return cfg
+
+
+def test_a_second_data_source_folder_is_served(monkeypatch, tmp_path):
+    """The bug this grew for: a corpus split across folders.
+
+    `source_file` is a bare basename, and resolution only ever looked in
+    `sources.data_dir`, so a citation into any other declared folder resolved to
+    None and the citation stayed plain text.
+    """
+    primary, secondary = tmp_path / "primary", tmp_path / "secondary"
+    primary.mkdir()
+    secondary.mkdir()
+    (primary / "a.pdf").write_bytes(b"%PDF-1.4")
+    (secondary / "b.pdf").write_bytes(b"%PDF-1.4")
+
+    _with_sources(monkeypatch, primary, [secondary])
+
+    assert chainlit_app._resolve_source_pdf_path("a.pdf") == primary / "a.pdf"
+    assert chainlit_app._resolve_source_pdf_path("b.pdf") == secondary / "b.pdf"
+    assert chainlit_app._resolve_source_pdf_path("nope.pdf") is None
+
+
+def test_data_dir_wins_a_basename_collision(monkeypatch, tmp_path):
+    """Same filename in two folders: data_dir first, as a single-folder instance did."""
+    primary, secondary = tmp_path / "primary", tmp_path / "secondary"
+    primary.mkdir()
+    secondary.mkdir()
+    (primary / "dup.pdf").write_bytes(b"%PDF-primary")
+    (secondary / "dup.pdf").write_bytes(b"%PDF-secondary")
+
+    _with_sources(monkeypatch, primary, [secondary])
+
+    assert chainlit_app._resolve_source_pdf_path("dup.pdf") == primary / "dup.pdf"
+
+
+def test_a_file_path_data_source_serves_its_folder(monkeypatch, tmp_path):
+    """`data_sources[].path` may name one file rather than a directory."""
+    primary, other = tmp_path / "primary", tmp_path / "other"
+    primary.mkdir()
+    other.mkdir()
+    single = other / "one.pdf"
+    single.write_bytes(b"%PDF-1.4")
+
+    _with_sources(monkeypatch, primary, [single])
+
+    assert chainlit_app._resolve_source_pdf_path("one.pdf") == single
+
+
+def test_traversal_is_refused_across_every_root(monkeypatch, tmp_path):
+    """The gate that matters most, now that there is more than one root."""
+    primary, secondary = tmp_path / "primary", tmp_path / "secondary"
+    primary.mkdir()
+    secondary.mkdir()
+    (tmp_path / "secret.pdf").write_bytes(b"%PDF-secret")
+
+    _with_sources(monkeypatch, primary, [secondary])
+
+    for name in ("../secret.pdf", "sub/a.pdf", "/etc/passwd", "..%2Fsecret.pdf"):
+        assert chainlit_app._resolve_source_pdf_path(name) is None

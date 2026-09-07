@@ -124,37 +124,63 @@ def _served_suffixes() -> set[str]:
     return {f".{e.lstrip('.').lower()}" for e in get_config().sources.served_extensions}
 
 
-def _allowed_source_pdf_names() -> set[str]:
-    if not DATA_RAW_DIR.is_dir():
-        return set()
-    try:
-        return {
-            entry.name
-            for entry in DATA_RAW_DIR.iterdir()
-            if entry.is_file() and entry.suffix.lower() in _served_suffixes()
-        }
-    except OSError:
-        return set()
+def _served_roots() -> list[Path]:
+    """Every directory the ``/sources`` routes may serve a file from.
+
+    ``sources.data_dir`` first, then each ``data_sources[].path``. A citation names
+    a bare file (parsers store ``source_file`` as ``path.name``), so a corpus
+    assembled from several folders had only its ``data_dir`` files resolvable and
+    every citation into another folder stayed plain text.
+
+    Derived from ``data_sources`` rather than a second list in ``sources`` on
+    purpose: the paths are already declared once, and a config that repeats them
+    is a config where the two copies drift.
+
+    ``data_dir`` stays first so it wins a basename collision, which is what a
+    single-folder instance did before. Collisions are already a known state on the
+    ingest side, where a second ``intro.pdf`` counts as the same document and the
+    run warns about it.
+    """
+    cfg = get_config()
+    roots = [DATA_RAW_DIR]
+    for source in cfg.data_sources:
+        path = cfg.resolve_path(source.path)
+        # `path` may name a single file; the folder holding it is what we serve.
+        roots.append(path if path.is_dir() else path.parent)
+
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for root in roots:
+        resolved = root.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(resolved)
+    return unique
 
 
-def _resolve_source_pdf_path(file_name: str, allowed_names: set[str] | None = None) -> Path | None:
+def _resolve_source_pdf_path(file_name: str) -> Path | None:
+    """Resolve a cited basename to a servable file, or ``None``.
+
+    Checked in this order, all three load-bearing: the name must be a bare
+    basename (no traversal, no subpath), its extension must be in
+    ``served_extensions``, and the resolved file must stay inside the root it was
+    found under. The suffix gate runs before any filesystem access, so a request
+    for a disallowed type costs nothing.
+    """
     if not file_name or file_name != Path(file_name).name:
         return None
-
-    candidates = allowed_names if allowed_names is not None else _allowed_source_pdf_names()
-    if file_name not in candidates:
+    if Path(file_name).suffix.lower() not in _served_suffixes():
         return None
 
-    data_root = DATA_RAW_DIR.resolve()
-    file_path = (DATA_RAW_DIR / file_name).resolve()
-    try:
-        file_path.relative_to(data_root)
-    except ValueError:
-        return None
-
-    if not file_path.is_file() or file_path.suffix.lower() not in _served_suffixes():
-        return None
-    return file_path
+    for root in _served_roots():
+        file_path = (root / file_name).resolve()
+        try:
+            file_path.relative_to(root)
+        except ValueError:
+            continue
+        if file_path.is_file():
+            return file_path
+    return None
 
 
 def _source_pdf_url(file_name: str) -> str:
@@ -3838,7 +3864,6 @@ async def main(message: cl.Message):
         desired_sources = _desired_source_count(content, len(last_results))
         if MAX_SOURCE_LINKS > 0:
             desired_sources = min(desired_sources, MAX_SOURCE_LINKS)
-        allowed_pdf_names = _allowed_source_pdf_names()
         # Warn once per file, not once per chunk: a missing document usually supplies
         # several of the retrieved chunks.
         unlinkable_files: set[str] = set()
@@ -3868,7 +3893,7 @@ async def main(message: cl.Message):
                     if isinstance(existing_url, str) and existing_url:
                         url_by_index[idx] = existing_url
                 continue
-            file_path = _resolve_source_pdf_path(file_name, allowed_pdf_names)
+            file_path = _resolve_source_pdf_path(file_name)
             if file_path is None and file_name not in unlinkable_files:
                 unlinkable_files.add(file_name)
                 # A retrieved chunk whose file is not on disk gets no alias, so any
@@ -3877,7 +3902,8 @@ async def main(message: cl.Message):
                 # folder disagree, which no check reports today.
                 print(
                     f"[WARN] citation_unlinkable source_file={file_name!r} "
-                    f"cited_as=Quelle {idx} — file not found under sources.data_dir, "
+                    f"cited_as=Quelle {idx} — file not found in sources.data_dir or any "
+                    f"data_sources[].path, "
                     f"so this citation cannot be made clickable"
                 )
             if file_path is not None:

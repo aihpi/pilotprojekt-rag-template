@@ -123,6 +123,39 @@ Source references and follow-up questions are recognised by German wording, so t
 only work with `language: de` in your settings file. Your documents themselves can be
 in any language. This is a known limitation.
 
+## A source is named but clicking it does nothing
+
+The reference appears under the answer as plain text rather than a link, or the
+source panel skips a number (Quelle 2, 3, 5 with no 4).
+
+The app says which file it could not link. Look for this in the log:
+
+```bash
+docker compose logs --tail 100 chainlit | grep citation_unlinkable
+```
+
+Each line names the file the answer cited and the number it was cited as. Three
+things cause it:
+
+1. **The file type is not served.** Only extensions listed in
+   `sources.served_extensions` can be opened. A `.docx` source is indexed and
+   answerable but not clickable until you add `.docx` there.
+2. **The file is not on disk any more.** The search index and the documents folder
+   disagree: the chunks were indexed from a file that has since been renamed,
+   moved or deleted. Re-reading the documents fixes it.
+3. **The file is in a subfolder.** Files are served from `sources.data_dir` and
+   from every folder in `data_sources[]`, but not from folders *inside* those. A
+   source indexed with a `**/*.pdf` glob can therefore be cited and not opened.
+
+You do **not** need to list your folders under `sources:`. If a corpus spread
+across several `data_sources[]` folders only links its `data_dir` files, that is a
+bug from before this behaviour existed, not a configuration mistake.
+
+The skipped number in the panel is deliberate. The number the answer shows is the
+position the model actually read, so an unlinkable source leaves a gap rather than
+shifting every later number by one. A gap is a true statement about what was
+retrieved.
+
 ## Reading documents stopped with an error
 
 The run now ends with an explanation rather than a wall of text: what the error was,

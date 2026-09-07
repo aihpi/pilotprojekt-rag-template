@@ -22,6 +22,49 @@ data_sources:
     genommen. In Docker nimmst du die gemounteten Pfade (`/data/...`) oder die
     Einstellung `INGEST_DOCLING_JSON_DIR`.
 
+## Mehrere Ordner gleichzeitig
+
+Zwei Ordner, nichts Optionales, zum Kopieren. Pro Ordner ein `- name:`-Block:
+
+```yaml
+data_sources:
+  - name: handbook
+    path: ./data/handbook
+    format: pdf
+    glob: "*.pdf"
+
+  - name: notes
+    path: ./data/notes
+    format: pdf
+    glob: "*.pdf"
+
+sources:
+  data_dir: ./data/handbook
+  served_extensions: [.pdf]
+```
+
+Beide Ordner werden eingelesen, gemeinsam durchsucht, und ein Klick auf ein Zitat
+öffnet die Datei aus dem Ordner, aus dem sie stammt.
+
+**Deine Ordner gehören nicht unter `sources:`.** Dieser Block regelt nur das
+Anklicken von Zitaten: `served_extensions` sagt, welche Dateitypen sich öffnen
+lassen, und `data_dir` ist nur der Ordner, der zuerst geprüft wird, wenn derselbe
+Dateiname zweimal vorkommt (dort landen außerdem die Abbildungen). Zeig damit auf
+deinen Hauptordner und lass ihn in Ruhe.
+
+Ein dritter Ordner ist ein weiterer Block:
+
+```yaml
+  - name: contracts
+    path: ./data/contracts
+    format: pdf
+    glob: "*.pdf"
+```
+
+Die Ordner dürfen unterschiedliche Dateitypen enthalten. Einer kann PDFs führen
+und ein anderer Markdown; setze dafür einfach im jeweiligen Block das eigene
+`format`.
+
 ## 1. Dateien ablegen
 
 Lege deine Dokumente irgendwo auf deinem Rechner ab und richte `path` darauf,
@@ -247,15 +290,23 @@ schaltest du das ab.
 
 ## 5. Zitate sollen die Quelldatei öffnen
 
-Damit ein Klick auf eine Quelle das Dokument wirklich öffnet, müssen zwei Dinge
-stimmen: Die Datei muss in dem Ordner liegen, der unter `sources.data_dir` steht,
-und ihr Dateityp muss als erlaubt aufgeführt sein.
+Damit ein Klick auf eine Quelle das Dokument wirklich öffnet, muss ihr Dateityp
+als erlaubt aufgeführt sein:
 
 ```yaml
 sources:
   data_dir: ../../data/handbook
   served_extensions: [.pdf, .txt, .md]
 ```
+
+**Deine Ordner musst du hier nicht auflisten.** Ausgeliefert wird aus `data_dir`
+*und* aus jedem Ordner in `data_sources[]`. Ein Korpus, der über mehrere Ordner
+verteilt ist, hat also ohne weitere Konfiguration klickbare Zitate. `data_dir`
+wird zuerst durchsucht: Liegt derselbe Dateiname in zwei Ordnern, öffnet die Kopie
+aus `data_dir`.
+
+Für zwei andere Dinge bleibt `data_dir` maßgeblich: Dort werden Abbildungen und
+ihre Beschreibungen abgelegt (`<data_dir>/figures`, `<data_dir>/descriptions`).
 
 Die Angabe unter einer Antwort wird aus dem zusammengebaut, was sich die App beim
 Lesen notiert hat: Dateiname, Titel und Seite. Die eingebauten Leseroutinen
