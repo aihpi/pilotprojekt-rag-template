@@ -131,8 +131,9 @@ async def _count_pages(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     return ToolResult(payload={"pages": len(pages)}, results=[])
 ```
 
-Add the module to the import list at the bottom of `tools/__init__.py` so it gets
-registered, then add its name to `tools.enabled`.
+Save the file in `tools/` and add its name to `tools.enabled`. Every `.py` in
+that folder is imported at startup, so the decorator runs and the tool is
+registered; there is no list to maintain.
 
 !!! warning "Two rules that will bite you"
     **Sources come from `results`.** Whatever you put in `ToolResult.results`
@@ -143,6 +144,43 @@ registered, then add its name to `tools.enabled`.
     **Import `rag_tool` inside the function, never at the top of the file.**
     Loading the settings happens at import time, so importing it at the top makes
     two modules wait for each other and the app fails to start.
+
+## Tools that live outside the template
+
+A tool that only makes sense for one deployment does not belong in this
+repository. Keep it in your own repo and mount it in: everything found in
+`/app/extra_tools/` inside the container is imported the same way as `tools/`.
+
+A Compose override file next to your tool does the wiring. Because the mount also
+holds the settings file, `RAG_CONFIG` can point straight into it. Host paths in an
+override resolve against `apps/chainlit/`, not against the override file, so write
+them from there:
+
+```yaml
+# my-extension/docker-compose.override.yml  (my-extension/ sits next to the template)
+services:
+  chainlit:
+    volumes:
+      - ../../../my-extension/tools/:/app/extra_tools/
+    environment:
+      RAG_CONFIG: extra_tools/my-rag.yaml
+```
+
+```bash
+cd apps/chainlit
+docker compose -f docker-compose.yml -f ../../../my-extension/docker-compose.override.yml up -d
+```
+
+Then list the tool in `tools.enabled` as usual. Three things to know:
+
+- **Docker only.** The path is fixed to `/app/extra_tools/`; a local
+  `chainlit run` without Docker does not see it.
+- **File names are module names.** `search.py` or `json.py` would shadow an
+  existing module, so give the file a distinctive name.
+- **A broken file is skipped, not fatal.** An import error is logged as a
+  warning and startup continues. The tool then simply is not registered, and the
+  name in `tools.enabled` fails validation with the list of known ids, which is
+  where to look first when a mounted tool does not appear.
 
 ## Invalid ids fail fast
 

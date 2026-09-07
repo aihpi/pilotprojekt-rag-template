@@ -137,8 +137,9 @@ async def _count_pages(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     return ToolResult(payload={"pages": len(pages)}, results=[])
 ```
 
-Trage das Modul unten in `tools/__init__.py` in die Import-Liste ein, damit es
-registriert wird, und dann den Namen in `tools.enabled`.
+Speichere die Datei in `tools/` und trage den Namen in `tools.enabled` ein. Jede
+`.py` in diesem Ordner wird beim Start importiert, der Decorator läuft und das Tool
+ist registriert; eine Liste musst du nicht pflegen.
 
 !!! warning "Zwei Regeln, die dich sonst einholen"
     **Quellen entstehen aus `results`.** Was du in `ToolResult.results` legst,
@@ -149,6 +150,45 @@ registriert wird, und dann den Namen in `tools.enabled`.
     **Importiere `rag_tool` innerhalb der Funktion, nie am Dateianfang.** Die
     Einstellungen werden beim Import geladen. Ein Import ganz oben lässt deshalb
     zwei Module aufeinander warten und die App startet nicht.
+
+## Tools außerhalb des Templates
+
+Ein Tool, das nur für eine Installation Sinn ergibt, gehört nicht in dieses
+Repository. Lass es in deinem eigenen Repo und hänge es ein: Alles, was im
+Container unter `/app/extra_tools/` liegt, wird genauso importiert wie `tools/`.
+
+Eine Compose-Override-Datei neben deinem Tool übernimmt die Verdrahtung. Da im
+Mount auch die Konfigurationsdatei liegen kann, darf `RAG_CONFIG` direkt darauf
+zeigen. Host-Pfade in einer Override-Datei werden relativ zu `apps/chainlit/`
+aufgelöst, nicht relativ zur Override-Datei, also von dort aus schreiben:
+
+```yaml
+# my-extension/docker-compose.override.yml  (my-extension/ liegt neben dem Template)
+services:
+  chainlit:
+    volumes:
+      - ../../../my-extension/tools/:/app/extra_tools/
+    environment:
+      RAG_CONFIG: extra_tools/my-rag.yaml
+```
+
+```bash
+cd apps/chainlit
+docker compose -f docker-compose.yml -f ../../../my-extension/docker-compose.override.yml up -d
+```
+
+Dann das Tool wie gewohnt in `tools.enabled` eintragen. Drei Dinge, die du wissen
+solltest:
+
+- **Nur mit Docker.** Der Pfad ist fest auf `/app/extra_tools/` gesetzt; ein
+  lokales `chainlit run` ohne Docker sieht ihn nicht.
+- **Dateinamen sind Modulnamen.** `search.py` oder `json.py` würden ein
+  vorhandenes Modul überdecken, also gib der Datei einen eindeutigen Namen.
+- **Eine defekte Datei wird übersprungen, nicht fatal.** Ein Importfehler wird
+  als Warnung geloggt und der Start läuft weiter. Das Tool ist dann schlicht
+  nicht registriert, und der Name in `tools.enabled` scheitert an der Validierung
+  mit der Liste bekannter IDs. Dort zuerst nachsehen, wenn ein eingehängtes Tool
+  nicht auftaucht.
 
 ## Ungültige IDs schlagen sofort fehl
 
