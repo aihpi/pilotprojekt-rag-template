@@ -94,10 +94,6 @@ services:
       - model_cache:/root/.cache
       # SQLite must not live on the bind mount above; see CHAT_DB_PATH.
       - chat_db:/app/.chatdb
-      # panda-db: named volume populated by the panda-extract service (profiles: [panda]).
-      # Run `make panda-extract` once to build panda.db, then it is available here.
-      # PANDA_DB_PATH inside the container is set via the environment block above.
-      - panda_db:/panda-db-data
     ports:
       - "${APP_PORT:-8000}:8000"
 
@@ -163,30 +159,6 @@ services:
           $$( [ "$$INGEST_RECREATE" = "true" ] && echo "--recreate" );
     restart: "no"
 
-  # panda-db extraction pipeline (opt-in via --profile panda).
-  # Reads PDFs from ./data/documents, converts via Docling, runs rule extraction,
-  # and writes panda.db into the panda_db named volume shared with chainlit.
-  # Run once: `make panda-extract`. Re-run when new PDFs are added.
-  # To switch to a published panda-db package later, change `context` to the repo URL.
-  panda-extract:
-    build:
-      context: ../../../panda-db
-    restart: "no"
-    depends_on:
-      ingest:
-        condition: service_completed_successfully
-    volumes:
-      - ./data/documents:/pdfs:ro
-      - panda_db:/panda-data:rw
-      - panda_model_cache:/root/.cache
-    environment:
-      PANDA_PDF_DIR: /pdfs
-      PANDA_DOCLING_DIR: /panda-data/docling
-      PANDA_EXTRACTED_DIR: /panda-data/extracted
-      PANDA_LLM_EXTRACTED_DIR: /panda-data/llm_extracted
-      PANDA_DB_PATH: /panda-data/panda.db
-      TORCHDYNAMO_DISABLE: "1"
-    profiles: [panda]
 
   # Answer-quality scoring and the evaluation dashboard on :8001.
   #
@@ -236,5 +208,3 @@ volumes:
   model_cache:
   chat_db:
   eval_db:
-  panda_db:
-  panda_model_cache:
