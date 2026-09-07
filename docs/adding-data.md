@@ -233,15 +233,23 @@ within seconds of a change, so in normal use you never call this manually. Set
 
 ## 5. Make citations open the source file
 
-For a click on a source to open the actual document, two things must be true: the
-file has to sit inside the folder named in `sources.data_dir`, and its file type
-has to be listed as allowed.
+For a click on a source to open the actual document, its file type has to be
+listed as allowed:
 
 ```yaml
 sources:
   data_dir: ../../data/handbook
   served_extensions: [.pdf, .txt, .md]
 ```
+
+**You do not have to list your folders here.** Files are served from `data_dir`
+*and* from every folder in `data_sources[]`, so a corpus split across several
+folders has all of its citations clickable with no extra configuration. `data_dir`
+is searched first, so if the same filename exists in two folders, the copy in
+`data_dir` is the one that opens.
+
+`data_dir` still matters for two other things: it is where figure images and
+figure descriptions are written (`<data_dir>/figures`, `<data_dir>/descriptions`).
 
 The reference under an answer is assembled from what the app noted while reading:
 file name, title and page. The built-in readers fill this in automatically. If

@@ -247,15 +247,23 @@ schaltest du das ab.
 
 ## 5. Zitate sollen die Quelldatei öffnen
 
-Damit ein Klick auf eine Quelle das Dokument wirklich öffnet, müssen zwei Dinge
-stimmen: Die Datei muss in dem Ordner liegen, der unter `sources.data_dir` steht,
-und ihr Dateityp muss als erlaubt aufgeführt sein.
+Damit ein Klick auf eine Quelle das Dokument wirklich öffnet, muss ihr Dateityp
+als erlaubt aufgeführt sein:
 
 ```yaml
 sources:
   data_dir: ../../data/handbook
   served_extensions: [.pdf, .txt, .md]
 ```
+
+**Deine Ordner musst du hier nicht auflisten.** Ausgeliefert wird aus `data_dir`
+*und* aus jedem Ordner in `data_sources[]`. Ein Korpus, der über mehrere Ordner
+verteilt ist, hat also ohne weitere Konfiguration klickbare Zitate. `data_dir`
+wird zuerst durchsucht: Liegt derselbe Dateiname in zwei Ordnern, öffnet die Kopie
+aus `data_dir`.
+
+Für zwei andere Dinge bleibt `data_dir` maßgeblich: Dort werden Abbildungen und
+ihre Beschreibungen abgelegt (`<data_dir>/figures`, `<data_dir>/descriptions`).
 
 Die Angabe unter einer Antwort wird aus dem zusammengebaut, was sich die App beim
 Lesen notiert hat: Dateiname, Titel und Seite. Die eingebauten Leseroutinen
