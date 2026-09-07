@@ -129,6 +129,41 @@ Quellenangaben und Anschlussfragen werden über deutsche Formulierungen erkannt 
 funktionieren deshalb nur mit `language: de` in der Einstellungsdatei. Deine Dokumente
 selbst können in jeder Sprache sein. Das ist eine bekannte Einschränkung.
 
+## Eine Quelle wird genannt, aber der Klick tut nichts
+
+Die Angabe erscheint unter der Antwort als reiner Text statt als Link, oder das
+Quellen-Panel überspringt eine Nummer (Quelle 2, 3, 5 ohne 4).
+
+Die App nennt die Datei, die sie nicht verlinken konnte. Suche im Protokoll nach:
+
+```bash
+docker compose logs --tail 100 chainlit | grep citation_unlinkable
+```
+
+Jede Zeile nennt die zitierte Datei und die Nummer, unter der sie zitiert wurde.
+Drei Ursachen kommen infrage:
+
+1. **Der Dateityp wird nicht ausgeliefert.** Öffnen lassen sich nur Endungen, die
+   unter `sources.served_extensions` stehen. Eine `.docx`-Quelle wird eingelesen
+   und beantwortet, ist aber erst klickbar, wenn `.docx` dort ergänzt wird.
+2. **Die Datei liegt nicht mehr auf der Platte.** Suchindex und Dokumentenordner
+   stimmen nicht überein: Die Textstücke stammen aus einer Datei, die seither
+   umbenannt, verschoben oder gelöscht wurde. Ein erneutes Einlesen behebt es.
+3. **Die Datei liegt in einem Unterordner.** Ausgeliefert wird aus
+   `sources.data_dir` und aus jedem Ordner in `data_sources[]`, aber nicht aus
+   Ordnern *darin*. Eine Quelle, die mit einem `**/*.pdf`-Glob eingelesen wurde,
+   kann deshalb zitiert und trotzdem nicht öffenbar sein.
+
+Deine Ordner musst du **nicht** unter `sources:` auflisten. Wenn ein Korpus über
+mehrere `data_sources[]`-Ordner verteilt ist und nur die Dateien aus `data_dir`
+verlinkt werden, ist das ein Fehler aus der Zeit vor diesem Verhalten und keine
+falsche Konfiguration.
+
+Die übersprungene Nummer im Panel ist Absicht. Die Nummer in der Antwort ist die
+Position, die das Modell wirklich gelesen hat. Eine nicht verlinkbare Quelle lässt
+deshalb eine Lücke, statt alle folgenden Nummern um eins zu verschieben. Die Lücke
+ist eine wahre Aussage darüber, was abgerufen wurde.
+
 ## Das Einlesen bricht mit einem Fehler ab
 
 Der Lauf endet jetzt mit einer Erklärung statt mit einer Textwand: was der Fehler war,
