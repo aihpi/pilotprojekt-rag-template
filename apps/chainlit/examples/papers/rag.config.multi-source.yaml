@@ -1,5 +1,11 @@
 # This config file shows how to add multiple sources.
 #
+# Note what "multiple sources" means here: three sources over the SAME folder,
+# split by `glob` into date ranges, so each part can be searched on its own. If
+# what you want is several different FOLDERS read together, that is simpler than
+# this file and needs no profiles or filters at all — see docs/adding-data.md,
+# "Several folders at once".
+#
 # To run this instance, point RAG_CONFIG at it in apps/chainlit/.env:
 #
 #   RAG_CONFIG=examples/papers/rag.config.multi-source.yaml
@@ -8,8 +14,10 @@ name: papers-multi-source
 language: de
 
 models:
-  chat_model: gpt-oss-120b
-  fallback_chat_model: gemma-4-31b
+  chat_model: gemma-4-31b
+  # Must not be the same model as chat_model: the outage a fallback exists for
+  # would take out both.
+  fallback_chat_model: gpt-oss-120b
   embed_model: octen-embedding-8b
 
 vector_store:
@@ -104,12 +112,22 @@ profiles:
     retrieval_filters: { zeitraum: ab_2024 }
 
 sources:
-  data_dir: ../../data/documents      # served files, so citations open the PDF
+  # Citations are served from here AND from every data_sources[].path, so a
+  # corpus spread over several folders needs no second list. All three sources
+  # above share this one folder, so for this file it is the only root. It is also
+  # where figure images and descriptions are written, and it is checked first if
+  # the same filename exists in two folders.
+  data_dir: ../../data/documents
   served_extensions: [.pdf]
 
 evaluation:
   enabled: true
-  judge_model: gemma-4-31b
+  # Deliberately NOT chat_model. A judge that is also the answering model grades
+  # its own work, and scores stop being comparable the moment you switch models
+  # in the settings panel. ministral-3-14b passed the same verification test
+  # gemma and llama-3-3-70b did: a mixed answer with three supported and three
+  # invented claims, and it flagged exactly the three invented ones.
+  judge_model: ministral-3-14b
 
 tools:
   enabled: [search, list_documents, fetch_document, expand_context, verify_claim]
