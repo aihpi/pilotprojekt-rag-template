@@ -13,6 +13,12 @@ can be pointed at a new corpus without touching Python.
 
 ### Added
 
+- **Tools register themselves.** Every `.py` in `tools/` is imported at startup,
+  so a new tool needs no entry in `tools/__init__.py`. A second directory,
+  `/app/extra_tools/`, is scanned the same way, so a deployment-specific tool and
+  its settings file can live in another repository and be bind-mounted in via a
+  Compose override, leaving the template untouched. See
+  [Agentic tools](https://aihpi.github.io/pilotprojekt-rag-template/tools/).
 - **Figure descriptions are kept as readable Markdown next to your documents, so
   re-reading them does not pay for the vision calls again.** With
   `images.mode: describe` every picture costs a call, and three ordinary things

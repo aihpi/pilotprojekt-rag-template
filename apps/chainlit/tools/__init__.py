@@ -61,15 +61,35 @@ def build_openai_tools(cfg: "RagConfig") -> tuple[list[dict[str, Any]], dict[str
     return schemas, by_function_name
 
 
-# Lazy imports populate the registry. Each module imports only tools/tools.base
-# at top and defers `rag_tool` imports into its handler, so this stays cycle-free.
-from tools import (  # noqa: E402,F401
-    expand_context,
-    fetch_document,
-    list_documents,
-    search,
-    verify_claim,
-)
+# Lazy imports populate the registry. Each tool self-registers via its
+# @register_tool decorator at import time.
+#
+# Two scan locations:
+#   tools/       -- built-in tools (imported as package members)
+#   /app/extra_tools/ -- optional extension directory; mount any .py here via
+#                        Docker bind mount to add tools without touching this repo
+import importlib  # noqa: E402
+import importlib.util  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+for _f in sorted(Path(__file__).parent.glob("*.py")):
+    if _f.stem not in ("__init__", "base"):
+        importlib.import_module(f"tools.{_f.stem}")
+
+import sys  # noqa: E402
+
+_extra = Path("/app/extra_tools")
+if _extra.exists():
+    for _f in sorted(_extra.glob("*.py")):
+        try:
+            _spec = importlib.util.spec_from_file_location(_f.stem, _f)
+            if _spec and _spec.loader:
+                _mod = importlib.util.module_from_spec(_spec)
+                sys.modules[_f.stem] = _mod
+                _spec.loader.exec_module(_mod)
+        except Exception as _e:
+            import warnings
+            warnings.warn(f"extra_tools/{_f.name} failed to load: {_e}")
 
 __all__ = [
     "TOOL_REGISTRY",
